@@ -17,20 +17,21 @@ func (m Model) View() string {
 	}
 	renderer := tideui.NewRenderer(m.theme, tideui.StyleOptions{Density: m.density, PaneCorners: tideui.RoundCorners})
 	topbar := m.renderTopbar(renderer)
-	bodyHeight := max(1, m.height-2)
-	topHeight, _ := m.layoutHeights()
-	topHeight = min(topHeight, bodyHeight-3)
-	bottomHeight := max(3, bodyHeight-topHeight)
+	topHeight := m.topPaneHeight()
+	bottomHeight := m.bottomPaneHeight()
 	localWidth := max(20, int(float64(m.width)*m.fileSplit.Value()))
 	remoteWidth := max(20, m.width-localWidth)
 
-	local := m.renderPane(renderer, "Local", m.local.path, m.renderFilePane(renderer, m.local, localWidth-2, topHeight-2), localWidth, topHeight, m.focus == focusLocal)
-	remote := m.renderPane(renderer, "Remote", m.remote.path, m.renderFilePane(renderer, m.remote, remoteWidth-2, topHeight-2), remoteWidth, topHeight, m.focus == focusRemote)
+	// renderPane reserves 2 rows for its border and 1 for its title header,
+	// so the content passed in must be sized to height-3 to fill exactly the
+	// space actually visible inside the pane (see renderPane's bodyHeight).
+	local := m.renderPane(renderer, "Local", m.local.path, m.renderFilePane(renderer, m.local, localWidth-2, topHeight-3), localWidth, topHeight, m.focus == focusLocal)
+	remote := m.renderPane(renderer, "Remote", m.remote.path, m.renderFilePane(renderer, m.remote, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
 	top := lipgloss.JoinHorizontal(lipgloss.Top, local, remote)
 
 	bottomTitle := "Transfers"
 	bottomHint := m.bottomTabLabel()
-	bottom := m.renderPane(renderer, bottomTitle, bottomHint, m.renderBottomPane(renderer, m.width-2, bottomHeight-2), m.width, bottomHeight, m.focus == focusQueue)
+	bottom := m.renderPane(renderer, bottomTitle, bottomHint, m.renderBottomPane(renderer, m.width-2, bottomHeight-3), m.width, bottomHeight, m.focus == focusQueue)
 	main := lipgloss.JoinVertical(lipgloss.Left, top, bottom)
 	status := m.renderStatus(renderer)
 	view := lipgloss.JoinVertical(lipgloss.Left, topbar, main, status)
@@ -106,7 +107,10 @@ func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) str
 	case tabHistory:
 		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool { return t.Status == domain.Done })...)
 	case tabLog:
-		for i := max(0, len(m.logs)-(height-1)); i < len(m.logs); i++ {
+		visible := height - 1
+		start := min(m.bottomOffset, max(0, len(m.logs)-visible))
+		end := min(len(m.logs), start+visible)
+		for i := start; i < end; i++ {
 			rows = append(rows, renderer.Styles.DetailBody.Width(width).Render(m.logs[i]))
 		}
 	}
@@ -118,9 +122,17 @@ func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) str
 
 func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int, keep func(domain.Transfer) bool) []string {
 	rows := make([]string, 0, limit)
+	skip := m.bottomOffset
 	for _, transfer := range m.transfers {
-		if !keep(transfer) || len(rows) >= limit {
+		if !keep(transfer) {
 			continue
+		}
+		if skip > 0 {
+			skip--
+			continue
+		}
+		if len(rows) >= limit {
+			break
 		}
 		rows = append(rows, renderTransferRow(renderer, transfer, width))
 	}
@@ -312,6 +324,53 @@ func (m Model) layoutHeights() (int, int) {
 	bottom := max(3, int(float64(bodyHeight)*m.bottomSplit.Value()))
 	top := max(5, bodyHeight-bottom)
 	return top, 1 + top
+}
+
+// topPaneHeight and bottomPaneHeight return the on-screen height (including
+// border and title header) allocated to the local/remote panes and the
+// transfers pane, respectively.
+func (m Model) topPaneHeight() int {
+	bodyHeight := max(1, m.height-2)
+	topHeight, _ := m.layoutHeights()
+	return min(topHeight, bodyHeight-3)
+}
+
+func (m Model) bottomPaneHeight() int {
+	bodyHeight := max(1, m.height-2)
+	return max(3, bodyHeight-m.topPaneHeight())
+}
+
+// bottomVisibleRows returns how many content rows (excluding the tab bar)
+// are visible inside the transfers pane, i.e. how many rows renderBottomPane
+// can actually show for the current terminal size.
+func (m Model) bottomVisibleRows() int {
+	bodyHeight := max(1, m.bottomPaneHeight()-3)
+	return max(0, bodyHeight-1)
+}
+
+// bottomRowCount returns how many rows exist for the currently selected
+// bottom-pane tab, regardless of how many are actually visible.
+func (m Model) bottomRowCount() int {
+	switch m.bottomTab {
+	case tabQueue:
+		count := 0
+		for _, transfer := range m.transfers {
+			if transfer.Status == domain.Queued || transfer.Status == domain.Active || transfer.Status == domain.Done {
+				count++
+			}
+		}
+		return count
+	case tabActive:
+		return countStatus(m.transfers, domain.Active)
+	case tabFailed:
+		return countStatus(m.transfers, domain.Failed)
+	case tabHistory:
+		return countStatus(m.transfers, domain.Done)
+	case tabLog:
+		return len(m.logs)
+	default:
+		return 0
+	}
 }
 
 func (m Model) bottomTabLabel() string {

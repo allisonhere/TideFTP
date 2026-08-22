@@ -66,6 +66,7 @@ type Model struct {
 	transfers      []domain.Transfer
 	nextTransferID int
 	bottomTab      bottomTab
+	bottomOffset   int
 	logs           []string
 
 	theme       tideui.Theme
@@ -132,6 +133,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case transferTick:
 		m.advanceTransfers()
+		m.clampBottomOffset()
 		return m, tickTransfers()
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
@@ -237,17 +239,18 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.bottomSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03})
 		m.setStatus("layout reset")
 	case "1":
-		m.bottomTab = tabQueue
+		m.setBottomTab(tabQueue)
 	case "2":
-		m.bottomTab = tabActive
+		m.setBottomTab(tabActive)
 	case "3":
-		m.bottomTab = tabFailed
+		m.setBottomTab(tabFailed)
 	case "4":
-		m.bottomTab = tabHistory
+		m.setBottomTab(tabHistory)
 	case "5":
-		m.bottomTab = tabLog
+		m.setBottomTab(tabLog)
 	}
 	m.clampCursors()
+	m.clampBottomOffset()
 	return m, nil
 }
 
@@ -298,11 +301,7 @@ func (m *Model) moveCursor(delta int) {
 	case focusRemote:
 		m.remote.cursor += delta
 	case focusQueue:
-		if delta > 0 {
-			m.bottomTab = minTab(m.bottomTab + 1)
-		} else if delta < 0 {
-			m.bottomTab = maxTab(m.bottomTab - 1)
-		}
+		m.bottomOffset = max(0, m.bottomOffset+delta)
 	}
 }
 
@@ -490,6 +489,23 @@ func (m *Model) clampCursors() {
 	m.remote.clamp()
 }
 
+// setBottomTab switches the focused bottom-pane tab and resets its scroll
+// position. The log tab opens scrolled to the latest entries, matching a
+// tail view; the transfer tabs open scrolled to the top.
+func (m *Model) setBottomTab(tab bottomTab) {
+	m.bottomTab = tab
+	if tab == tabLog {
+		m.bottomOffset = max(0, len(m.logs)-m.bottomVisibleRows())
+	} else {
+		m.bottomOffset = 0
+	}
+}
+
+func (m *Model) clampBottomOffset() {
+	m.bottomOffset = min(m.bottomOffset, max(0, m.bottomRowCount()-m.bottomVisibleRows()))
+	m.bottomOffset = max(0, m.bottomOffset)
+}
+
 func (m *Model) cursorFromMouse(pane *filePane, y int) {
 	row := y - 5
 	if row < 0 {
@@ -576,20 +592,6 @@ func listLocal(dirPath string, showHidden bool) ([]domain.Entry, error) {
 
 func tickTransfers() tea.Cmd {
 	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return transferTick{} })
-}
-
-func minTab(tab bottomTab) bottomTab {
-	if tab > tabLog {
-		return tabLog
-	}
-	return tab
-}
-
-func maxTab(tab bottomTab) bottomTab {
-	if tab < tabQueue {
-		return tabQueue
-	}
-	return tab
 }
 
 func joinDisplayPath(base, name string) string {
