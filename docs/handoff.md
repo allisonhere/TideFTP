@@ -22,8 +22,9 @@ Implemented:
 - Connection lifecycle (`internal/session`) with a simulated dialer under
   `internal/fakesession`: connect, disconnect, reconnect, connect failure,
   and dropped connections
-- Real SFTP under `internal/sftpsession` and real FTP under
-  `internal/ftpsession`, reachable with `--protocol`/`--host`
+- Real SFTP under `internal/sftpsession` and real FTP/FTPS under
+  `internal/ftpsession`, reachable with `--protocol`/`--host`, and verified
+  against the LAN servers described under **Test Servers**
 - Bottom tabs: Queue, Active, Failed, History, Log
 - Theme picker on `t`
 - Connect, help, and conflict modals
@@ -67,12 +68,97 @@ Last known result:
 Run `-race` from now on: `faketransfer` is the first concurrent code in the
 project, and the UI consumes its channel from a Bubble Tea command goroutine.
 
+See **Test Servers** for the live-test invocations against real servers.
+
 Driving the built binary from a synthetic PTY has not worked: the process
 renders, but plain rune keypresses written to the pty master never reach it
 (Ctrl+C arrives only as SIGINT from the line discipline). This reproduces on
 older commits too, so it is a harness problem, not a regression — but it means
 there is still no automated smoke test of the real binary. Manual runs are the
 only coverage there.
+
+## Test Servers
+
+A LAN-only box runs the servers the real adapters are verified against. It is
+not reachable from outside the network, and the credentials below are
+throwaway ones for it.
+
+**Host `192.168.86.52`, user `ftp_test`, password `ftp-test-2026` for every
+service below.**
+
+### FTPS — port 21, verified working
+
+- Explicit TLS / STARTTLS (`AUTH TLS`), passive ports `21000`–`21010`
+- vsftpd, via the `delfer/alpine-ftp-server` image
+- Home directory `/ftp/ftp_test`; test files persist in `ftp-test-server/data`
+
+Plain FTP no longer works on this box for this account: enabling FTPS turned on
+`force_local_logins_ssl`, so a plaintext login is refused with "Non-anonymous
+sessions must use encryption." The adapter still supports plain FTP; only the
+server changed.
+
+Quirks, each of which cost real debugging time:
+
+- `AUTH TLS` is **not** advertised in `FEAT` even though it works. `PBSZ` and
+  `PROT` are the tell. Do not autodetect FTPS from `FEAT`.
+- No `MLSD`, so listings come from `LIST` parsing.
+- The certificate is self-signed, `CN=192.168.86.52` with an IP SAN, so it
+  verifies properly once trusted. Fetch it with:
+  `openssl s_client -connect 192.168.86.52:21 -starttls ftp -showcerts`
+- vsftpd requires the data connection to resume the control connection's TLS
+  session (`require_ssl_reuse`); see the FTPS design note.
+- TLS 1.3 uploads fail at exactly 16384 bytes and above; see the same note.
+
+### SFTP — port 2222, connects but `/upload` is unreadable
+
+- OpenSSH 8.4p1 Debian, chrooted: the account sees only `/`, containing
+  `upload`
+- `/upload` is `drwxr-x---` and `ftp_test` is neither its owner nor in its
+  group, so listing it returns "permission denied". **This needs a `chown` or
+  group grant on the server** before round-trip tests can run against it.
+  Everything up to that point works: password auth, host key verification, and
+  listing `/`.
+
+The host key must be in a `known_hosts` file; get one with
+`ssh-keyscan -p 2222 192.168.86.52`. That is trust-on-first-use, which is fine
+for a box on your own LAN but is not a pattern to carry into the app — it
+verifies strictly and has no accept-once flow.
+
+### Running the live tests
+
+```bash
+# FTPS
+TIDEFTP_TEST_FTP_ADDR=192.168.86.52:21 \
+TIDEFTP_TEST_FTP_USER=ftp_test \
+TIDEFTP_TEST_FTP_PASSWORD=ftp-test-2026 \
+TIDEFTP_TEST_FTP_PATH=/ftp/ftp_test \
+TIDEFTP_TEST_FTP_TLS=1 \
+TIDEFTP_TEST_FTP_CA=/path/to/server-cert.pem \
+go test -run Live ./internal/ftpsession
+
+# SFTP
+TIDEFTP_TEST_SFTP_ADDR=192.168.86.52:2222 \
+TIDEFTP_TEST_SFTP_USER=ftp_test \
+TIDEFTP_TEST_SFTP_PASSWORD=ftp-test-2026 \
+TIDEFTP_TEST_SFTP_PATH=/upload \
+TIDEFTP_TEST_SFTP_KNOWN_HOSTS=/path/to/known_hosts \
+go test -run Live ./internal/sftpsession
+```
+
+Both suites skip unless their `_ADDR` variable is set, so `go test ./...` stays
+green off the LAN.
+
+### Running the app against them
+
+```bash
+TIDEFTP_FTP_PASSWORD=ftp-test-2026 go run ./cmd/tideftp --protocol ftps \
+  --host 192.168.86.52 --user ftp_test --path /ftp/ftp_test \
+  --ftps-ca /path/to/server-cert.pem
+
+TIDEFTP_SFTP_PASSWORD=ftp-test-2026 go run ./cmd/tideftp --protocol sftp \
+  --host 192.168.86.52 --port 2222 --user ftp_test --path / \
+  --known-hosts /path/to/known_hosts
+```
 
 ## Product Decisions
 
@@ -245,18 +331,10 @@ a setting rather than something to autodetect.
 ### Live tests
 
 Both real adapters have live tests that skip unless their address variable is
-set, so `go test ./...` stays green anywhere:
-
-```bash
-TIDEFTP_TEST_FTP_ADDR=host:port TIDEFTP_TEST_FTP_USER=... \
-TIDEFTP_TEST_FTP_PASSWORD=... TIDEFTP_TEST_FTP_PATH=/dir \
-go test -run Live ./internal/ftpsession
-```
-
-`internal/sftpsession` takes the same variables with `SFTP` in place of `FTP`,
-plus `TIDEFTP_TEST_SFTP_KNOWN_HOSTS`. These complement the hermetic tests
-rather than replacing them; SFTP still has a full in-process server, FTP does
-not.
+set, so `go test ./...` stays green anywhere. They complement the hermetic
+tests rather than replacing them: SFTP has a full in-process server, FTP does
+not yet. See **Test Servers** above for the variables and the box to run them
+against.
 
 ### Contrast
 
@@ -417,6 +495,9 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 - `internal/ftpsession` has no hermetic tests: its unit tests cover listing
   conversion, paths, and the pool, but everything protocol-level needs the
   live server. SFTP has an in-process server and FTP should get one too
+- The SFTP test server's `/upload` is not readable by `ftp_test`, so the SFTP
+  live tests cannot do a round trip until that is fixed on the server (see
+  **Test Servers**)
 - Passwords come from the environment (`TIDEFTP_FTP_PASSWORD`,
   `TIDEFTP_SFTP_PASSWORD`), never a flag. A passphrase-protected SSH key is
   reported rather than prompted for; real credential handling waits on the

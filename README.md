@@ -75,3 +75,14 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `1`-`5`: bottom tabs
 - `?`: help
 - `q`: quit
+
+## Development
+
+`docs/handoff.md` carries the design notes, the adapter architecture, and the
+LAN test servers the real FTP/FTPS/SFTP adapters are verified against.
+
+```bash
+go test ./...             # hermetic; safe anywhere
+go test -race ./...       # the adapters and the transfer engines are concurrent
+go vet ./...
+```
