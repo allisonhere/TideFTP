@@ -83,24 +83,7 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 	pane.offset = min(pane.offset, max(0, len(pane.entries)-visible))
 	for index := pane.offset; index < len(pane.entries) && len(rows) < height; index++ {
 		entry := pane.entries[index]
-		prefix := entryIcon(entry) + " "
-		if pane.selected[entry.Name] {
-			prefix = "* " + prefix
-		} else {
-			prefix = "  " + prefix
-		}
-		size := formatSize(entry.Size)
-		if entry.IsDir() {
-			size = "<DIR>"
-		}
-		text := fmt.Sprintf("%-10s %9s  %-12s %s", short(entry.Mode, 10), size, entry.Modified.Format("Jan 02 15:04"), entry.Name)
-		rows = append(rows, renderer.RenderRow(tideui.Row{
-			Prefix:   prefix,
-			Text:     text,
-			Suffix:   "",
-			Selected: index == pane.cursor,
-			Muted:    entry.Hidden,
-		}, width))
+		rows = append(rows, renderEntryRow(renderer, entry, index == pane.cursor, pane.selected[entry.Name], width))
 	}
 	if len(pane.entries) == 0 {
 		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render("empty"))
@@ -139,21 +122,107 @@ func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int, ke
 		if !keep(transfer) || len(rows) >= limit {
 			continue
 		}
-		dir := "↑"
-		if transfer.Direction == domain.Download {
-			dir = "↓"
-		}
-		bar := progressBar(transfer.Progress(), 18)
-		name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-48))
-		meta := fmt.Sprintf("%3.0f%% %s", transfer.Progress()*100, transferStatus(transfer.Status))
-		rows = append(rows, renderer.RenderRow(tideui.Row{
-			Prefix: dir + " ",
-			Text:   fmt.Sprintf("%s  %s", bar, name),
-			Suffix: meta,
-			Muted:  transfer.Status == domain.Done,
-		}, width))
+		rows = append(rows, renderTransferRow(renderer, transfer, width))
 	}
 	return rows
+}
+
+// rowSurface resolves the background/foreground pair a row style paints,
+// falling back to the theme's base colors if a style leaves either unset.
+func rowSurface(renderer tideui.Renderer, style lipgloss.Style) (bg, fg lipgloss.Color) {
+	bg, _ = style.GetBackground().(lipgloss.Color)
+	fg, _ = style.GetForeground().(lipgloss.Color)
+	if bg == "" {
+		bg = renderer.Styles.Theme.Bg
+	}
+	if fg == "" {
+		fg = renderer.Styles.Theme.Fg
+	}
+	return bg, fg
+}
+
+// segment renders text with an explicit background on every span so that
+// concatenating differently-colored segments never lets one segment's
+// trailing reset code erase the row's background for the segments after it.
+func segment(bg, color lipgloss.Color, text string) string {
+	return lipgloss.NewStyle().Background(bg).Foreground(color).Render(text)
+}
+
+func renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked bool, width int) string {
+	base := renderer.Styles.Item
+	switch {
+	case cursor:
+		base = renderer.Styles.ItemSelected
+	case entry.Hidden:
+		base = renderer.Styles.ItemMuted
+	}
+	bg, fg := rowSurface(renderer, base)
+
+	nameColor := fg
+	if !entry.Hidden {
+		switch entry.Kind {
+		case domain.EntryDir:
+			nameColor = renderer.Styles.Theme.BorderFocus
+		case domain.EntrySymlink:
+			nameColor = renderer.Styles.Theme.Unread
+		}
+	}
+
+	mark := "  "
+	if marked {
+		mark = "* "
+	}
+	size := formatSize(entry.Size)
+	if entry.IsDir() {
+		size = "<DIR>"
+	}
+	meta := fmt.Sprintf("%-10s %9s  %-12s ", short(entry.Mode, 10), size, entry.Modified.Format("Jan 02 15:04"))
+
+	content := segment(bg, fg, mark) +
+		segment(bg, nameColor, entryIcon(entry)+" ") +
+		segment(bg, fg, meta) +
+		segment(bg, nameColor, entry.Name)
+	return clampView(content, width, 1, bg)
+}
+
+func renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width int) string {
+	base := renderer.Styles.Item
+	if transfer.Status == domain.Done {
+		base = renderer.Styles.ItemMuted
+	}
+	bg, fg := rowSurface(renderer, base)
+
+	statusColor := fg
+	switch transfer.Status {
+	case domain.Active:
+		statusColor = renderer.Styles.Theme.BorderFocus
+	case domain.Done:
+		statusColor = renderer.Styles.Theme.Unread
+	case domain.Failed:
+		statusColor = renderer.Styles.Theme.Error
+	case domain.Queued:
+		statusColor = renderer.Styles.Theme.Dimmed
+	}
+
+	dir := "↑"
+	if transfer.Direction == domain.Download {
+		dir = "↓"
+	}
+	const barWidth = 18
+	progress := minFloat(maxFloat(transfer.Progress(), 0), 1)
+	filled := int(progress * float64(barWidth))
+	bar := segment(bg, fg, "[") +
+		segment(bg, statusColor, strings.Repeat("=", filled)) +
+		segment(bg, fg, strings.Repeat(" ", max(0, barWidth-filled))) +
+		segment(bg, fg, "]")
+	name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-48))
+
+	left := segment(bg, statusColor, dir+" ") + bar + segment(bg, fg, "  "+name)
+	meta := fmt.Sprintf("%3.0f%% %s", transfer.Progress()*100, transferStatus(transfer.Status))
+	right := segment(bg, statusColor, meta)
+	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
+	content := left + segment(bg, fg, strings.Repeat(" ", gap)) + right
+	return clampView(content, width, 1, bg)
 }
 
 func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
@@ -272,12 +341,6 @@ func formatSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
-}
-
-func progressBar(progress float64, width int) string {
-	progress = minFloat(maxFloat(progress, 0), 1)
-	filled := int(progress * float64(width))
-	return "[" + strings.Repeat("=", filled) + strings.Repeat(" ", max(0, width-filled)) + "]"
 }
 
 func transferStatus(status domain.TransferStatus) string {
