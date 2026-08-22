@@ -23,6 +23,10 @@ or directly:
 go run ./cmd/tideftp
 ```
 
+Check the version of a built binary with `tideftp --version` (release builds inject it
+via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag reports
+`dev`).
+
 ## Keys
 
 - `Tab` / `Shift+Tab`: switch panes
