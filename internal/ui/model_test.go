@@ -1155,3 +1155,44 @@ func TestStaleDisconnectDoesNotTearDownTheLiveConnection(t *testing.T) {
 		t.Fatalf("state = %v after a stale disconnect, want still connected", model.state)
 	}
 }
+
+func TestQueuingSkipsDirectories(t *testing.T) {
+	engine := newScriptedEngine()
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	model.focus = focusLocal
+	model.local.path = "/tmp"
+	model.local.entries = []domain.Entry{
+		{Name: "folder", Kind: domain.EntryDir},
+		{Name: "file.txt", Kind: domain.EntryFile, Size: 1234},
+	}
+	model.local.selected = map[string]bool{"folder": true, "file.txt": true}
+
+	model = press(t, model, runes("u"))
+
+	if len(model.transfers) != 1 {
+		t.Fatalf("queued %d transfers, want only the file", len(model.transfers))
+	}
+	if model.transfers[0].BytesTotal != 1234 {
+		t.Fatalf("BytesTotal = %d, want the file's real size", model.transfers[0].BytesTotal)
+	}
+	if !strings.Contains(model.status, "skipped 1 folder") {
+		t.Fatalf("status = %q, want it to mention the skipped folder", model.status)
+	}
+}
+
+func TestQueuingOnlyDirectoriesReportsAnError(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.focus = focusLocal
+	model.local.entries = []domain.Entry{{Name: "folder", Kind: domain.EntryDir}}
+	model.local.cursor = 0
+	model.local.selected = map[string]bool{}
+
+	model = press(t, model, runes("u"))
+
+	if len(model.transfers) != 0 {
+		t.Fatalf("queued %d transfers for a folder, want none", len(model.transfers))
+	}
+	if !model.statusErr || !strings.Contains(model.status, "recursive transfers are not supported") {
+		t.Fatalf("status = %q (err=%v), want a clear explanation", model.status, model.statusErr)
+	}
+}

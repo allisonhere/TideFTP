@@ -9,7 +9,7 @@ The first slice focuses on the polished app shell:
 - Whatthedock-style soft modal screens with drop shadows.
 - `tide-night` default theme plus a live theme picker.
 - Shift-arrow pane resizing.
-- Fake remote adapter and simulated transfers for UI iteration.
+- Real SFTP over the same adapter interfaces, plus a fake adapter for UI work.
 
 ## Run
 
@@ -22,6 +22,18 @@ or directly:
 ```bash
 go run ./cmd/tideftp
 ```
+
+That runs on the fake demo adapter. To reach a real server over SFTP:
+
+```bash
+go run ./cmd/tideftp --host files.example.com --user allie --path /srv/www
+```
+
+Authentication is the SSH agent and the usual `~/.ssh` keys, or `--identity`
+for a specific key file. Password entry does not exist yet, so a
+passphrase-protected key needs an agent. Host keys are checked strictly
+against `~/.ssh/known_hosts` (`--known-hosts` to point elsewhere); there is no
+option to skip that check.
 
 Check the version of a built binary with `tideftp --version` (release builds inject it
 via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag reports

@@ -22,6 +22,8 @@ Implemented:
 - Connection lifecycle (`internal/session`) with a simulated dialer under
   `internal/fakesession`: connect, disconnect, reconnect, connect failure,
   and dropped connections
+- Real SFTP under `internal/sftpsession`, tested against an in-process SSH
+  server, reachable with `--host`
 - Bottom tabs: Queue, Active, Failed, History, Log
 - Theme picker on `t`
 - Connect, help, and conflict modals
@@ -174,6 +176,13 @@ First build slice:
   `session.Dialer`; succeeds only for hosts it was told about, so the
   connect-failure path is reachable, and `Conn.Drop` simulates a server
   going away
+- `internal/sftpsession/`: the real SFTP adapter. `sftpsession.go` dials
+  (agent and key-file auth, strict known_hosts), `fs.go` implements
+  `vfs.FS`, `engine.go` implements `transfer.Engine`. All three share one
+  `sftp.Client`, which is safe for concurrent use
+- `internal/sftpsession/testserver_test.go`: a real SSH server with pkg/sftp's
+  server half, on a loopback listener rooted at a temp directory. The adapter
+  is tested against genuine protocol traffic, with no external sshd
 - `internal/ui/model.go`: Bubble Tea state, update loop, listing requests and
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
@@ -281,6 +290,8 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
      port, user, start path. `cmd/tideftp/main.go` hardcodes three demo
      targets; the connect overlay (`c`) is a menu over them plus a
      disconnect action
+   - `--host/--user/--port/--path/--identity/--known-hosts` reach a real
+     server today; the form replaces them
    - Still missing: an editable form (no text input anywhere in the app
      yet), persistence, and everything credential-related — password mode
      (prompt/keyring/config), SFTP agent/key file, FTPS certificate
@@ -300,11 +311,11 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
    - Recursive folder preflight summary
 
 6. Add protocol adapters.
-   - Start with SFTP (`pkg/sftp`): it is testable in-process, unlike FTP,
-     which needs a real daemon.
-   - Implement `session.Dialer`, whose `Conn` supplies a `vfs.FS` and a
-     `transfer.Engine` over one SSH connection. Decide there whether
-     parallel transfers share that connection or open their own.
+   - ~~SFTP.~~ Done — `internal/sftpsession`. Parallel transfers share one
+     `sftp.Client`; if that turns out to throttle, giving each transfer its
+     own client is the next thing to try.
+   - FTP and FTPS remain. They need a real daemon to test against, so
+     budget for that before starting.
    - The fake adapters and their tests are the contract that proves the UI
      did not regress while real adapters land.
 
@@ -316,10 +327,24 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
 ## Known Gaps
 
-- No real FTP/FTPS/SFTP networking yet; `faketransfer` moves no bytes, it
-  only emits a plausible event stream on a timer
-- All three seams (`session.Dialer`, `vfs.FS`, `transfer.Engine`) are ready
-  for real implementations; nothing structural blocks an SFTP adapter
+- SFTP works; FTP and FTPS do not exist yet. `faketransfer` moves no bytes,
+  it only emits a plausible event stream on a timer
+- SFTP auth is the agent and key files only. A passphrase-protected key is
+  reported, not prompted for, and password auth waits on the connect form
+- Host keys are verified strictly against known_hosts, with no ask or
+  accept-once flow: both need a prompt that does not exist yet. A missing
+  known_hosts fails the connection closed, which is deliberate
+- Transfers overwrite the destination. Resume and the rest of the conflict
+  policy are not wired to the UI, so nothing can ask for anything else
+- Folders are skipped when queuing, with a message, since recursive
+  transfers do not exist and a real adapter cannot read a directory as a file
+- Cancelling a transfer closes its file handles to interrupt a parked read.
+  A listing parked on a dead connection is only abandoned, not interrupted:
+  pkg/sftp has no context-aware API, so the request occupies the connection
+  until the server answers or the connection closes
+- All three seams (`session.Dialer`, `vfs.FS`, `transfer.Engine`) now have
+  both a fake and a real implementation, which is the evidence they are the
+  right shape
 - The connect overlay is a menu over hardcoded targets, not a form. There is
   no text input in the app yet, so a host cannot be typed
 - No credential handling of any kind: nothing prompts, stores, or sends a

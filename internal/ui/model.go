@@ -929,23 +929,38 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 	if len(entries) == 0 {
 		return
 	}
+	// Recursive transfers do not exist yet, and a real adapter cannot read a
+	// directory as a file. Refusing here says so plainly instead of letting
+	// each one fail later with an unhelpful read error.
+	skipped := 0
+	queued := 0
 	for _, entry := range entries {
-		total := entry.Size
 		if entry.IsDir() {
-			total = 3_200_000
+			skipped++
+			continue
 		}
 		m.transfers = append(m.transfers, domain.Transfer{
 			ID:          m.nextTransferID,
 			Direction:   direction,
 			Source:      srcFS.Child(srcBase, entry.Name),
 			Destination: dstFS.Child(dstBase, entry.Name),
-			BytesTotal:  max(total, int64(64_000)),
+			BytesTotal:  entry.Size,
 			Status:      domain.Queued,
 			Message:     "queued",
 		})
 		m.nextTransferID++
+		queued++
 	}
-	m.setStatus(fmt.Sprintf("queued %d transfer(s)", len(entries)))
+	if queued == 0 {
+		m.setError(fmt.Sprintf("skipped %d folder(s): recursive transfers are not supported yet", skipped))
+		return
+	}
+	if skipped > 0 {
+		m.setStatus(fmt.Sprintf("queued %d transfer(s), skipped %d folder(s)", queued, skipped))
+		m.startQueuedTransfers()
+		return
+	}
+	m.setStatus(fmt.Sprintf("queued %d transfer(s)", queued))
 	m.startQueuedTransfers()
 }
 
