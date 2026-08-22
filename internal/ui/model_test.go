@@ -83,6 +83,85 @@ func TestLogTabOpensScrolledToLatest(t *testing.T) {
 	}
 }
 
+func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
+	model := NewModel(fakefs.NewRemote())
+	model.width, model.height = 100, 30
+	model.local.entries = []domain.Entry{{Name: "a"}}
+	model.local.cursor = 0
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+	for i := 0; i < 30; i++ {
+		model.transfers = append(model.transfers, domain.Transfer{ID: i, Status: domain.Queued})
+	}
+	visible := model.bottomVisibleRows()
+
+	for i := 0; i < 100; i++ {
+		updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("down")})
+		model = updated.(Model)
+	}
+	if !model.isAtBottomPane() {
+		t.Fatalf("expected to be scrolled to the bottom before new activity arrives")
+	}
+
+	// "u" queues a new transfer inside the same updateKey call whose
+	// wasAtBottom snapshot precedes it, exactly like real usage (a
+	// transferTick or queued transfer growing the list mid-update).
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	model = updated.(Model)
+	if len(model.transfers) != 31 {
+		t.Fatalf("expected queueUpload to add exactly one transfer, got %d total", len(model.transfers))
+	}
+
+	wantOffset := len(model.transfers) - visible
+	if model.bottomOffset != wantOffset {
+		t.Fatalf("bottomOffset after queuing a transfer while at bottom = %d, want %d (auto-follow)", model.bottomOffset, wantOffset)
+	}
+}
+
+func TestBottomPaneStaysPutWhenScrolledUpDuringTick(t *testing.T) {
+	model := NewModel(fakefs.NewRemote())
+	model.width, model.height = 100, 30
+	model.focus = focusQueue
+	for i := 0; i < 30; i++ {
+		model.transfers = append(model.transfers, domain.Transfer{ID: i, Status: domain.Queued})
+	}
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("down")})
+	model = updated.(Model)
+	if model.bottomOffset != 1 {
+		t.Fatalf("bottomOffset after one down = %d, want 1", model.bottomOffset)
+	}
+	if model.isAtBottomPane() {
+		t.Fatalf("expected to not be at the bottom after scrolling only one row into a long list")
+	}
+
+	next, _ := model.Update(transferTick{})
+	model = next.(Model)
+	if model.bottomOffset != 1 {
+		t.Fatalf("bottomOffset after a tick while scrolled up = %d, want unchanged at 1", model.bottomOffset)
+	}
+}
+
+func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
+	model := NewModel(fakefs.NewRemote())
+	model.width, model.height = 100, 30
+	model.focus = focusQueue
+	for i := 0; i < 30; i++ {
+		model.transfers = append(model.transfers, domain.Transfer{ID: i, Status: domain.Queued})
+	}
+	for i := 0; i < 100; i++ {
+		updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("down")})
+		model = updated.(Model)
+	}
+	atBottom := model.bottomOffset
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("up")})
+	model = updated.(Model)
+	if model.bottomOffset != atBottom-1 {
+		t.Fatalf("scrolling up from the bottom = %d, want %d (not snapped back by auto-follow)", model.bottomOffset, atBottom-1)
+	}
+}
+
 func TestViewContainsThreeOperationalRegions(t *testing.T) {
 	model := NewModel(fakefs.NewRemote())
 	model.width = 120

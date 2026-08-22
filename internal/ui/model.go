@@ -132,8 +132,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case transferTick:
+		wasAtBottom := m.isAtBottomPane()
 		m.advanceTransfers()
-		m.clampBottomOffset()
+		m.settleBottomOffset(wasAtBottom)
 		return m, tickTransfers()
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
@@ -143,7 +144,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateKey handles a key press. Actions taken here (queuing a transfer,
+// logging a connect attempt, a transfer advancing) can grow or shrink the
+// row count for whichever bottom-pane tab is active; the deferred settle
+// call keeps the view pinned to the bottom if it was already there
+// (auto-follow), on every return path, without needing it duplicated at
+// each early return. Two escape hatches opt out of the follow snap: tabSwitch
+// (setBottomTab already picks the right offset for a freshly opened tab) and
+// manualScroll (the user is deliberately scrolling the bottom pane, so their
+// input must not be overridden by auto-follow — it's still clamped though).
+func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
+	wasAtBottom := m.isAtBottomPane()
+	tabSwitch := false
+	manualScroll := false
+	defer func() {
+		next, ok := result.(Model)
+		if !ok || tabSwitch {
+			return
+		}
+		if manualScroll {
+			next.clampBottomOffset()
+		} else {
+			next.settleBottomOffset(wasAtBottom)
+		}
+		result = next
+	}()
+
 	if m.overlay == overlayTheme {
 		action := m.themePicker.Update(msg)
 		m.theme = m.themePicker.PreviewTheme()
@@ -188,12 +214,16 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.focus = (m.focus + 2) % 3
 	case "up", "k":
+		manualScroll = m.focus == focusQueue
 		m.moveCursor(-1)
 	case "down", "j":
+		manualScroll = m.focus == focusQueue
 		m.moveCursor(1)
 	case "pgup":
+		manualScroll = m.focus == focusQueue
 		m.moveCursor(-10)
 	case "pgdown":
+		manualScroll = m.focus == focusQueue
 		m.moveCursor(10)
 	case "enter":
 		m.activateCursor()
@@ -239,18 +269,22 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.bottomSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03})
 		m.setStatus("layout reset")
 	case "1":
+		tabSwitch = true
 		m.setBottomTab(tabQueue)
 	case "2":
+		tabSwitch = true
 		m.setBottomTab(tabActive)
 	case "3":
+		tabSwitch = true
 		m.setBottomTab(tabFailed)
 	case "4":
+		tabSwitch = true
 		m.setBottomTab(tabHistory)
 	case "5":
+		tabSwitch = true
 		m.setBottomTab(tabLog)
 	}
 	m.clampCursors()
-	m.clampBottomOffset()
 	return m, nil
 }
 
@@ -504,6 +538,24 @@ func (m *Model) setBottomTab(tab bottomTab) {
 func (m *Model) clampBottomOffset() {
 	m.bottomOffset = min(m.bottomOffset, max(0, m.bottomRowCount()-m.bottomVisibleRows()))
 	m.bottomOffset = max(0, m.bottomOffset)
+}
+
+// isAtBottomPane reports whether the bottom pane is currently scrolled all
+// the way down for its tab, i.e. showing the latest rows.
+func (m Model) isAtBottomPane() bool {
+	return m.bottomOffset >= max(0, m.bottomRowCount()-m.bottomVisibleRows())
+}
+
+// settleBottomOffset re-clamps the scroll offset after the row count for the
+// current tab may have changed. If the pane was already scrolled to the
+// bottom, it stays pinned there (auto-follow) so new transfer activity or
+// log lines stay visible; otherwise it's just clamped to the valid range.
+func (m *Model) settleBottomOffset(wasAtBottom bool) {
+	if wasAtBottom {
+		m.bottomOffset = max(0, m.bottomRowCount()-m.bottomVisibleRows())
+		return
+	}
+	m.clampBottomOffset()
 }
 
 func (m *Model) cursorFromMouse(pane *filePane, y int) {
