@@ -65,6 +65,7 @@ type Model struct {
 
 	transfers      []domain.Transfer
 	nextTransferID int
+	maxParallel    int
 	bottomTab      bottomTab
 	bottomOffset   int
 	logs           []string
@@ -83,6 +84,18 @@ type Model struct {
 }
 
 type transferTick struct{}
+
+// defaultParallelTransfers is how many transfers run at once until config
+// persistence lands and can override Model.maxParallel.
+const defaultParallelTransfers = 2
+
+// firstFileRow is the screen row of the first entry in a file pane:
+// topbar (1) + pane top border (1) + pane title header (1) + column
+// header (1). Mouse clicks above it are not on an entry.
+const firstFileRow = 4
+
+// simulatedFailureEvery is how often the fake adapter fails a transfer.
+const simulatedFailureEvery = 5
 
 func NewModel(remote remotefs.FS) Model {
 	cwd, err := os.Getwd()
@@ -105,6 +118,7 @@ func NewModel(remote remotefs.FS) Model {
 		},
 		remoteFS:       remote,
 		nextTransferID: 1,
+		maxParallel:    defaultParallelTransfers,
 		theme:          tideNight,
 		density:        tideui.Compact,
 		shadow:         true,
@@ -250,7 +264,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.queueUpload()
 	case "d":
 		m.queueDownload()
-	case "delete":
+	case "o":
 		m.overlay = overlayConflict
 	case "r":
 		m.refresh()
@@ -301,16 +315,19 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress && msg.Action != tea.MouseActionMotion {
 		return m, nil
 	}
-	topHeight, bottomStart := m.layoutHeights()
+	// topPaneHeight is what View actually draws with, so the hit test and
+	// the drawn boundary agree even when the layout clamp bites.
+	topHeight := m.topPaneHeight()
+	bottomStart := 1 + topHeight
 	localWidth := max(20, int(float64(m.width)*m.fileSplit.Value()))
 	switch {
-	case msg.Y < topHeight && msg.X < localWidth:
+	case msg.Y < bottomStart && msg.X < localWidth:
 		m.focus = focusLocal
 		m.cursorFromMouse(&m.local, msg.Y)
-	case msg.Y < topHeight:
+	case msg.Y < bottomStart:
 		m.focus = focusRemote
 		m.cursorFromMouse(&m.remote, msg.Y)
-	case msg.Y >= bottomStart:
+	default:
 		m.focus = focusQueue
 	}
 	return m, nil
@@ -325,11 +342,34 @@ func (m *Model) refresh() {
 func (m *Model) refreshLocal() {
 	entries, err := listLocal(m.local.path, m.local.showHidden)
 	if err != nil {
+		m.local.entries = nil
+		m.local.cursor, m.local.offset = 0, 0
 		m.setError(err.Error())
 		return
 	}
 	m.local.entries = entries
 	m.local.cursor = min(m.local.cursor, max(0, len(entries)-1))
+}
+
+// setLocalPath moves the local pane to dirPath, keeping the pane where it is
+// if the new directory cannot be read. Entering a directory always starts a
+// fresh selection: selections are keyed by bare name, so carrying them across
+// a directory change would silently mark same-named files in the new one.
+func (m *Model) setLocalPath(dirPath string) {
+	entries, err := listLocal(dirPath, m.local.showHidden)
+	if err != nil {
+		m.setError(err.Error())
+		return
+	}
+	m.local.path = dirPath
+	m.local.entries = entries
+	m.local.reset()
+}
+
+func (m *Model) setRemotePath(dirPath string) {
+	m.remote.path = dirPath
+	m.remote.entries = m.remoteFS.List(dirPath, m.remote.showHidden)
+	m.remote.reset()
 }
 
 func (m *Model) refreshRemote() {
@@ -355,17 +395,13 @@ func (m *Model) activateCursor() {
 		if !ok || !entry.IsDir() {
 			return
 		}
-		m.local.path = filepath.Join(m.local.path, entry.Name)
-		m.local.cursor = 0
-		m.refreshLocal()
+		m.setLocalPath(filepath.Join(m.local.path, entry.Name))
 	case focusRemote:
 		entry, ok := m.remote.current()
 		if !ok || !entry.IsDir() {
 			return
 		}
-		m.remote.path = m.remoteFS.Child(m.remote.path, entry.Name)
-		m.remote.cursor = 0
-		m.refreshRemote()
+		m.setRemotePath(m.remoteFS.Child(m.remote.path, entry.Name))
 	}
 }
 
@@ -374,14 +410,10 @@ func (m *Model) parentDir() {
 	case focusLocal:
 		parent := filepath.Dir(m.local.path)
 		if parent != m.local.path {
-			m.local.path = parent
-			m.local.cursor = 0
-			m.refreshLocal()
+			m.setLocalPath(parent)
 		}
 	case focusRemote:
-		m.remote.path = m.remoteFS.Parent(m.remote.path)
-		m.remote.cursor = 0
-		m.refreshRemote()
+		m.setRemotePath(m.remoteFS.Parent(m.remote.path))
 	}
 }
 
@@ -474,7 +506,7 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 			Direction:   direction,
 			Source:      joinDisplayPath(srcBase, entry.Name),
 			Destination: joinDisplayPath(dstBase, entry.Name),
-			BytesTotal:  max64(total, 64_000),
+			BytesTotal:  max(total, int64(64_000)),
 			Status:      domain.Queued,
 			Message:     "queued",
 		})
@@ -491,7 +523,7 @@ func (m *Model) advanceTransfers() {
 		}
 	}
 	for i := range m.transfers {
-		if active >= 2 {
+		if active >= m.maxParallel {
 			break
 		}
 		if m.transfers[i].Status == domain.Queued {
@@ -505,8 +537,15 @@ func (m *Model) advanceTransfers() {
 		if m.transfers[i].Status != domain.Active {
 			continue
 		}
-		step := max64(48_000, m.transfers[i].BytesTotal/12)
+		step := max(int64(48_000), m.transfers[i].BytesTotal/12)
 		m.transfers[i].BytesDone += step
+		if failsAt(m.transfers[i]) {
+			m.transfers[i].Status = domain.Failed
+			m.transfers[i].FinishedAt = time.Now()
+			m.transfers[i].Message = "connection reset by peer"
+			m.logs = append(m.logs, "error: transfer "+fmt.Sprint(m.transfers[i].ID)+" failed (simulated)")
+			continue
+		}
 		if m.transfers[i].BytesDone >= m.transfers[i].BytesTotal {
 			m.transfers[i].BytesDone = m.transfers[i].BytesTotal
 			m.transfers[i].Status = domain.Done
@@ -514,6 +553,20 @@ func (m *Model) advanceTransfers() {
 			m.transfers[i].Message = "complete"
 		}
 	}
+}
+
+// failsAt decides when the fake adapter drops a transfer, so the Failed tab
+// and the error styling are reachable without real networking. The rule is
+// deterministic on purpose: every simulatedFailureEvery-th transfer fails once
+// it is past the halfway mark.
+func failsAt(transfer domain.Transfer) bool {
+	if transfer.ID <= 0 || transfer.BytesTotal <= 0 {
+		return false
+	}
+	if transfer.ID%simulatedFailureEvery != 0 {
+		return false
+	}
+	return transfer.BytesDone*2 >= transfer.BytesTotal
 }
 
 func (m *Model) focusedFilePane() *filePane {
@@ -528,8 +581,9 @@ func (m *Model) focusedFilePane() *filePane {
 }
 
 func (m *Model) clampCursors() {
-	m.local.clamp()
-	m.remote.clamp()
+	visible := m.filePaneVisibleRows()
+	m.local.clamp(visible)
+	m.remote.clamp(visible)
 }
 
 // setBottomTab switches the focused bottom-pane tab and resets its scroll
@@ -568,12 +622,12 @@ func (m *Model) settleBottomOffset(wasAtBottom bool) {
 }
 
 func (m *Model) cursorFromMouse(pane *filePane, y int) {
-	row := y - 5
+	row := y - firstFileRow
 	if row < 0 {
 		return
 	}
 	pane.cursor = pane.offset + row
-	pane.clamp()
+	pane.clamp(m.filePaneVisibleRows())
 }
 
 func (m *Model) setStatus(value string) {
@@ -592,14 +646,27 @@ func (p *filePane) current() (domain.Entry, bool) {
 	return p.entries[p.cursor], true
 }
 
-func (p *filePane) clamp() {
+// clamp keeps the cursor inside the entry list and scrolls the offset so the
+// cursor stays within the visible window, where visible is how many entry rows
+// the pane can actually draw at the current terminal size.
+func (p *filePane) clamp(visible int) {
+	visible = max(1, visible)
 	p.cursor = min(max(0, p.cursor), max(0, len(p.entries)-1))
 	if p.cursor < p.offset {
 		p.offset = p.cursor
 	}
-	if p.cursor >= p.offset+20 {
-		p.offset = max(0, p.cursor-19)
+	if p.cursor >= p.offset+visible {
+		p.offset = p.cursor - visible + 1
 	}
+	p.offset = min(p.offset, max(0, len(p.entries)-visible))
+	p.offset = max(0, p.offset)
+}
+
+// reset returns a pane to the top of a freshly entered directory and drops
+// the previous directory's selection.
+func (p *filePane) reset() {
+	p.cursor, p.offset = 0, 0
+	p.selected = map[string]bool{}
 }
 
 func (p filePane) actionEntries() []domain.Entry {
@@ -664,11 +731,4 @@ func joinDisplayPath(base, name string) string {
 
 func short(value string, width int) string {
 	return ansi.Truncate(value, max(1, width), "…")
-}
-
-func max64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
 }

@@ -2,7 +2,8 @@
 
 ## Current State
 
-TideFTP is a new Go terminal file transfer client in `/home/allieb/Projects/tideftp`.
+TideFTP is a new Go terminal file transfer client in
+`/home/allie/Projects/whatthedock/TideFTP`.
 The first implementation slice is a polished UI shell with a fake remote adapter,
 not real FTP/FTPS/SFTP networking yet.
 
@@ -35,7 +36,7 @@ Git repository state:
 Run the TUI:
 
 ```bash
-cd /home/allieb/Projects/tideftp
+cd /home/allie/Projects/whatthedock/TideFTP
 ./start.sh
 # or: go run ./cmd/tideftp
 ```
@@ -192,7 +193,9 @@ concrete adapter package.
    - SFTP known-host mode
 
 5. Improve transfer queue behavior.
-   - Configurable parallelism
+   - Configurable parallelism — the cap is now `Model.maxParallel`
+     (default `defaultParallelTransfers` = 2); it still needs a config
+     source and a UI to change it
    - Completed-transfer aging into History
    - Retry failed transfers
    - Cancel active or queued transfers
@@ -214,9 +217,18 @@ concrete adapter package.
 - No config persistence yet
 - No saved profiles yet
 - No real credential storage yet
-- Mouse support is basic: focus/select, not full range selection or context menus
+- Mouse support is basic: focus/select, not full range selection or context
+  menus. The click-to-row mapping depends on the chrome above the file panes
+  (`firstFileRow` in `internal/ui/model.go`) and on `topPaneHeight`, which
+  `View` and the hit test must keep sharing — changing the topbar or pane
+  header height means updating `firstFileRow`
 - No recursive transfer summary yet
-- Conflict modal is visual/simulated, not wired to transfer policy yet
+- Conflict modal is visual/simulated, not wired to transfer policy yet;
+  it is a demo opened with `o` (it used to be `delete`, which read as
+  "delete this file")
+- Transfer failures are simulated deterministically by `failsAt` in
+  `internal/ui/model.go` so the Failed tab and error styling are
+  reachable without real networking; replace this once real adapters land
 - Completed transfers do not yet age out of Queue into History
 - Failed transfer retry flow is not implemented yet
 - No screenshot/PTY visual QA has been run yet

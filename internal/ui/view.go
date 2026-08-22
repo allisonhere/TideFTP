@@ -47,7 +47,7 @@ func (m Model) renderTopbar(renderer tideui.Renderer) string {
 	conn := renderer.Styles.StatusBar.Render(" demo-sftp.local  sftp  fake adapter ")
 	right := fmt.Sprintf(" %d queued  %s  split %.0f/%.0f ", countStatus(m.transfers, domain.Queued), m.theme.Name, m.fileSplit.Value()*100, (1-m.fileSplit.Value())*100)
 	content := left + conn
-	padding := max(0, m.width-lipgloss.Width(content)-len(right))
+	padding := max(0, m.width-lipgloss.Width(content)-lipgloss.Width(right))
 	return renderer.Styles.StatusBar.Width(m.width).Render(content + strings.Repeat(" ", padding) + right)
 }
 
@@ -81,8 +81,11 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 	rows := make([]string, 0, len(pane.entries)+1)
 	rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render("mode        size        modified        name"))
 	visible := max(0, height-1)
-	pane.offset = min(pane.offset, max(0, len(pane.entries)-visible))
-	for index := pane.offset; index < len(pane.entries) && len(rows) < height; index++ {
+	// Render from a local offset: pane is a copy, so writing back to
+	// pane.offset here would be silently discarded. clampCursors owns the
+	// model's offset; this only guards against a stale one.
+	offset := max(0, min(pane.offset, max(0, len(pane.entries)-visible)))
+	for index := offset; index < len(pane.entries) && len(rows) < height; index++ {
 		entry := pane.entries[index]
 		rows = append(rows, m.renderEntryRow(renderer, entry, index == pane.cursor, pane.selected[entry.Name], width))
 	}
@@ -246,7 +249,7 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 		dir = m.glyph(renderer, "↓", "v")
 	}
 	const barWidth = 18
-	progress := minFloat(maxFloat(transfer.Progress(), 0), 1)
+	progress := min(max(transfer.Progress(), 0), 1)
 	filled := int(progress * float64(barWidth))
 	bar := segment(bg, fg, "[") +
 		segment(bg, statusColor, strings.Repeat("=", filled)) +
@@ -255,7 +258,11 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 	name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-48))
 
 	left := segment(bg, statusColor, dir+" ") + bar + segment(bg, fg, "  "+name)
-	meta := fmt.Sprintf("%s %3.0f%% %s", statusIcon, transfer.Progress()*100, transferStatus(transfer.Status))
+	label := transfer.Message
+	if label == "" {
+		label = transferStatus(transfer.Status)
+	}
+	meta := fmt.Sprintf("%s %3.0f%% %s", statusIcon, transfer.Progress()*100, label)
 	right := segment(bg, statusColor, meta)
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
 	content := left + segment(bg, fg, strings.Repeat(" ", gap)) + right
@@ -298,6 +305,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			keyRow("u", "upload"),
 			keyRow("d", "download"),
 			keyRow("r", "refresh"),
+			keyRow("o", "conflict prompt (demo)"),
 			keyRow(".", "toggle hidden files"),
 			"",
 			renderer.Styles.DetailMeta.Render("View"),
@@ -345,25 +353,25 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 	}
 }
 
-func (m Model) layoutHeights() (int, int) {
-	bodyHeight := max(1, m.height-2)
-	bottom := max(3, int(float64(bodyHeight)*m.bottomSplit.Value()))
-	top := max(5, bodyHeight-bottom)
-	return top, 1 + top
-}
-
 // topPaneHeight and bottomPaneHeight return the on-screen height (including
 // border and title header) allocated to the local/remote panes and the
 // transfers pane, respectively.
 func (m Model) topPaneHeight() int {
 	bodyHeight := max(1, m.height-2)
-	topHeight, _ := m.layoutHeights()
-	return min(topHeight, bodyHeight-3)
+	bottom := max(3, int(float64(bodyHeight)*m.bottomSplit.Value()))
+	return min(max(5, bodyHeight-bottom), bodyHeight-3)
 }
 
 func (m Model) bottomPaneHeight() int {
 	bodyHeight := max(1, m.height-2)
 	return max(3, bodyHeight-m.topPaneHeight())
+}
+
+// filePaneVisibleRows returns how many entry rows (excluding the column
+// header) a local/remote pane can draw at the current terminal size. It is
+// the window filePane.clamp scrolls the cursor within.
+func (m Model) filePaneVisibleRows() int {
+	return max(1, m.topPaneHeight()-4)
 }
 
 // bottomVisibleRows returns how many content rows (excluding the tab bar)
@@ -510,18 +518,4 @@ func clampView(value string, width, height int, bg lipgloss.Color) string {
 func align(left, right string, width int) string {
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
 	return left + strings.Repeat(" ", gap) + right
-}
-
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }
