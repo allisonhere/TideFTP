@@ -1,24 +1,34 @@
 package fakefs
 
 import (
+	"context"
+	"fmt"
 	"path"
 	"sort"
 	"strings"
 	"time"
 
 	"tideftp/internal/domain"
-	"tideftp/internal/remotefs"
+	"tideftp/internal/vfs"
 )
 
-var _ remotefs.FS = (*Remote)(nil)
+var _ vfs.FS = (*Remote)(nil)
 
 type Remote struct {
 	entries map[string][]domain.Entry
+	// latency stands in for network round-trip time. Zero in tests; the app
+	// sets a small one so the panes' loading state is visible in real use.
+	latency time.Duration
 }
 
-func NewRemote() *Remote {
+// NewRemote builds the fake tree with no artificial latency.
+func NewRemote() *Remote { return NewRemoteWithLatency(0) }
+
+// NewRemoteWithLatency builds the fake tree, delaying every listing by the
+// given duration so the UI's loading path gets exercised by hand.
+func NewRemoteWithLatency(latency time.Duration) *Remote {
 	now := time.Now()
-	return &Remote{entries: map[string][]domain.Entry{
+	return &Remote{latency: latency, entries: map[string][]domain.Entry{
 		"/": {
 			dir("public_html", now.Add(-72*time.Hour)),
 			dir("releases", now.Add(-24*time.Hour)),
@@ -57,9 +67,25 @@ func NewRemote() *Remote {
 	}}
 }
 
-func (r *Remote) List(dirPath string, showHidden bool) []domain.Entry {
+func (r *Remote) List(ctx context.Context, dirPath string, showHidden bool) ([]domain.Entry, error) {
+	if r.latency > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(r.latency):
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	dirPath = clean(dirPath)
-	entries := append([]domain.Entry(nil), r.entries[dirPath]...)
+	stored, ok := r.entries[dirPath]
+	if !ok {
+		// A real server answers a bad path with an error, not an empty
+		// directory, so the fake does too.
+		return nil, fmt.Errorf("no such directory: %s", dirPath)
+	}
+	entries := append([]domain.Entry(nil), stored...)
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Kind != entries[j].Kind {
 			return entries[i].Kind == domain.EntryDir
@@ -67,7 +93,7 @@ func (r *Remote) List(dirPath string, showHidden bool) []domain.Entry {
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 	if showHidden {
-		return entries
+		return entries, nil
 	}
 	filtered := entries[:0]
 	for _, entry := range entries {
@@ -75,7 +101,7 @@ func (r *Remote) List(dirPath string, showHidden bool) []domain.Entry {
 			filtered = append(filtered, entry)
 		}
 	}
-	return filtered
+	return filtered, nil
 }
 
 func (r *Remote) Child(current, name string) string {

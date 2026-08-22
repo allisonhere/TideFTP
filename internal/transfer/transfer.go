@@ -1,7 +1,7 @@
 // Package transfer defines the protocol-agnostic interface the UI uses to move
 // bytes between the local filesystem and a remote server. FTP, FTPS, and SFTP
 // engines will implement it alongside the existing fake one, the same way
-// FTP/FTPS/SFTP adapters will implement remotefs.FS for browsing.
+// FTP/FTPS/SFTP adapters will implement vfs.FS for browsing.
 //
 // Engines are asynchronous by contract. Start must return immediately and
 // report everything that happens afterwards on the Events channel: a real

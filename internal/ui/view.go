@@ -25,8 +25,8 @@ func (m Model) View() string {
 	// renderPane reserves 2 rows for its border and 1 for its title header,
 	// so the content passed in must be sized to height-3 to fill exactly the
 	// space actually visible inside the pane (see renderPane's bodyHeight).
-	local := m.renderPane(renderer, "Local", m.local.path, m.renderFilePane(renderer, m.local, localWidth-2, topHeight-3), localWidth, topHeight, m.focus == focusLocal)
-	remote := m.renderPane(renderer, "Remote", m.remote.path, m.renderFilePane(renderer, m.remote, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
+	local := m.renderPane(renderer, m.paneTitle("Local", m.local), m.local.displayPath(), m.renderFilePane(renderer, m.local, localWidth-2, topHeight-3), localWidth, topHeight, m.focus == focusLocal)
+	remote := m.renderPane(renderer, m.paneTitle("Remote", m.remote), m.remote.displayPath(), m.renderFilePane(renderer, m.remote, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
 	top := lipgloss.JoinHorizontal(lipgloss.Top, local, remote)
 
 	bottomTitle := "Transfers"
@@ -40,6 +40,16 @@ func (m Model) View() string {
 		view = overlayOnBase(view, overlay.Content, m.width, m.height, renderer.Styles.Theme.Bg, m.shadow)
 	}
 	return clampView(view, m.width, m.height, renderer.Styles.Theme.Bg)
+}
+
+// paneTitle appends a spinner-free loading marker while a listing is in
+// flight. It stays in the title rather than replacing the body so the pane's
+// current contents remain readable and usable during a slow listing.
+func (m Model) paneTitle(title string, pane filePane) string {
+	if !pane.loading {
+		return title
+	}
+	return title + " " + m.glyphPlain("…", "...")
 }
 
 func (m Model) renderTopbar(renderer tideui.Renderer) string {
@@ -90,7 +100,11 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 		rows = append(rows, m.renderEntryRow(renderer, entry, index == pane.cursor, pane.selected[entry.Name], width))
 	}
 	if len(pane.entries) == 0 {
-		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render("empty"))
+		label := "empty"
+		if pane.loading {
+			label = "loading…"
+		}
+		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render(label))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -167,6 +181,15 @@ func segment(bg, color lipgloss.Color, text string) string {
 // is ASCII-only (e.g. vt52), in which case it falls back to asciiGlyph.
 func (m Model) glyph(renderer tideui.Renderer, unicodeGlyph, asciiGlyph string) string {
 	if !m.showIcons || renderer.Styles.PlainUI {
+		return asciiGlyph
+	}
+	return unicodeGlyph
+}
+
+// glyphPlain is glyph for callers that have no renderer to hand; it consults
+// the icon toggle and the active theme's ASCII flag directly.
+func (m Model) glyphPlain(unicodeGlyph, asciiGlyph string) string {
+	if !m.showIcons || m.theme.UsesASCII() {
 		return asciiGlyph
 	}
 	return unicodeGlyph

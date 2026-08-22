@@ -10,8 +10,66 @@ import (
 
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
+	"tideftp/internal/localfs"
 	"tideftp/internal/transfer"
+	"tideftp/internal/vfs"
 )
+
+// loadedModel builds a model over the fake adapters and settles its initial
+// listings, so a test can treat both panes as already loaded. It goes through
+// refresh rather than Init because Init also starts the transfer event pump,
+// which blocks on an open channel.
+func loadedModel(t *testing.T, engine transfer.Engine) Model {
+	t.Helper()
+	return loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
+}
+
+func loadedModelOver(t *testing.T, local, remote vfs.FS, engine transfer.Engine) Model {
+	t.Helper()
+	model := NewModel(local, remote, engine)
+	model.width, model.height = 120, 36
+	return settle(t, model, model.refresh())
+}
+
+// settle runs cmd and everything it produces against the model until nothing
+// is left, so tests can treat asynchronous listings as if they were
+// synchronous. It must not be handed a command that blocks (waitForTransferEvent
+// on an open channel), which is why tests drive listings directly.
+func settle(t *testing.T, model Model, cmd tea.Cmd) Model {
+	t.Helper()
+	queue := []tea.Cmd{cmd}
+	for steps := 0; len(queue) > 0; steps++ {
+		if steps > 200 {
+			t.Fatalf("commands never settled")
+		}
+		next := queue[0]
+		queue = queue[1:]
+		if next == nil {
+			continue
+		}
+		switch msg := next().(type) {
+		case nil:
+		case tea.BatchMsg:
+			queue = append(queue, msg...)
+		default:
+			updated, follow := model.Update(msg)
+			model = updated.(Model)
+			queue = append(queue, follow)
+		}
+	}
+	return model
+}
+
+// press sends one key and settles whatever it kicks off.
+func press(t *testing.T, model Model, key tea.KeyMsg) Model {
+	t.Helper()
+	updated, cmd := model.updateKey(key)
+	return settle(t, updated.(Model), cmd)
+}
+
+func runes(value string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
+}
 
 // scriptedEngine is a transfer.Engine the tests drive by hand: nothing runs on
 // a timer and no goroutine is involved, so UI tests assert on engine traffic
@@ -42,7 +100,7 @@ func (e *scriptedEngine) startedIDs() []int {
 }
 
 func TestShiftArrowsResizeLayout(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	startFile := model.fileSplit.Value()
 	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyShiftRight})
 	model = updated.(Model)
@@ -65,7 +123,7 @@ func TestThemePickerIncludesTideNight(t *testing.T) {
 }
 
 func TestBottomPaneScrolls(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 40; i++ {
@@ -99,7 +157,7 @@ func TestBottomPaneScrolls(t *testing.T) {
 }
 
 func TestLogTabOpensScrolledToLatest(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 50; i++ {
@@ -115,7 +173,7 @@ func TestLogTabOpensScrolledToLatest(t *testing.T) {
 }
 
 func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.local.entries = []domain.Entry{{Name: "a"}}
 	model.local.cursor = 0
@@ -150,7 +208,7 @@ func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
 }
 
 func TestBottomPaneStaysPutWhenScrolledUpDuringActivity(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 30; i++ {
@@ -174,7 +232,7 @@ func TestBottomPaneStaysPutWhenScrolledUpDuringActivity(t *testing.T) {
 }
 
 func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 30; i++ {
@@ -194,7 +252,7 @@ func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
 }
 
 func TestIconsToggleAndAsciiFallback(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	if !model.showIcons {
 		t.Fatalf("icons should default on")
 	}
@@ -229,7 +287,7 @@ func TestIconsToggleAndAsciiFallback(t *testing.T) {
 }
 
 func TestViewContainsThreeOperationalRegions(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width = 120
 	model.height = 36
 	view := model.View()
@@ -241,7 +299,7 @@ func TestViewContainsThreeOperationalRegions(t *testing.T) {
 }
 
 func TestMouseClickSelectsTheClickedRow(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 120, 36
 	model.local.entries = []domain.Entry{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}
 	model.local.cursor, model.local.offset = 0, 0
@@ -268,7 +326,7 @@ func TestMouseClickSelectsTheClickedRow(t *testing.T) {
 }
 
 func TestMouseClickBelowTopPaneFocusesQueue(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 120, 36
 	// The row right after the top panes belongs to the transfers pane, using
 	// the same height View draws with.
@@ -279,14 +337,12 @@ func TestMouseClickBelowTopPaneFocusesQueue(t *testing.T) {
 }
 
 func TestEnteringDirectoryClearsSelection(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusRemote
-	model.remote.path = "/"
-	model.refreshRemote()
+	model = settle(t, model, model.navigateTo(paneRemote, "/"))
 
 	// Select every entry in the root, then walk into a subdirectory.
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyCtrlA})
-	model = updated.(Model)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlA})
 	if len(model.remote.selected) == 0 {
 		t.Fatalf("expected ctrl+a to select the root entries")
 	}
@@ -296,9 +352,11 @@ func TestEnteringDirectoryClearsSelection(t *testing.T) {
 			break
 		}
 	}
-	updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(Model)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 
+	if model.remote.path == "/" {
+		t.Fatalf("enter did not move into a subdirectory")
+	}
 	if len(model.remote.selected) != 0 {
 		t.Fatalf("selection survived a directory change: %v", model.remote.selected)
 	}
@@ -308,15 +366,17 @@ func TestEnteringDirectoryClearsSelection(t *testing.T) {
 
 	// Going back up is a directory change too.
 	model.remote.selected["public_html"] = true
-	updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyBackspace})
-	model = updated.(Model)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyBackspace})
+	if model.remote.path != "/" {
+		t.Fatalf("backspace left the pane at %q, want /", model.remote.path)
+	}
 	if len(model.remote.selected) != 0 {
 		t.Fatalf("selection survived a move to the parent directory: %v", model.remote.selected)
 	}
 }
 
 func TestFilePaneScrollsWithTheVisibleHeight(t *testing.T) {
-	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
+	model := loadedModel(t, newScriptedEngine())
 	model.width, model.height = 120, 36
 	model.focus = focusLocal
 	entries := make([]domain.Entry, 60)
@@ -362,7 +422,7 @@ func TestFilePaneScrollsWithTheVisibleHeight(t *testing.T) {
 
 func TestParallelismIsCappedByMaxParallel(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 	model.maxParallel = 3
 	for i := 0; i < 10; i++ {
 		model.transfers = append(model.transfers, domain.Transfer{ID: i + 1, BytesTotal: 10_000_000, Status: domain.Queued})
@@ -379,7 +439,7 @@ func TestParallelismIsCappedByMaxParallel(t *testing.T) {
 
 func TestQueuingHandsTheRequestToTheEngine(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 	model.focus = focusLocal
 	model.local.path = "/tmp"
 	model.remote.path = "/public_html"
@@ -406,7 +466,7 @@ func TestQueuingHandsTheRequestToTheEngine(t *testing.T) {
 
 func TestEngineEventsDriveTransferState(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 	model.width, model.height = 100, 30
 	model.transfers = []domain.Transfer{
 		{ID: 1, BytesTotal: 1000, Status: domain.Queued},
@@ -454,7 +514,7 @@ func TestEngineEventsDriveTransferState(t *testing.T) {
 
 func TestFinishedTransferFreesASlotForTheNextOne(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 	model.maxParallel = 2
 	model.transfers = []domain.Transfer{
 		{ID: 1, BytesTotal: 1000, Status: domain.Queued},
@@ -479,7 +539,7 @@ func TestFinishedTransferFreesASlotForTheNextOne(t *testing.T) {
 
 func TestCancelStopsActiveTransfers(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 	model.transfers = []domain.Transfer{
 		{ID: 1, BytesTotal: 1000, Status: domain.Active},
 		{ID: 2, BytesTotal: 1000, Status: domain.Queued},
@@ -504,7 +564,7 @@ func TestCancelStopsActiveTransfers(t *testing.T) {
 
 func TestQuitSchedulesAnEngineShutdown(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 
 	_, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd == nil {
@@ -523,7 +583,7 @@ func TestQuitSchedulesAnEngineShutdown(t *testing.T) {
 
 func TestClosedEventStreamStopsThePump(t *testing.T) {
 	engine := newScriptedEngine()
-	model := NewModel(fakefs.NewRemote(), engine)
+	model := loadedModel(t, engine)
 	close(engine.events)
 
 	msg := waitForTransferEvent(engine.Events())()
@@ -532,5 +592,196 @@ func TestClosedEventStreamStopsThePump(t *testing.T) {
 	}
 	if _, cmd := model.Update(transferStreamClosed{}); cmd != nil {
 		t.Fatalf("the UI should stop pumping once the stream is closed")
+	}
+}
+
+func TestInitLoadsBothPanes(t *testing.T) {
+	engine := newScriptedEngine()
+	// Closing the stream lets Init's event pump return instead of blocking.
+	close(engine.events)
+
+	model := NewModel(localfs.New(), fakefs.NewRemote(), engine)
+	model.width, model.height = 120, 36
+	if !model.local.loading || !model.remote.loading {
+		t.Fatalf("both panes should start in their loading state")
+	}
+	if len(model.remote.entries) != 0 {
+		t.Fatalf("a constructor cannot list asynchronously; entries should be empty")
+	}
+
+	model = settle(t, model, model.Init())
+
+	if model.local.loading || model.remote.loading {
+		t.Fatalf("panes still loading after Init settled")
+	}
+	if len(model.remote.entries) == 0 {
+		t.Fatalf("remote pane has no entries after Init")
+	}
+}
+
+func TestPaneStaysUsableWhileLoading(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	before := append([]domain.Entry(nil), model.remote.entries...)
+
+	cmd := model.navigateTo(paneRemote, "/releases")
+
+	if !model.remote.loading {
+		t.Fatalf("pane should be marked loading while the listing is in flight")
+	}
+	if model.remote.displayPath() != "/releases" {
+		t.Fatalf("header shows %q while loading, want the directory being opened", model.remote.displayPath())
+	}
+	if model.remote.path == "/releases" {
+		t.Fatalf("path must not be committed until the listing succeeds")
+	}
+	if len(model.remote.entries) != len(before) {
+		t.Fatalf("pane contents changed before the listing landed")
+	}
+	if view := model.View(); !strings.Contains(view, "/releases") {
+		t.Fatalf("the loading directory should appear in the pane header\n%s", view)
+	}
+
+	model = settle(t, model, cmd)
+
+	if model.remote.loading || model.remote.path != "/releases" {
+		t.Fatalf("after the listing landed: loading=%v path=%q", model.remote.loading, model.remote.path)
+	}
+	if model.remote.displayPath() != "/releases" {
+		t.Fatalf("displayPath = %q after loading", model.remote.displayPath())
+	}
+}
+
+func TestStaleListingIsIgnored(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+
+	// Two navigations in flight at once, as two quick Enter presses would do.
+	slow := model.navigateTo(paneRemote, "/releases")
+	fast := model.navigateTo(paneRemote, "/incoming")
+
+	// The newer request answers first.
+	model = settle(t, model, fast)
+	if model.remote.path != "/incoming" {
+		t.Fatalf("newest listing did not land: path = %q", model.remote.path)
+	}
+	landed := append([]domain.Entry(nil), model.remote.entries...)
+
+	// The older reply arrives late and must be dropped.
+	model = settle(t, model, slow)
+	if model.remote.path != "/incoming" {
+		t.Fatalf("a stale listing overwrote the newer directory: path = %q", model.remote.path)
+	}
+	if len(model.remote.entries) != len(landed) {
+		t.Fatalf("a stale listing replaced the newer entries")
+	}
+	if model.remote.loading {
+		t.Fatalf("a stale reply should not put the pane back into loading")
+	}
+}
+
+func TestFailedListingLeavesThePaneWhereItWas(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/public_html"))
+
+	pathBefore := model.remote.path
+	entriesBefore := len(model.remote.entries)
+
+	model = settle(t, model, model.navigateTo(paneRemote, "/does-not-exist"))
+
+	if model.remote.path != pathBefore {
+		t.Fatalf("a failed listing moved the pane to %q, want it left at %q", model.remote.path, pathBefore)
+	}
+	if len(model.remote.entries) != entriesBefore {
+		t.Fatalf("a failed listing changed the pane contents")
+	}
+	if model.remote.loading {
+		t.Fatalf("pane stuck in its loading state after a failed listing")
+	}
+	if !model.statusErr {
+		t.Fatalf("a failed listing should report an error, status = %q", model.status)
+	}
+	if !strings.Contains(model.status, "remote") {
+		t.Fatalf("error status = %q, want it to name the pane", model.status)
+	}
+}
+
+func TestRefreshKeepsCursorAndSelection(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/public_html"))
+
+	model.remote.cursor = 2
+	model.remote.selected[model.remote.entries[2].Name] = true
+
+	model = press(t, model, runes("r"))
+
+	if model.remote.cursor != 2 {
+		t.Fatalf("refresh moved the cursor to %d, want it left at 2", model.remote.cursor)
+	}
+	if len(model.remote.selected) != 1 {
+		t.Fatalf("refresh dropped the selection: %v", model.remote.selected)
+	}
+	if model.remote.path != "/public_html" {
+		t.Fatalf("refresh changed the directory to %q", model.remote.path)
+	}
+}
+
+func TestToggleHiddenRelistsOnlyTheFocusedPane(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/"))
+
+	visible := len(model.remote.entries)
+	localToken := model.local.requestToken
+
+	model = press(t, model, runes("."))
+
+	if !model.remote.showHidden {
+		t.Fatalf("'.' did not turn hidden files on for the focused pane")
+	}
+	if len(model.remote.entries) <= visible {
+		t.Fatalf("hidden entries = %d, want more than the %d visible ones", len(model.remote.entries), visible)
+	}
+	if model.local.requestToken != localToken {
+		t.Fatalf("toggling hidden files re-listed the unfocused pane too")
+	}
+	if model.local.showHidden {
+		t.Fatalf("toggling hidden files changed the unfocused pane's setting")
+	}
+}
+
+func TestParentAtRootDoesNothing(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/"))
+
+	token := model.remote.requestToken
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	model = updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("backspace at the root issued a listing")
+	}
+	if model.remote.requestToken != token || model.remote.loading {
+		t.Fatalf("backspace at the root started a request")
+	}
+}
+
+func TestEnterOnAFileDoesNothing(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/public_html/assets"))
+
+	token := model.remote.requestToken
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("enter on a file issued a listing")
+	}
+	if model.remote.requestToken != token {
+		t.Fatalf("enter on a file started a request")
 	}
 }

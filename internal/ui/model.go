@@ -1,11 +1,9 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/allisonhere/tideui"
@@ -13,8 +11,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/domain"
-	"tideftp/internal/remotefs"
 	"tideftp/internal/transfer"
+	"tideftp/internal/vfs"
 )
 
 type focusPane int
@@ -45,6 +43,42 @@ const (
 	overlayTheme
 )
 
+// paneID names a file pane for listing requests. It is deliberately separate
+// from focusPane: a listing can land in a pane that is not focused.
+type paneID int
+
+const (
+	paneLocal paneID = iota
+	paneRemote
+)
+
+func (p paneID) String() string {
+	if p == paneLocal {
+		return "local"
+	}
+	return "remote"
+}
+
+// listingKind says what to do with the cursor and selection when a listing
+// arrives. Walking into a directory starts fresh; re-reading the directory you
+// are already in must not move the cursor or drop what is selected.
+type listingKind int
+
+const (
+	listingNavigate listingKind = iota
+	listingRefresh
+)
+
+// listingMsg is the reply to one List request.
+type listingMsg struct {
+	pane    paneID
+	token   int
+	kind    listingKind
+	path    string
+	entries []domain.Entry
+	err     error
+}
+
 type filePane struct {
 	title      string
 	path       string
@@ -53,6 +87,35 @@ type filePane struct {
 	offset     int
 	showHidden bool
 	selected   map[string]bool
+
+	// requestToken is the id of the most recent listing request. Replies
+	// carrying an older token are stale — two quick Enter presses put two
+	// listings in flight, and the slower one must not overwrite the newer
+	// directory — so they are dropped.
+	requestToken int
+	// loading is set while a listing is in flight, and pendingPath is the
+	// directory being loaded. The pane keeps showing its current contents
+	// until the reply lands, so a failed listing changes nothing.
+	loading     bool
+	pendingPath string
+}
+
+// beginRequest marks the pane as waiting for dirPath and returns the token the
+// reply must carry to be accepted.
+func (p *filePane) beginRequest(dirPath string) int {
+	p.requestToken++
+	p.loading = true
+	p.pendingPath = dirPath
+	return p.requestToken
+}
+
+// displayPath is what the pane header shows: the directory being loaded while
+// a request is in flight, otherwise the one on screen.
+func (p filePane) displayPath() string {
+	if p.loading && p.pendingPath != "" {
+		return p.pendingPath
+	}
+	return p.path
 }
 
 type Model struct {
@@ -62,7 +125,8 @@ type Model struct {
 
 	local    filePane
 	remote   filePane
-	remoteFS remotefs.FS
+	localFS  vfs.FS
+	remoteFS vfs.FS
 	engine   transfer.Engine
 
 	transfers      []domain.Transfer
@@ -93,12 +157,17 @@ type transferStreamClosed struct{}
 // persistence lands and can override Model.maxParallel.
 const defaultParallelTransfers = 2
 
+// listTimeout bounds a single directory listing. A real server can accept a
+// connection and then never answer; without this the pane would sit in its
+// loading state forever.
+const listTimeout = 20 * time.Second
+
 // firstFileRow is the screen row of the first entry in a file pane:
 // topbar (1) + pane top border (1) + pane title header (1) + column
 // header (1). Mouse clicks above it are not on an entry.
 const firstFileRow = 4
 
-func NewModel(remote remotefs.FS, engine transfer.Engine) Model {
+func NewModel(local, remote vfs.FS, engine transfer.Engine) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
@@ -117,6 +186,7 @@ func NewModel(remote remotefs.FS, engine transfer.Engine) Model {
 			selected:   map[string]bool{},
 			showHidden: false,
 		},
+		localFS:        local,
 		remoteFS:       remote,
 		engine:         engine,
 		nextTransferID: 1,
@@ -135,19 +205,31 @@ func NewModel(remote remotefs.FS, engine transfer.Engine) Model {
 		InitialTheme: model.theme.Name,
 		Title:        "THEMES",
 	})
-	model.refreshLocal()
-	model.refreshRemote()
+	// Listings are asynchronous now, and a constructor cannot return commands,
+	// so both panes start in their loading state and Init issues the requests.
+	model.local.beginRequest(model.local.path)
+	model.remote.beginRequest(model.remote.path)
 	return model
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForTransferEvent(m.engine.Events()), tea.SetWindowTitle("TideFTP"))
+	return tea.Batch(
+		waitForTransferEvent(m.engine.Events()),
+		tea.SetWindowTitle("TideFTP"),
+		listCmd(m.localFS, paneLocal, m.local.requestToken, m.local.path, m.local.showHidden, listingNavigate),
+		listCmd(m.remoteFS, paneRemote, m.remote.requestToken, m.remote.path, m.remote.showHidden, listingNavigate),
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case listingMsg:
+		wasAtBottom := m.isAtBottomPane()
+		m.applyListing(msg)
+		m.settleBottomOffset(wasAtBottom)
 		return m, nil
 	case transfer.Event:
 		// Applying an event can finish a transfer, which frees a slot for the
@@ -249,9 +331,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		manualScroll = m.focus == focusQueue
 		m.moveCursor(10)
 	case "enter":
-		m.activateCursor()
+		cmd = m.activateCursor()
 	case "backspace", "h":
-		m.parentDir()
+		cmd = m.parentDir()
 	case " ":
 		m.toggleSelection()
 	case "esc":
@@ -259,7 +341,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "ctrl+a":
 		m.selectAll()
 	case ".":
-		m.toggleHidden()
+		cmd = m.toggleHidden()
 	case "i":
 		m.showIcons = !m.showIcons
 		if m.showIcons {
@@ -276,7 +358,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "x":
 		m.cancelActiveTransfers()
 	case "r":
-		m.refresh()
+		cmd = m.refresh()
 	case "c":
 		m.overlay = overlayConnect
 	case "t":
@@ -317,7 +399,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.setBottomTab(tabLog)
 	}
 	m.clampCursors()
-	return m, nil
+	return m, cmd
 }
 
 func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -342,48 +424,93 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) refresh() {
-	m.refreshLocal()
-	m.refreshRemote()
-	m.setStatus("refreshed")
+// refresh re-reads both panes in place, keeping cursors and selections.
+func (m *Model) refresh() tea.Cmd {
+	m.setStatus("refreshing")
+	return tea.Batch(
+		m.requestListing(paneLocal, m.local.path, listingRefresh),
+		m.requestListing(paneRemote, m.remote.path, listingRefresh),
+	)
 }
 
-func (m *Model) refreshLocal() {
-	entries, err := listLocal(m.local.path, m.local.showHidden)
-	if err != nil {
-		m.local.entries = nil
-		m.local.cursor, m.local.offset = 0, 0
-		m.setError(err.Error())
+// requestListing issues a List for dirPath and returns the command that runs
+// it off the UI goroutine. The pane keeps its current contents until the reply
+// arrives, so a listing that fails or never answers leaves the pane usable.
+func (m *Model) requestListing(pane paneID, dirPath string, kind listingKind) tea.Cmd {
+	target := m.filePaneByID(pane)
+	token := target.beginRequest(dirPath)
+	return listCmd(m.fsByID(pane), pane, token, dirPath, target.showHidden, kind)
+}
+
+// listCmd is a free function rather than a method because Init has a value
+// receiver and cannot record the request on the model; NewModel does that part.
+func listCmd(fs vfs.FS, pane paneID, token int, dirPath string, showHidden bool, kind listingKind) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
+		defer cancel()
+		entries, err := fs.List(ctx, dirPath, showHidden)
+		return listingMsg{pane: pane, token: token, kind: kind, path: dirPath, entries: entries, err: err}
+	}
+}
+
+// applyListing folds one reply into its pane, ignoring stale replies and
+// leaving the pane untouched when the listing failed.
+func (m *Model) applyListing(msg listingMsg) {
+	target := m.filePaneByID(msg.pane)
+	if msg.token != target.requestToken {
 		return
 	}
-	m.local.entries = entries
-	m.local.cursor = min(m.local.cursor, max(0, len(entries)-1))
-}
-
-// setLocalPath moves the local pane to dirPath, keeping the pane where it is
-// if the new directory cannot be read. Entering a directory always starts a
-// fresh selection: selections are keyed by bare name, so carrying them across
-// a directory change would silently mark same-named files in the new one.
-func (m *Model) setLocalPath(dirPath string) {
-	entries, err := listLocal(dirPath, m.local.showHidden)
-	if err != nil {
-		m.setError(err.Error())
+	target.loading = false
+	target.pendingPath = ""
+	if msg.err != nil {
+		m.setError(fmt.Sprintf("%s: %v", msg.pane, msg.err))
 		return
 	}
-	m.local.path = dirPath
-	m.local.entries = entries
-	m.local.reset()
+	target.entries = msg.entries
+	switch msg.kind {
+	case listingNavigate:
+		target.path = msg.path
+		target.reset()
+	case listingRefresh:
+		target.clamp(m.filePaneVisibleRows())
+	}
+	// Deliberately not clearing an error status here: refresh lists both
+	// panes, so a success on one would wipe a genuine failure reported by the
+	// other. The next action replaces the status anyway.
 }
 
-func (m *Model) setRemotePath(dirPath string) {
-	m.remote.path = dirPath
-	m.remote.entries = m.remoteFS.List(dirPath, m.remote.showHidden)
-	m.remote.reset()
+// navigateTo walks a pane to dirPath. The path is not committed until the
+// listing succeeds, so a directory that cannot be read leaves the pane where
+// it was.
+func (m *Model) navigateTo(pane paneID, dirPath string) tea.Cmd {
+	return m.requestListing(pane, dirPath, listingNavigate)
 }
 
-func (m *Model) refreshRemote() {
-	m.remote.entries = m.remoteFS.List(m.remote.path, m.remote.showHidden)
-	m.remote.cursor = min(m.remote.cursor, max(0, len(m.remote.entries)-1))
+func (m *Model) filePaneByID(pane paneID) *filePane {
+	if pane == paneLocal {
+		return &m.local
+	}
+	return &m.remote
+}
+
+func (m Model) fsByID(pane paneID) vfs.FS {
+	if pane == paneLocal {
+		return m.localFS
+	}
+	return m.remoteFS
+}
+
+// focusedPaneID reports which file pane has focus, and whether one does at all
+// (the transfers pane is not a file pane).
+func (m Model) focusedPaneID() (paneID, bool) {
+	switch m.focus {
+	case focusLocal:
+		return paneLocal, true
+	case focusRemote:
+		return paneRemote, true
+	default:
+		return paneLocal, false
+	}
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -397,33 +524,32 @@ func (m *Model) moveCursor(delta int) {
 	}
 }
 
-func (m *Model) activateCursor() {
-	switch m.focus {
-	case focusLocal:
-		entry, ok := m.local.current()
-		if !ok || !entry.IsDir() {
-			return
-		}
-		m.setLocalPath(filepath.Join(m.local.path, entry.Name))
-	case focusRemote:
-		entry, ok := m.remote.current()
-		if !ok || !entry.IsDir() {
-			return
-		}
-		m.setRemotePath(m.remoteFS.Child(m.remote.path, entry.Name))
+// activateCursor opens the directory under the cursor in the focused pane.
+func (m *Model) activateCursor() tea.Cmd {
+	pane, ok := m.focusedPaneID()
+	if !ok {
+		return nil
 	}
+	target := m.filePaneByID(pane)
+	entry, found := target.current()
+	if !found || !entry.IsDir() {
+		return nil
+	}
+	return m.navigateTo(pane, m.fsByID(pane).Child(target.path, entry.Name))
 }
 
-func (m *Model) parentDir() {
-	switch m.focus {
-	case focusLocal:
-		parent := filepath.Dir(m.local.path)
-		if parent != m.local.path {
-			m.setLocalPath(parent)
-		}
-	case focusRemote:
-		m.setRemotePath(m.remoteFS.Parent(m.remote.path))
+// parentDir walks the focused pane up one level, doing nothing at the root.
+func (m *Model) parentDir() tea.Cmd {
+	pane, ok := m.focusedPaneID()
+	if !ok {
+		return nil
 	}
+	target := m.filePaneByID(pane)
+	parent := m.fsByID(pane).Parent(target.path)
+	if parent == target.path {
+		return nil
+	}
+	return m.navigateTo(pane, parent)
 }
 
 func (m *Model) toggleSelection() {
@@ -457,13 +583,16 @@ func (m *Model) selectAll() {
 	}
 }
 
-func (m *Model) toggleHidden() {
-	if pane := m.focusedFilePane(); pane != nil {
-		pane.showHidden = !pane.showHidden
-		m.refreshLocal()
-		m.refreshRemote()
-		m.setStatus("hidden files toggled")
+func (m *Model) toggleHidden() tea.Cmd {
+	pane, ok := m.focusedPaneID()
+	if !ok {
+		return nil
 	}
+	target := m.filePaneByID(pane)
+	target.showHidden = !target.showHidden
+	m.setStatus("hidden files toggled")
+	// Only the focused pane's setting changed, so only it needs re-reading.
+	return m.requestListing(pane, target.path, listingRefresh)
 }
 
 func (m *Model) queueUpload() {
@@ -493,14 +622,15 @@ func (m *Model) queueFocusedTransfer() {
 func (m *Model) queueTransfer(direction domain.TransferDirection) {
 	var entries []domain.Entry
 	var srcBase, dstBase string
+	var srcFS, dstFS vfs.FS
 	if direction == domain.Download {
 		entries = m.remote.actionEntries()
-		srcBase = m.remote.path
-		dstBase = m.local.path
+		srcBase, srcFS = m.remote.path, m.remoteFS
+		dstBase, dstFS = m.local.path, m.localFS
 	} else {
 		entries = m.local.actionEntries()
-		srcBase = m.local.path
-		dstBase = m.remote.path
+		srcBase, srcFS = m.local.path, m.localFS
+		dstBase, dstFS = m.remote.path, m.remoteFS
 	}
 	if len(entries) == 0 {
 		return
@@ -513,8 +643,8 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 		m.transfers = append(m.transfers, domain.Transfer{
 			ID:          m.nextTransferID,
 			Direction:   direction,
-			Source:      joinDisplayPath(srcBase, entry.Name),
-			Destination: joinDisplayPath(dstBase, entry.Name),
+			Source:      srcFS.Child(srcBase, entry.Name),
+			Destination: dstFS.Child(dstBase, entry.Name),
 			BytesTotal:  max(total, int64(64_000)),
 			Status:      domain.Queued,
 			Message:     "queued",
@@ -737,38 +867,6 @@ func (p filePane) actionEntries() []domain.Entry {
 	return entries
 }
 
-func listLocal(dirPath string, showHidden bool) ([]domain.Entry, error) {
-	items, err := os.ReadDir(dirPath)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]domain.Entry, 0, len(items))
-	for _, item := range items {
-		if !showHidden && strings.HasPrefix(item.Name(), ".") {
-			continue
-		}
-		info, err := item.Info()
-		if err != nil {
-			continue
-		}
-		kind := domain.EntryFile
-		mode := info.Mode().String()
-		if item.IsDir() {
-			kind = domain.EntryDir
-		} else if info.Mode()&os.ModeSymlink != 0 {
-			kind = domain.EntrySymlink
-		}
-		entries = append(entries, domain.Entry{Name: item.Name(), Kind: kind, Size: info.Size(), Mode: mode, Modified: info.ModTime(), Hidden: strings.HasPrefix(item.Name(), ".")})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].Kind != entries[j].Kind {
-			return entries[i].Kind == domain.EntryDir
-		}
-		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
-	})
-	return entries, nil
-}
-
 // waitForTransferEvent blocks a command goroutine on the engine's event
 // channel and delivers the next event as a message. Update re-issues it after
 // each event, which is the standard Bubble Tea way to pump an external stream.
@@ -787,13 +885,6 @@ func closeEngine(engine transfer.Engine) tea.Cmd {
 		_ = engine.Close()
 		return nil
 	}
-}
-
-func joinDisplayPath(base, name string) string {
-	if strings.HasPrefix(base, "/") {
-		return strings.TrimRight(base, "/") + "/" + name
-	}
-	return filepath.Join(base, name)
 }
 
 func short(value string, width int) string {

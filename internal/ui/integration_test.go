@@ -4,11 +4,10 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
 	"tideftp/internal/faketransfer"
+	"tideftp/internal/localfs"
 )
 
 // TestRealEngineDrivesTheQueue wires the real fake engine to the real model,
@@ -20,16 +19,17 @@ func TestRealEngineDrivesTheQueue(t *testing.T) {
 	engine := faketransfer.NewWithInterval(time.Millisecond)
 	defer engine.Close()
 
-	model := NewModel(fakefs.NewRemote(), engine)
-	model.width, model.height = 120, 40
+	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
 	// selectAll acts on the focused pane, so focus must be on the remote one.
 	model.focus = focusRemote
 
 	download := func(remotePath string) {
-		model.setRemotePath(remotePath)
+		model = settle(t, model, model.navigateTo(paneRemote, remotePath))
+		if model.remote.path != remotePath {
+			t.Fatalf("navigating to %q left the pane at %q", remotePath, model.remote.path)
+		}
 		model.selectAll()
-		updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-		model = updated.(Model)
+		model = press(t, model, runes("d"))
 	}
 
 	// Five files across two directories, so IDs run 1..5 and the engine's
@@ -97,16 +97,14 @@ func TestRealEngineCancelStopsTheQueue(t *testing.T) {
 	engine := faketransfer.NewWithInterval(20 * time.Millisecond)
 	defer engine.Close()
 
-	model := NewModel(fakefs.NewRemote(), engine)
-	model.width, model.height = 120, 40
+	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
 	model.transfers = []domain.Transfer{
 		{ID: 1, BytesTotal: 1 << 30, Status: domain.Queued},
 		{ID: 2, BytesTotal: 1 << 30, Status: domain.Queued},
 	}
 	model.startQueuedTransfers()
 
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	model = updated.(Model)
+	model = press(t, model, runes("x"))
 
 	deadline := time.After(20 * time.Second)
 	for !allFinished(model.transfers) {

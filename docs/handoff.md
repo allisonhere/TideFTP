@@ -14,8 +14,9 @@ Implemented:
 - TideUI-based visual system with `tide-night` as the default theme
 - FileZilla-style layout: local pane, remote pane, wide bottom transfer pane
 - Whatthedock-style soft overlays with drop shadows
-- Local filesystem browsing using real local files
-- Fake remote filesystem data under `internal/fakefs`
+- Asynchronous filesystem interface (`internal/vfs`) shared by both file
+  panes, over real disk (`internal/localfs`) and a fake remote
+  (`internal/fakefs`)
 - Asynchronous transfer engine interface (`internal/transfer`) with a
   simulated implementation under `internal/faketransfer`
 - Bottom tabs: Queue, Active, Failed, History, Log
@@ -145,13 +146,17 @@ First build slice:
 ## Code Map
 
 - `cmd/tideftp/main.go`: Bubble Tea program entrypoint; constructs the fake
-  remote adapter and wires it into the UI as a `remotefs.FS`
+  remote adapter and the fake transfer engine, and wires them into the UI as
+  a `vfs.FS` pair plus a `transfer.Engine`
 - `internal/domain/domain.go`: shared entry and transfer types
-- `internal/remotefs/remotefs.go`: protocol-agnostic remote filesystem
-  interface (`List`/`Child`/`Parent`) that FTP/FTPS/SFTP adapters will
-  implement alongside the fake one
+- `internal/vfs/vfs.go`: filesystem interface both panes browse through
+  (`List`/`Child`/`Parent`). `List` blocks and takes a `context.Context`;
+  `Child`/`Parent` are pure path math. FTP/FTPS/SFTP adapters implement
+  this alongside `localfs` and `fakefs`
+- `internal/localfs/localfs.go`: the machine's own disk, implements `vfs.FS`
 - `internal/fakefs/fakefs.go`: fake remote directory tree, implements
-  `remotefs.FS`
+  `vfs.FS`; `NewRemoteWithLatency` adds fake round-trip time so the panes'
+  loading state is visible when running by hand
 - `internal/transfer/transfer.go`: protocol-agnostic transfer engine
   interface (`Start`/`Cancel`/`Events`/`Close`) that FTP/FTPS/SFTP engines
   will implement. Asynchronous by contract: `Start` returns immediately and
@@ -159,7 +164,9 @@ First build slice:
 - `internal/faketransfer/faketransfer.go`: simulated engine, implements
   `transfer.Engine`; emits timed progress events and fails every fifth
   transfer so the Failed tab stays reachable
-- `internal/ui/model.go`: Bubble Tea state, update loop, fake transfer simulation, key/mouse routing; depends only on `remotefs.FS`, not on `fakefs` directly
+- `internal/ui/model.go`: Bubble Tea state, update loop, listing requests and
+  replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
+  `transfer.Engine`, never on a concrete adapter
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
@@ -185,11 +192,34 @@ The fake adapter is intentionally realistic enough to exercise the UI:
 - redacted log entries
 
 Do not wire real protocol complexity into the UI package directly. Real
-FTP/FTPS/SFTP adapters should implement `remotefs.FS` (browsing) and
+FTP/FTPS/SFTP adapters should implement `vfs.FS` (browsing) and
 `transfer.Engine` (moving bytes), and be constructed in `cmd/tideftp/main.go`
-(or a future profile/connect flow), the same way `fakefs.NewRemote()` and
-`faketransfer.New()` are today — the UI package itself should never import a
-concrete adapter package.
+(or a future profile/connect flow), the same way `localfs.New()`,
+`fakefs.NewRemote()` and `faketransfer.New()` are today — the UI package
+itself should never import a concrete adapter package.
+
+Both seams are now asynchronous, but in different shapes, because the two jobs
+differ. A transfer is long-lived and reports progress, so `transfer.Engine`
+streams events over a channel. A listing is one-shot request/response, so
+`vfs.FS.List` is an ordinary blocking call taking a `context.Context`, and
+`internal/ui` wraps it in a `tea.Cmd`. Keeping `vfs` free of any UI framework
+leaves the adapters usable from the planned non-interactive CLI mode.
+
+Asynchronous listing brings three problems the old synchronous code never had,
+all handled in `applyListing`:
+
+- **Stale replies.** Two quick Enter presses put two listings in flight, and
+  the slower one must not overwrite the newer directory. Every request carries
+  a token; replies whose token is not the pane's latest are dropped.
+- **Failure.** The pane's path is not committed until the listing succeeds, so
+  a directory that cannot be read leaves the pane exactly where it was.
+- **Latency.** A pane keeps showing its current contents while a listing is in
+  flight, with the directory being opened shown in its header and a marker on
+  the title. Nothing blocks.
+
+The local pane goes through the same path as the remote one even though local
+reads are usually instant, because "usually" is doing real work there: a
+stalled network mount blocks `os.ReadDir` just as hard as a dead FTP server.
 
 The queue lives in the UI, not the engine. The UI decides what runs and when
 (ordering, the `maxParallel` cap, and eventually conflict policy) and hands the
@@ -198,23 +228,16 @@ the work they are given but never queue. The contract that keeps this honest:
 every accepted Request must produce exactly one terminal event (Completed,
 Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
-`remotefs.FS` has not had the same treatment yet and still returns
-`[]domain.Entry` with no error, synchronously. That is fine for `fakefs` and
-wrong for a real network filesystem: a blocking `List` freezes the TUI and
-there is nowhere to report a timeout or a permission error. Give it the same
-command/message shape as `transfer.Engine` before writing a real adapter.
-
 ## Suggested Next Steps
 
 1. ~~Initialize or fix Git repository state.~~ Done — real repo on `main`,
    pushed to `git@github.com:allisonhere/TideFTP.git`, `-buildvcs=false` no
    longer needed.
 
-2. ~~Extract a remote filesystem interface.~~ Done — `internal/remotefs.FS`
-   defines `List`/`Child`/`Parent`; `fakefs.Remote` implements it;
-   `internal/ui` depends only on the interface and takes a `remotefs.FS` via
-   `NewModel(remote)`; `main.go` constructs the concrete `fakefs.NewRemote()`
-   adapter.
+2. ~~Extract a filesystem interface.~~ Done — `internal/vfs.FS` defines
+   `List`/`Child`/`Parent`, asynchronous and error-returning;
+   `localfs.FS` and `fakefs.Remote` implement it; `internal/ui` takes both
+   via `NewModel(local, remote, engine)` and never imports an adapter.
 
 3. Add real layout/config persistence.
    - XDG config path: `~/.config/tideftp/config.toml`
@@ -242,19 +265,14 @@ command/message shape as `transfer.Engine` before writing a real adapter.
      Failed tab
    - Recursive folder preflight summary
 
-6. Make `remotefs.FS` asynchronous and error-returning, mirroring
-   `transfer.Engine`. Every call site is in `internal/ui/model.go`
-   (`refreshRemote`, `setRemotePath`, `parentDir`, `activateCursor`).
-   Do this before step 7, not after.
-
-7. Add protocol adapters.
+6. Add protocol adapters.
    - Start with SFTP (`pkg/sftp`): it is testable in-process, unlike FTP,
      which needs a real daemon.
-   - Implement both `remotefs.FS` and `transfer.Engine`.
+   - Implement both `vfs.FS` and `transfer.Engine`.
    - The fake adapters and their tests are the contract that proves the UI
      did not regress while real adapters land.
 
-8. Expand TUI tests.
+7. Expand TUI tests.
    - Snapshot/golden views for main screen and overlays
    - Key routing tests for focus, selection, tabs, and modals
    - Resize tests for small terminals
@@ -264,8 +282,10 @@ command/message shape as `transfer.Engine` before writing a real adapter.
 
 - No real FTP/FTPS/SFTP networking yet; `faketransfer` moves no bytes, it
   only emits a plausible event stream on a timer
-- `remotefs.FS` is still synchronous and cannot report errors (see Design
-  Notes) — the one seam that is not ready for a real adapter
+- Both adapter seams (`vfs.FS`, `transfer.Engine`) are ready for real
+  implementations; nothing else blocks an SFTP adapter
+- A listing that hangs is bounded only by `listTimeout` (20s) and cannot be
+  cancelled from the UI — there is no key to abandon a slow directory
 - No config persistence yet
 - No saved profiles yet
 - No real credential storage yet
