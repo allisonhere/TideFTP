@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/allisonhere/tideui"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"tideftp/internal/domain"
@@ -159,6 +160,41 @@ func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
 	model = updated.(Model)
 	if model.bottomOffset != atBottom-1 {
 		t.Fatalf("scrolling up from the bottom = %d, want %d (not snapped back by auto-follow)", model.bottomOffset, atBottom-1)
+	}
+}
+
+func TestIconsToggleAndAsciiFallback(t *testing.T) {
+	model := NewModel(fakefs.NewRemote())
+	if !model.showIcons {
+		t.Fatalf("icons should default on")
+	}
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	model = updated.(Model)
+	if model.showIcons {
+		t.Fatalf("pressing i should turn icons off")
+	}
+	renderer := tideui.NewRenderer(model.theme, tideui.StyleOptions{})
+	if got := model.entryIcon(renderer, domain.Entry{Kind: domain.EntryDir}); got != ">" {
+		t.Fatalf("dir icon with icons off = %q, want ascii fallback %q", got, ">")
+	}
+
+	updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	model = updated.(Model)
+	if !model.showIcons {
+		t.Fatalf("pressing i again should turn icons back on")
+	}
+	renderer = tideui.NewRenderer(model.theme, tideui.StyleOptions{})
+	if got := model.entryIcon(renderer, domain.Entry{Kind: domain.EntryDir}); got != "▸" {
+		t.Fatalf("dir icon with icons on = %q, want unicode glyph", got)
+	}
+
+	// An ASCII-presentation theme (vt52) should fall back to ASCII glyphs
+	// even when the icon toggle itself is on.
+	model.theme = tideui.VT52
+	renderer = tideui.NewRenderer(model.theme, tideui.StyleOptions{})
+	if got := model.entryIcon(renderer, domain.Entry{Kind: domain.EntryDir}); got != ">" {
+		t.Fatalf("dir icon under an ASCII theme = %q, want ascii fallback %q", got, ">")
 	}
 }
 

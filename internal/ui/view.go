@@ -84,7 +84,7 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 	pane.offset = min(pane.offset, max(0, len(pane.entries)-visible))
 	for index := pane.offset; index < len(pane.entries) && len(rows) < height; index++ {
 		entry := pane.entries[index]
-		rows = append(rows, renderEntryRow(renderer, entry, index == pane.cursor, pane.selected[entry.Name], width))
+		rows = append(rows, m.renderEntryRow(renderer, entry, index == pane.cursor, pane.selected[entry.Name], width))
 	}
 	if len(pane.entries) == 0 {
 		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render("empty"))
@@ -134,7 +134,7 @@ func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int, ke
 		if len(rows) >= limit {
 			break
 		}
-		rows = append(rows, renderTransferRow(renderer, transfer, width))
+		rows = append(rows, m.renderTransferRow(renderer, transfer, width))
 	}
 	return rows
 }
@@ -160,11 +160,33 @@ func segment(bg, color lipgloss.Color, text string) string {
 	return lipgloss.NewStyle().Background(bg).Foreground(color).Render(text)
 }
 
-func renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked bool, width int) string {
+// glyph returns unicodeGlyph unless icons are turned off or the active theme
+// is ASCII-only (e.g. vt52), in which case it falls back to asciiGlyph.
+func (m Model) glyph(renderer tideui.Renderer, unicodeGlyph, asciiGlyph string) string {
+	if !m.showIcons || renderer.Styles.PlainUI {
+		return asciiGlyph
+	}
+	return unicodeGlyph
+}
+
+func (m Model) entryIcon(renderer tideui.Renderer, entry domain.Entry) string {
+	switch entry.Kind {
+	case domain.EntryDir:
+		return m.glyph(renderer, "▸", ">")
+	case domain.EntrySymlink:
+		return m.glyph(renderer, "↪", "~")
+	default:
+		return " "
+	}
+}
+
+func (m Model) renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked bool, width int) string {
 	base := renderer.Styles.Item
 	switch {
 	case cursor:
 		base = renderer.Styles.ItemSelected
+	case marked:
+		base = lipgloss.NewStyle().Background(renderer.Styles.Theme.Selected).Foreground(renderer.Styles.Theme.Fg)
 	case entry.Hidden:
 		base = renderer.Styles.ItemMuted
 	}
@@ -182,7 +204,7 @@ func renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked
 
 	mark := "  "
 	if marked {
-		mark = "* "
+		mark = m.glyph(renderer, "✔", "*") + " "
 	}
 	size := formatSize(entry.Size)
 	if entry.IsDir() {
@@ -191,13 +213,13 @@ func renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked
 	meta := fmt.Sprintf("%-10s %9s  %-12s ", short(entry.Mode, 10), size, entry.Modified.Format("Jan 02 15:04"))
 
 	content := segment(bg, fg, mark) +
-		segment(bg, nameColor, entryIcon(entry)+" ") +
+		segment(bg, nameColor, m.entryIcon(renderer, entry)+" ") +
 		segment(bg, fg, meta) +
 		segment(bg, nameColor, entry.Name)
 	return clampView(content, width, 1, bg)
 }
 
-func renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width int) string {
+func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width int) string {
 	base := renderer.Styles.Item
 	if transfer.Status == domain.Done {
 		base = renderer.Styles.ItemMuted
@@ -205,20 +227,23 @@ func renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width
 	bg, fg := rowSurface(renderer, base)
 
 	statusColor := fg
+	statusIcon := " "
 	switch transfer.Status {
 	case domain.Active:
 		statusColor = renderer.Styles.Theme.BorderFocus
 	case domain.Done:
 		statusColor = renderer.Styles.Theme.Unread
+		statusIcon = m.glyph(renderer, "✓", "+")
 	case domain.Failed:
 		statusColor = renderer.Styles.Theme.Error
+		statusIcon = m.glyph(renderer, "✗", "x")
 	case domain.Queued:
 		statusColor = renderer.Styles.Theme.Dimmed
 	}
 
-	dir := "↑"
+	dir := m.glyph(renderer, "↑", "^")
 	if transfer.Direction == domain.Download {
-		dir = "↓"
+		dir = m.glyph(renderer, "↓", "v")
 	}
 	const barWidth = 18
 	progress := minFloat(maxFloat(transfer.Progress(), 0), 1)
@@ -230,7 +255,7 @@ func renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width
 	name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-48))
 
 	left := segment(bg, statusColor, dir+" ") + bar + segment(bg, fg, "  "+name)
-	meta := fmt.Sprintf("%3.0f%% %s", transfer.Progress()*100, transferStatus(transfer.Status))
+	meta := fmt.Sprintf("%s %3.0f%% %s", statusIcon, transfer.Progress()*100, transferStatus(transfer.Status))
 	right := segment(bg, statusColor, meta)
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
 	content := left + segment(bg, fg, strings.Repeat(" ", gap)) + right
@@ -278,6 +303,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			renderer.Styles.DetailMeta.Render("View"),
 			keyRow("c", "connect"),
 			keyRow("t", "theme picker"),
+			keyRow("i", "toggle icons"),
 			keyRow("shift+left/right", "resize file panes"),
 			keyRow("shift+up/down", "resize transfer pane"),
 			keyRow("ctrl+0", "reset layout"),
@@ -376,17 +402,6 @@ func (m Model) bottomRowCount() int {
 func (m Model) bottomTabLabel() string {
 	labels := []string{"queue", "active", "failed", "history", "log"}
 	return labels[int(m.bottomTab)]
-}
-
-func entryIcon(entry domain.Entry) string {
-	switch entry.Kind {
-	case domain.EntryDir:
-		return "▸"
-	case domain.EntrySymlink:
-		return "↪"
-	default:
-		return " "
-	}
 }
 
 func formatSize(size int64) string {

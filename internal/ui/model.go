@@ -73,6 +73,7 @@ type Model struct {
 	themePicker tideui.ThemePicker
 	density     tideui.Density
 	shadow      bool
+	showIcons   bool
 
 	fileSplit   tideui.PaneRatio
 	bottomSplit tideui.PaneRatio
@@ -107,6 +108,7 @@ func NewModel(remote remotefs.FS) Model {
 		theme:          tideNight,
 		density:        tideui.Compact,
 		shadow:         true,
+		showIcons:      true,
 		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.5, Min: 0.25, Max: 0.75, Step: 0.03}),
 		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03}),
 		logs:           []string{"redacted logs enabled", "fake protocol adapter online", "profiles: demo ftp / demo ftps / demo sftp"},
@@ -237,6 +239,13 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.selectAll()
 	case ".":
 		m.toggleHidden()
+	case "i":
+		m.showIcons = !m.showIcons
+		if m.showIcons {
+			m.setStatus("icons on")
+		} else {
+			m.setStatus("icons off")
+		}
 	case "u":
 		m.queueUpload()
 	case "d":

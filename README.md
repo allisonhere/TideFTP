@@ -35,6 +35,7 @@ go run ./cmd/tideftp
 - `d`: download selected/remote cursor item
 - `c`: connect modal
 - `t`: theme picker
+- `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)
 - `.`: toggle hidden files
 - `Shift+Left` / `Shift+Right`: resize local/remote panes
 - `Shift+Up` / `Shift+Down`: resize transfer pane
