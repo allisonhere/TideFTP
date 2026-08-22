@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"tideftp/internal/domain"
+	"tideftp/internal/remotefs"
 )
+
+var _ remotefs.FS = (*Remote)(nil)
 
 type Remote struct {
 	entries map[string][]domain.Entry

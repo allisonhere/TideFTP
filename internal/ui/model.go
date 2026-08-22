@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/domain"
-	"tideftp/internal/fakefs"
+	"tideftp/internal/remotefs"
 )
 
 type focusPane int
@@ -59,9 +59,9 @@ type Model struct {
 	focus         focusPane
 	overlay       overlayMode
 
-	local  filePane
-	remote filePane
-	fake   *fakefs.Remote
+	local    filePane
+	remote   filePane
+	remoteFS remotefs.FS
 
 	transfers      []domain.Transfer
 	nextTransferID int
@@ -82,12 +82,11 @@ type Model struct {
 
 type transferTick struct{}
 
-func NewModel() Model {
+func NewModel(remote remotefs.FS) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
 	}
-	remote := fakefs.NewRemote()
 	model := Model{
 		focus: focusLocal,
 		local: filePane{
@@ -102,7 +101,7 @@ func NewModel() Model {
 			selected:   map[string]bool{},
 			showHidden: false,
 		},
-		fake:           remote,
+		remoteFS:       remote,
 		nextTransferID: 1,
 		theme:          tideNight,
 		density:        tideui.Compact,
@@ -288,7 +287,7 @@ func (m *Model) refreshLocal() {
 }
 
 func (m *Model) refreshRemote() {
-	m.remote.entries = m.fake.List(m.remote.path, m.remote.showHidden)
+	m.remote.entries = m.remoteFS.List(m.remote.path, m.remote.showHidden)
 	m.remote.cursor = min(m.remote.cursor, max(0, len(m.remote.entries)-1))
 }
 
@@ -322,7 +321,7 @@ func (m *Model) activateCursor() {
 		if !ok || !entry.IsDir() {
 			return
 		}
-		m.remote.path = m.fake.Child(m.remote.path, entry.Name)
+		m.remote.path = m.remoteFS.Child(m.remote.path, entry.Name)
 		m.remote.cursor = 0
 		m.refreshRemote()
 	}
@@ -338,7 +337,7 @@ func (m *Model) parentDir() {
 			m.refreshLocal()
 		}
 	case focusRemote:
-		m.remote.path = m.fake.Parent(m.remote.path)
+		m.remote.path = m.remoteFS.Parent(m.remote.path)
 		m.remote.cursor = 0
 		m.refreshRemote()
 	}

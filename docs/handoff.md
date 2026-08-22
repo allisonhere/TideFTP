@@ -130,10 +130,15 @@ First build slice:
 
 ## Code Map
 
-- `cmd/tideftp/main.go`: Bubble Tea program entrypoint with alt screen and mouse enabled
+- `cmd/tideftp/main.go`: Bubble Tea program entrypoint; constructs the fake
+  remote adapter and wires it into the UI as a `remotefs.FS`
 - `internal/domain/domain.go`: shared entry and transfer types
-- `internal/fakefs/fakefs.go`: fake remote directory tree
-- `internal/ui/model.go`: Bubble Tea state, update loop, fake transfer simulation, key/mouse routing
+- `internal/remotefs/remotefs.go`: protocol-agnostic remote filesystem
+  interface (`List`/`Child`/`Parent`) that FTP/FTPS/SFTP adapters will
+  implement alongside the fake one
+- `internal/fakefs/fakefs.go`: fake remote directory tree, implements
+  `remotefs.FS`
+- `internal/ui/model.go`: Bubble Tea state, update loop, fake transfer simulation, key/mouse routing; depends only on `remotefs.FS`, not on `fakefs` directly
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests
@@ -155,9 +160,11 @@ The fake adapter is intentionally realistic enough to exercise the UI:
 - simulated queued and active transfers
 - redacted log entries
 
-Do not wire real protocol complexity into the UI package directly. The next
-major step should introduce a protocol-facing interface and move fake remote
-behavior behind that interface.
+Do not wire real protocol complexity into the UI package directly. Real
+FTP/FTPS/SFTP adapters should implement `remotefs.FS` and be constructed in
+`cmd/tideftp/main.go` (or a future profile/connect flow), the same way
+`fakefs.NewRemote()` is today — the UI package itself should never import a
+concrete adapter package.
 
 ## Suggested Next Steps
 
@@ -165,10 +172,11 @@ behavior behind that interface.
    pushed to `git@github.com:allisonhere/TideFTP.git`, `-buildvcs=false` no
    longer needed.
 
-2. Extract a remote filesystem interface.
-   - Keep UI code protocol-agnostic.
-   - Move fake remote into an adapter that satisfies the same interface planned
-     for FTP/FTPS/SFTP.
+2. ~~Extract a remote filesystem interface.~~ Done — `internal/remotefs.FS`
+   defines `List`/`Child`/`Parent`; `fakefs.Remote` implements it;
+   `internal/ui` depends only on the interface and takes a `remotefs.FS` via
+   `NewModel(remote)`; `main.go` constructs the concrete `fakefs.NewRemote()`
+   adapter.
 
 3. Add real layout/config persistence.
    - XDG config path: `~/.config/tideftp/config.toml`

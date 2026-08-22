@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"tideftp/internal/fakefs"
 )
 
 func TestShiftArrowsResizeLayout(t *testing.T) {
-	model := NewModel()
+	model := NewModel(fakefs.NewRemote())
 	startFile := model.fileSplit.Value()
 	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("shift+right")})
 	model = updated.(Model)
@@ -31,7 +33,7 @@ func TestThemePickerIncludesTideNight(t *testing.T) {
 }
 
 func TestViewContainsThreeOperationalRegions(t *testing.T) {
-	model := NewModel()
+	model := NewModel(fakefs.NewRemote())
 	model.width = 120
 	model.height = 36
 	view := model.View()
