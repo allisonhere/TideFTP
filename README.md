@@ -37,6 +37,7 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `Esc`: clear selection or close overlay
 - `u`: upload selected/local cursor item
 - `d`: download selected/remote cursor item
+- `x`: cancel active transfers
 - `o`: conflict prompt (demo)
 - `c`: connect modal
 - `t`: theme picker

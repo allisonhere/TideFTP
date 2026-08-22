@@ -305,6 +305,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			keyRow("u", "upload"),
 			keyRow("d", "download"),
 			keyRow("r", "refresh"),
+			keyRow("x", "cancel active transfers"),
 			keyRow("o", "conflict prompt (demo)"),
 			keyRow(".", "toggle hidden files"),
 			"",

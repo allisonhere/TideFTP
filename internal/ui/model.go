@@ -14,6 +14,7 @@ import (
 
 	"tideftp/internal/domain"
 	"tideftp/internal/remotefs"
+	"tideftp/internal/transfer"
 )
 
 type focusPane int
@@ -62,6 +63,7 @@ type Model struct {
 	local    filePane
 	remote   filePane
 	remoteFS remotefs.FS
+	engine   transfer.Engine
 
 	transfers      []domain.Transfer
 	nextTransferID int
@@ -83,7 +85,9 @@ type Model struct {
 	statusErr bool
 }
 
-type transferTick struct{}
+// transferStreamClosed arrives when the engine has shut down and will send no
+// more events, so the UI stops waiting on the channel.
+type transferStreamClosed struct{}
 
 // defaultParallelTransfers is how many transfers run at once until config
 // persistence lands and can override Model.maxParallel.
@@ -94,10 +98,7 @@ const defaultParallelTransfers = 2
 // header (1). Mouse clicks above it are not on an entry.
 const firstFileRow = 4
 
-// simulatedFailureEvery is how often the fake adapter fails a transfer.
-const simulatedFailureEvery = 5
-
-func NewModel(remote remotefs.FS) Model {
+func NewModel(remote remotefs.FS, engine transfer.Engine) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
@@ -117,6 +118,7 @@ func NewModel(remote remotefs.FS) Model {
 			showHidden: false,
 		},
 		remoteFS:       remote,
+		engine:         engine,
 		nextTransferID: 1,
 		maxParallel:    defaultParallelTransfers,
 		theme:          tideNight,
@@ -139,7 +141,7 @@ func NewModel(remote remotefs.FS) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tickTransfers(), tea.SetWindowTitle("TideFTP"))
+	return tea.Batch(waitForTransferEvent(m.engine.Events()), tea.SetWindowTitle("TideFTP"))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -147,11 +149,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
-	case transferTick:
+	case transfer.Event:
+		// Applying an event can finish a transfer, which frees a slot for the
+		// next queued one, which is why startQueuedTransfers runs here too.
 		wasAtBottom := m.isAtBottomPane()
-		m.advanceTransfers()
+		m.applyTransferEvent(msg)
+		m.startQueuedTransfers()
 		m.settleBottomOffset(wasAtBottom)
-		return m, tickTransfers()
+		return m, waitForTransferEvent(m.engine.Events())
+	case transferStreamClosed:
+		return m, nil
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
@@ -224,7 +231,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit
+		return m, tea.Sequence(closeEngine(m.engine), tea.Quit)
 	case "tab":
 		m.focus = (m.focus + 1) % 3
 	case "shift+tab":
@@ -266,6 +273,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.queueDownload()
 	case "o":
 		m.overlay = overlayConflict
+	case "x":
+		m.cancelActiveTransfers()
 	case "r":
 		m.refresh()
 	case "c":
@@ -513,60 +522,102 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 		m.nextTransferID++
 	}
 	m.setStatus(fmt.Sprintf("queued %d transfer(s)", len(entries)))
+	m.startQueuedTransfers()
 }
 
-func (m *Model) advanceTransfers() {
-	active := 0
-	for i := range m.transfers {
-		if m.transfers[i].Status == domain.Active {
-			active++
-		}
-	}
+// startQueuedTransfers promotes queued transfers to active, up to maxParallel,
+// handing each one to the engine. Nothing else moves a transfer forward: all
+// progress after this point arrives as transfer.Event.
+func (m *Model) startQueuedTransfers() {
+	active := countStatus(m.transfers, domain.Active)
 	for i := range m.transfers {
 		if active >= m.maxParallel {
-			break
+			return
 		}
-		if m.transfers[i].Status == domain.Queued {
-			m.transfers[i].Status = domain.Active
-			m.transfers[i].StartedAt = time.Now()
-			m.transfers[i].Message = "transferring"
-			active++
-		}
-	}
-	for i := range m.transfers {
-		if m.transfers[i].Status != domain.Active {
+		if m.transfers[i].Status != domain.Queued {
 			continue
 		}
-		step := max(int64(48_000), m.transfers[i].BytesTotal/12)
-		m.transfers[i].BytesDone += step
-		if failsAt(m.transfers[i]) {
-			m.transfers[i].Status = domain.Failed
-			m.transfers[i].FinishedAt = time.Now()
-			m.transfers[i].Message = "connection reset by peer"
-			m.logs = append(m.logs, "error: transfer "+fmt.Sprint(m.transfers[i].ID)+" failed (simulated)")
-			continue
-		}
-		if m.transfers[i].BytesDone >= m.transfers[i].BytesTotal {
-			m.transfers[i].BytesDone = m.transfers[i].BytesTotal
-			m.transfers[i].Status = domain.Done
-			m.transfers[i].FinishedAt = time.Now()
-			m.transfers[i].Message = "complete"
-		}
+		m.transfers[i].Status = domain.Active
+		m.transfers[i].StartedAt = time.Now()
+		m.transfers[i].Message = "transferring"
+		m.engine.Start(transfer.Request{
+			ID:          m.transfers[i].ID,
+			Direction:   m.transfers[i].Direction,
+			Source:      m.transfers[i].Source,
+			Destination: m.transfers[i].Destination,
+			Size:        m.transfers[i].BytesTotal,
+		})
+		active++
 	}
 }
 
-// failsAt decides when the fake adapter drops a transfer, so the Failed tab
-// and the error styling are reachable without real networking. The rule is
-// deterministic on purpose: every simulatedFailureEvery-th transfer fails once
-// it is past the halfway mark.
-func failsAt(transfer domain.Transfer) bool {
-	if transfer.ID <= 0 || transfer.BytesTotal <= 0 {
-		return false
+// applyTransferEvent folds one engine event into the queue row it belongs to.
+// Events for unknown IDs are ignored: the engine may still be draining a
+// transfer the UI has already forgotten.
+func (m *Model) applyTransferEvent(event transfer.Event) {
+	index := m.transferIndex(event.ID)
+	if index < 0 {
+		return
 	}
-	if transfer.ID%simulatedFailureEvery != 0 {
-		return false
+	row := &m.transfers[index]
+	row.BytesDone = min(event.BytesDone, row.BytesTotal)
+	switch event.Kind {
+	case transfer.Progress:
+		row.Status = domain.Active
+		row.Message = "transferring"
+	case transfer.Completed:
+		row.BytesDone = row.BytesTotal
+		row.Status = domain.Done
+		row.FinishedAt = time.Now()
+		row.Message = "complete"
+	case transfer.Failed:
+		row.Status = domain.Failed
+		row.FinishedAt = time.Now()
+		row.Message = failureMessage(event.Err)
+		m.setError(fmt.Sprintf("transfer %d failed: %s", row.ID, row.Message))
+	case transfer.Canceled:
+		// domain has no Canceled status yet, so a canceled transfer lands in
+		// the Failed tab, which is also where the retry flow will live.
+		row.Status = domain.Failed
+		row.FinishedAt = time.Now()
+		row.Message = "canceled"
+		m.logs = append(m.logs, fmt.Sprintf("transfer %d canceled", row.ID))
 	}
-	return transfer.BytesDone*2 >= transfer.BytesTotal
+}
+
+// cancelActiveTransfers stops everything in flight. It is all-or-nothing
+// because the transfers pane scrolls but has no row cursor to aim at yet.
+func (m *Model) cancelActiveTransfers() {
+	ids := make([]int, 0, len(m.transfers))
+	for _, row := range m.transfers {
+		if row.Status == domain.Active {
+			ids = append(ids, row.ID)
+		}
+	}
+	if len(ids) == 0 {
+		m.setError("no active transfers to cancel")
+		return
+	}
+	for _, id := range ids {
+		m.engine.Cancel(id)
+	}
+	m.setStatus(fmt.Sprintf("cancelling %d transfer(s)", len(ids)))
+}
+
+func (m Model) transferIndex(id int) int {
+	for i := range m.transfers {
+		if m.transfers[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func failureMessage(err error) string {
+	if err == nil {
+		return "failed"
+	}
+	return err.Error()
 }
 
 func (m *Model) focusedFilePane() *filePane {
@@ -718,8 +769,24 @@ func listLocal(dirPath string, showHidden bool) ([]domain.Entry, error) {
 	return entries, nil
 }
 
-func tickTransfers() tea.Cmd {
-	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return transferTick{} })
+// waitForTransferEvent blocks a command goroutine on the engine's event
+// channel and delivers the next event as a message. Update re-issues it after
+// each event, which is the standard Bubble Tea way to pump an external stream.
+func waitForTransferEvent(events <-chan transfer.Event) tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-events
+		if !ok {
+			return transferStreamClosed{}
+		}
+		return event
+	}
+}
+
+func closeEngine(engine transfer.Engine) tea.Cmd {
+	return func() tea.Msg {
+		_ = engine.Close()
+		return nil
+	}
 }
 
 func joinDisplayPath(base, name string) string {

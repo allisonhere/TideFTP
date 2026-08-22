@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,10 +10,39 @@ import (
 
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
+	"tideftp/internal/transfer"
 )
 
+// scriptedEngine is a transfer.Engine the tests drive by hand: nothing runs on
+// a timer and no goroutine is involved, so UI tests assert on engine traffic
+// without depending on scheduling. faketransfer has its own tests for the
+// simulated timing behaviour.
+type scriptedEngine struct {
+	events   chan transfer.Event
+	started  []transfer.Request
+	canceled []int
+	closed   bool
+}
+
+func newScriptedEngine() *scriptedEngine {
+	return &scriptedEngine{events: make(chan transfer.Event, 64)}
+}
+
+func (e *scriptedEngine) Start(req transfer.Request)    { e.started = append(e.started, req) }
+func (e *scriptedEngine) Cancel(id int)                 { e.canceled = append(e.canceled, id) }
+func (e *scriptedEngine) Events() <-chan transfer.Event { return e.events }
+func (e *scriptedEngine) Close() error                  { e.closed = true; return nil }
+
+func (e *scriptedEngine) startedIDs() []int {
+	ids := make([]int, 0, len(e.started))
+	for _, req := range e.started {
+		ids = append(ids, req.ID)
+	}
+	return ids
+}
+
 func TestShiftArrowsResizeLayout(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	startFile := model.fileSplit.Value()
 	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyShiftRight})
 	model = updated.(Model)
@@ -35,7 +65,7 @@ func TestThemePickerIncludesTideNight(t *testing.T) {
 }
 
 func TestBottomPaneScrolls(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 40; i++ {
@@ -69,7 +99,7 @@ func TestBottomPaneScrolls(t *testing.T) {
 }
 
 func TestLogTabOpensScrolledToLatest(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 50; i++ {
@@ -85,7 +115,7 @@ func TestLogTabOpensScrolledToLatest(t *testing.T) {
 }
 
 func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.local.entries = []domain.Entry{{Name: "a"}}
 	model.local.cursor = 0
@@ -119,8 +149,8 @@ func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
 	}
 }
 
-func TestBottomPaneStaysPutWhenScrolledUpDuringTick(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+func TestBottomPaneStaysPutWhenScrolledUpDuringActivity(t *testing.T) {
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 30; i++ {
@@ -136,15 +166,15 @@ func TestBottomPaneStaysPutWhenScrolledUpDuringTick(t *testing.T) {
 		t.Fatalf("expected to not be at the bottom after scrolling only one row into a long list")
 	}
 
-	next, _ := model.Update(transferTick{})
+	next, _ := model.Update(transfer.Event{ID: 5, Kind: transfer.Progress, BytesDone: 10})
 	model = next.(Model)
 	if model.bottomOffset != 1 {
-		t.Fatalf("bottomOffset after a tick while scrolled up = %d, want unchanged at 1", model.bottomOffset)
+		t.Fatalf("bottomOffset after engine activity while scrolled up = %d, want unchanged at 1", model.bottomOffset)
 	}
 }
 
 func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 100, 30
 	model.focus = focusQueue
 	for i := 0; i < 30; i++ {
@@ -164,7 +194,7 @@ func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
 }
 
 func TestIconsToggleAndAsciiFallback(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	if !model.showIcons {
 		t.Fatalf("icons should default on")
 	}
@@ -199,7 +229,7 @@ func TestIconsToggleAndAsciiFallback(t *testing.T) {
 }
 
 func TestViewContainsThreeOperationalRegions(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width = 120
 	model.height = 36
 	view := model.View()
@@ -211,7 +241,7 @@ func TestViewContainsThreeOperationalRegions(t *testing.T) {
 }
 
 func TestMouseClickSelectsTheClickedRow(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 120, 36
 	model.local.entries = []domain.Entry{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}
 	model.local.cursor, model.local.offset = 0, 0
@@ -238,7 +268,7 @@ func TestMouseClickSelectsTheClickedRow(t *testing.T) {
 }
 
 func TestMouseClickBelowTopPaneFocusesQueue(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 120, 36
 	// The row right after the top panes belongs to the transfers pane, using
 	// the same height View draws with.
@@ -249,7 +279,7 @@ func TestMouseClickBelowTopPaneFocusesQueue(t *testing.T) {
 }
 
 func TestEnteringDirectoryClearsSelection(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.focus = focusRemote
 	model.remote.path = "/"
 	model.refreshRemote()
@@ -286,7 +316,7 @@ func TestEnteringDirectoryClearsSelection(t *testing.T) {
 }
 
 func TestFilePaneScrollsWithTheVisibleHeight(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+	model := NewModel(fakefs.NewRemote(), newScriptedEngine())
 	model.width, model.height = 120, 36
 	model.focus = focusLocal
 	entries := make([]domain.Entry, 60)
@@ -330,27 +360,81 @@ func TestFilePaneScrollsWithTheVisibleHeight(t *testing.T) {
 	}
 }
 
-func TestSimulatedTransfersCanFail(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
+func TestParallelismIsCappedByMaxParallel(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
+	model.maxParallel = 3
+	for i := 0; i < 10; i++ {
+		model.transfers = append(model.transfers, domain.Transfer{ID: i + 1, BytesTotal: 10_000_000, Status: domain.Queued})
+	}
+	model.startQueuedTransfers()
+
+	if got := countStatus(model.transfers, domain.Active); got != 3 {
+		t.Fatalf("active transfers = %d, want maxParallel of 3", got)
+	}
+	if got := engine.startedIDs(); len(got) != 3 {
+		t.Fatalf("engine started %v, want exactly 3 requests", got)
+	}
+}
+
+func TestQueuingHandsTheRequestToTheEngine(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
+	model.focus = focusLocal
+	model.local.path = "/tmp"
+	model.remote.path = "/public_html"
+	model.local.entries = []domain.Entry{{Name: "report.pdf", Size: 500_000}}
+	model.local.cursor = 0
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	model = updated.(Model)
+
+	if len(engine.started) != 1 {
+		t.Fatalf("engine received %d requests, want 1", len(engine.started))
+	}
+	req := engine.started[0]
+	if req.Source != "/tmp/report.pdf" || req.Destination != "/public_html/report.pdf" {
+		t.Fatalf("request paths = %q -> %q", req.Source, req.Destination)
+	}
+	if req.Size != 500_000 || req.Direction != domain.Upload {
+		t.Fatalf("request size/direction = %d/%v, want 500000/Upload", req.Size, req.Direction)
+	}
+	if got := model.transfers[0].Status; got != domain.Active {
+		t.Fatalf("queued transfer status = %v, want Active once handed to the engine", got)
+	}
+}
+
+func TestEngineEventsDriveTransferState(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
 	model.width, model.height = 100, 30
 	model.transfers = []domain.Transfer{
-		{ID: simulatedFailureEvery, BytesTotal: 100_000, Status: domain.Queued},
-		{ID: simulatedFailureEvery + 1, BytesTotal: 100_000, Status: domain.Queued},
+		{ID: 1, BytesTotal: 1000, Status: domain.Queued},
+		{ID: 2, BytesTotal: 1000, Status: domain.Queued},
 	}
 
-	for i := 0; i < 20; i++ {
-		next, _ := model.Update(transferTick{})
+	apply := func(event transfer.Event) {
+		next, _ := model.Update(event)
 		model = next.(Model)
 	}
 
-	if got := model.transfers[0].Status; got != domain.Failed {
-		t.Fatalf("transfer %d status = %v, want Failed", model.transfers[0].ID, got)
+	apply(transfer.Event{ID: 1, Kind: transfer.Progress, BytesDone: 400})
+	if got := model.transfers[0]; got.Status != domain.Active || got.BytesDone != 400 {
+		t.Fatalf("after progress: status=%v bytes=%d, want Active/400", got.Status, got.BytesDone)
 	}
-	if model.transfers[0].Message == "" {
-		t.Fatalf("a failed transfer should carry a message explaining why")
+
+	apply(transfer.Event{ID: 1, Kind: transfer.Completed, BytesDone: 1000})
+	if got := model.transfers[0]; got.Status != domain.Done || got.BytesDone != got.BytesTotal {
+		t.Fatalf("after completion: status=%v bytes=%d, want Done/1000", got.Status, got.BytesDone)
 	}
-	if got := model.transfers[1].Status; got != domain.Done {
-		t.Fatalf("transfer %d status = %v, want Done", model.transfers[1].ID, got)
+
+	apply(transfer.Event{ID: 2, Kind: transfer.Failed, BytesDone: 600, Err: errors.New("connection reset by peer")})
+	failed := model.transfers[1]
+	if failed.Status != domain.Failed {
+		t.Fatalf("after failure: status=%v, want Failed", failed.Status)
+	}
+	if failed.Message != "connection reset by peer" {
+		t.Fatalf("failure message = %q, want the engine's error", failed.Message)
 	}
 
 	model.bottomTab = tabFailed
@@ -358,18 +442,95 @@ func TestSimulatedTransfersCanFail(t *testing.T) {
 		t.Fatalf("failed tab row count = %d, want 1", got)
 	}
 	if view := model.View(); !strings.Contains(view, "connection reset by peer") {
-		t.Fatalf("failed tab should render the transfer message\n%s", view)
+		t.Fatalf("failed tab should render the engine's message\n%s", view)
+	}
+
+	// An event for a transfer the UI does not know about must be ignored.
+	apply(transfer.Event{ID: 999, Kind: transfer.Completed, BytesDone: 1})
+	if len(model.transfers) != 2 {
+		t.Fatalf("an unknown event changed the queue: %d rows", len(model.transfers))
 	}
 }
 
-func TestParallelismIsCappedByMaxParallel(t *testing.T) {
-	model := NewModel(fakefs.NewRemote())
-	model.maxParallel = 3
-	for i := 0; i < 10; i++ {
-		model.transfers = append(model.transfers, domain.Transfer{ID: i + 1, BytesTotal: 10_000_000, Status: domain.Queued})
+func TestFinishedTransferFreesASlotForTheNextOne(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
+	model.maxParallel = 2
+	model.transfers = []domain.Transfer{
+		{ID: 1, BytesTotal: 1000, Status: domain.Queued},
+		{ID: 2, BytesTotal: 1000, Status: domain.Queued},
+		{ID: 3, BytesTotal: 1000, Status: domain.Queued},
 	}
-	model.advanceTransfers()
-	if got := countStatus(model.transfers, domain.Active); got != 3 {
-		t.Fatalf("active transfers = %d, want maxParallel of 3", got)
+	model.startQueuedTransfers()
+	if got := engine.startedIDs(); len(got) != 2 {
+		t.Fatalf("engine started %v, want the first 2 only", got)
+	}
+
+	next, _ := model.Update(transfer.Event{ID: 1, Kind: transfer.Completed, BytesDone: 1000})
+	model = next.(Model)
+
+	if got := engine.startedIDs(); len(got) != 3 || got[2] != 3 {
+		t.Fatalf("engine started %v, want transfer 3 to take the freed slot", got)
+	}
+	if got := countStatus(model.transfers, domain.Active); got != 2 {
+		t.Fatalf("active transfers = %d, want the cap to stay at 2", got)
+	}
+}
+
+func TestCancelStopsActiveTransfers(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
+	model.transfers = []domain.Transfer{
+		{ID: 1, BytesTotal: 1000, Status: domain.Active},
+		{ID: 2, BytesTotal: 1000, Status: domain.Queued},
+	}
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	model = updated.(Model)
+	if len(engine.canceled) != 1 || engine.canceled[0] != 1 {
+		t.Fatalf("engine.Cancel calls = %v, want just the active transfer 1", engine.canceled)
+	}
+
+	// The row does not change until the engine confirms.
+	if got := model.transfers[0].Status; got != domain.Active {
+		t.Fatalf("status right after requesting cancel = %v, want still Active", got)
+	}
+	next, _ := model.Update(transfer.Event{ID: 1, Kind: transfer.Canceled, BytesDone: 400})
+	model = next.(Model)
+	if got := model.transfers[0]; got.Status != domain.Failed || got.Message != "canceled" {
+		t.Fatalf("after the cancel event: status=%v message=%q, want Failed/canceled", got.Status, got.Message)
+	}
+}
+
+func TestQuitSchedulesAnEngineShutdown(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
+
+	_, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd == nil {
+		t.Fatalf("quit produced no command, so nothing shuts the engine down")
+	}
+	// tea.Sequence hands its commands to the runtime rather than running them,
+	// so the sequence itself cannot be executed here. Check the shutdown
+	// command it carries does close the engine.
+	if msg := closeEngine(engine)(); msg != nil {
+		t.Fatalf("closeEngine returned %v, want no message", msg)
+	}
+	if !engine.closed {
+		t.Fatalf("closeEngine did not close the engine")
+	}
+}
+
+func TestClosedEventStreamStopsThePump(t *testing.T) {
+	engine := newScriptedEngine()
+	model := NewModel(fakefs.NewRemote(), engine)
+	close(engine.events)
+
+	msg := waitForTransferEvent(engine.Events())()
+	if _, ok := msg.(transferStreamClosed); !ok {
+		t.Fatalf("a closed event channel produced %T, want transferStreamClosed", msg)
+	}
+	if _, cmd := model.Update(transferStreamClosed{}); cmd != nil {
+		t.Fatalf("the UI should stop pumping once the stream is closed")
 	}
 }

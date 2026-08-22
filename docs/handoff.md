@@ -16,7 +16,8 @@ Implemented:
 - Whatthedock-style soft overlays with drop shadows
 - Local filesystem browsing using real local files
 - Fake remote filesystem data under `internal/fakefs`
-- Simulated uploads/downloads and transfer progress
+- Asynchronous transfer engine interface (`internal/transfer`) with a
+  simulated implementation under `internal/faketransfer`
 - Bottom tabs: Queue, Active, Failed, History, Log
 - Theme picker on `t`
 - Connect, help, and conflict modals
@@ -45,6 +46,7 @@ Verification commands used:
 
 ```bash
 go test -count=1 ./...
+go test -race -count=1 ./...
 go vet ./...
 go build -o /tmp/tideftp ./cmd/tideftp
 ```
@@ -52,8 +54,19 @@ go build -o /tmp/tideftp ./cmd/tideftp
 Last known result:
 
 - `go test -count=1 ./...`: passed
+- `go test -race -count=1 ./...`: passed
 - `go vet ./...`: passed
 - `go build -o /tmp/tideftp ./cmd/tideftp`: passed
+
+Run `-race` from now on: `faketransfer` is the first concurrent code in the
+project, and the UI consumes its channel from a Bubble Tea command goroutine.
+
+Driving the built binary from a synthetic PTY has not worked: the process
+renders, but plain rune keypresses written to the pty master never reach it
+(Ctrl+C arrives only as SIGINT from the line discipline). This reproduces on
+older commits too, so it is a harness problem, not a regression — but it means
+there is still no automated smoke test of the real binary. Manual runs are the
+only coverage there.
 
 ## Product Decisions
 
@@ -139,10 +152,20 @@ First build slice:
   implement alongside the fake one
 - `internal/fakefs/fakefs.go`: fake remote directory tree, implements
   `remotefs.FS`
+- `internal/transfer/transfer.go`: protocol-agnostic transfer engine
+  interface (`Start`/`Cancel`/`Events`/`Close`) that FTP/FTPS/SFTP engines
+  will implement. Asynchronous by contract: `Start` returns immediately and
+  everything afterwards arrives as a `transfer.Event`
+- `internal/faketransfer/faketransfer.go`: simulated engine, implements
+  `transfer.Engine`; emits timed progress events and fails every fifth
+  transfer so the Failed tab stays reachable
 - `internal/ui/model.go`: Bubble Tea state, update loop, fake transfer simulation, key/mouse routing; depends only on `remotefs.FS`, not on `fakefs` directly
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
-- `internal/ui/model_test.go`: UI behavior tests
+- `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
+  `transfer.Engine` stub so they never depend on goroutine timing
+- `internal/ui/integration_test.go`: real model plus real `faketransfer`
+  engine, pumping actual events end to end
 - `README.md`: quick run instructions and keybindings
 
 ## Design Notes
@@ -162,10 +185,24 @@ The fake adapter is intentionally realistic enough to exercise the UI:
 - redacted log entries
 
 Do not wire real protocol complexity into the UI package directly. Real
-FTP/FTPS/SFTP adapters should implement `remotefs.FS` and be constructed in
-`cmd/tideftp/main.go` (or a future profile/connect flow), the same way
-`fakefs.NewRemote()` is today — the UI package itself should never import a
+FTP/FTPS/SFTP adapters should implement `remotefs.FS` (browsing) and
+`transfer.Engine` (moving bytes), and be constructed in `cmd/tideftp/main.go`
+(or a future profile/connect flow), the same way `fakefs.NewRemote()` and
+`faketransfer.New()` are today — the UI package itself should never import a
 concrete adapter package.
+
+The queue lives in the UI, not the engine. The UI decides what runs and when
+(ordering, the `maxParallel` cap, and eventually conflict policy) and hands the
+engine one `transfer.Request` per running transfer. Engines own concurrency for
+the work they are given but never queue. The contract that keeps this honest:
+every accepted Request must produce exactly one terminal event (Completed,
+Failed, or Canceled), or the UI's queue stalls waiting for a slot.
+
+`remotefs.FS` has not had the same treatment yet and still returns
+`[]domain.Entry` with no error, synchronously. That is fine for `fakefs` and
+wrong for a real network filesystem: a blocking `List` freezes the TUI and
+there is nowhere to report a timeout or a permission error. Give it the same
+command/message shape as `transfer.Engine` before writing a real adapter.
 
 ## Suggested Next Steps
 
@@ -198,14 +235,26 @@ concrete adapter package.
      source and a UI to change it
    - Completed-transfer aging into History
    - Retry failed transfers
-   - Cancel active or queued transfers
+   - ~~Cancel active transfers.~~ Done — `x` cancels everything in flight
+     through `transfer.Engine.Cancel`. Per-row cancel still needs a cursor
+     in the transfers pane (it scrolls but has no selected row), and
+     `domain` has no Canceled status yet, so canceled transfers land in the
+     Failed tab
    - Recursive folder preflight summary
 
-6. Add protocol adapters.
-   - Start with SFTP or FTP/FTPS depending on available libraries and testability.
-   - Use fake adapter tests to preserve UI behavior while real adapters land.
+6. Make `remotefs.FS` asynchronous and error-returning, mirroring
+   `transfer.Engine`. Every call site is in `internal/ui/model.go`
+   (`refreshRemote`, `setRemotePath`, `parentDir`, `activateCursor`).
+   Do this before step 7, not after.
 
-7. Expand TUI tests.
+7. Add protocol adapters.
+   - Start with SFTP (`pkg/sftp`): it is testable in-process, unlike FTP,
+     which needs a real daemon.
+   - Implement both `remotefs.FS` and `transfer.Engine`.
+   - The fake adapters and their tests are the contract that proves the UI
+     did not regress while real adapters land.
+
+8. Expand TUI tests.
    - Snapshot/golden views for main screen and overlays
    - Key routing tests for focus, selection, tabs, and modals
    - Resize tests for small terminals
@@ -213,7 +262,10 @@ concrete adapter package.
 
 ## Known Gaps
 
-- No real FTP/FTPS/SFTP networking yet
+- No real FTP/FTPS/SFTP networking yet; `faketransfer` moves no bytes, it
+  only emits a plausible event stream on a timer
+- `remotefs.FS` is still synchronous and cannot report errors (see Design
+  Notes) — the one seam that is not ready for a real adapter
 - No config persistence yet
 - No saved profiles yet
 - No real credential storage yet
@@ -227,8 +279,9 @@ concrete adapter package.
   it is a demo opened with `o` (it used to be `delete`, which read as
   "delete this file")
 - Transfer failures are simulated deterministically by `failsAt` in
-  `internal/ui/model.go` so the Failed tab and error styling are
-  reachable without real networking; replace this once real adapters land
+  `internal/faketransfer` so the Failed tab and error styling are reachable
+  without real networking; the whole package goes away once real engines land
 - Completed transfers do not yet age out of Queue into History
 - Failed transfer retry flow is not implemented yet
-- No screenshot/PTY visual QA has been run yet
+- No screenshot/PTY visual QA has been run yet, and synthetic PTY input does
+  not currently work (see Run And Verify)
