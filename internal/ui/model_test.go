@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/allisonhere/tideui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,30 +14,125 @@ import (
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
 	"tideftp/internal/localfs"
+	"tideftp/internal/session"
 	"tideftp/internal/transfer"
 	"tideftp/internal/vfs"
 )
 
-// loadedModel builds a model over the fake adapters and settles its initial
-// listings, so a test can treat both panes as already loaded. It goes through
-// refresh rather than Init because Init also starts the transfer event pump,
-// which blocks on an open channel.
+// testTarget is the profile the test dialer answers for.
+var testTarget = session.Target{Name: "test", Protocol: "sftp", Host: "test.local", User: "allie", StartPath: "/public_html"}
+
+// stubConn is a session.Conn over adapters the test supplies, so UI tests can
+// drive a connection without any real dialing. drop ends it as a server going
+// away would.
+type stubConn struct {
+	fs     vfs.FS
+	engine transfer.Engine
+	done   chan error
+	once   sync.Once
+	closed bool
+}
+
+func (c *stubConn) FS() vfs.FS              { return c.fs }
+func (c *stubConn) Engine() transfer.Engine { return c.engine }
+func (c *stubConn) Done() <-chan error      { return c.done }
+
+func (c *stubConn) Close() error {
+	c.closed = true
+	c.end(nil)
+	return nil
+}
+
+func (c *stubConn) drop(err error) { c.end(err) }
+
+func (c *stubConn) end(reason error) {
+	c.once.Do(func() {
+		c.done <- reason
+		close(c.done)
+	})
+}
+
+// stubDialer hands out stubConns, or fails with err when one is set.
+type stubDialer struct {
+	fs     vfs.FS
+	engine transfer.Engine
+	err    error
+	calls  []session.Target
+	conns  []*stubConn
+}
+
+func (d *stubDialer) Dial(_ context.Context, target session.Target) (session.Conn, error) {
+	d.calls = append(d.calls, target)
+	if d.err != nil {
+		return nil, d.err
+	}
+	conn := &stubConn{fs: d.fs, engine: d.engine, done: make(chan error, 1)}
+	d.conns = append(d.conns, conn)
+	return conn, nil
+}
+
+// loadedModel builds a connected model over the fake adapters and settles its
+// listings, so a test can treat both panes as loaded.
 func loadedModel(t *testing.T, engine transfer.Engine) Model {
 	t.Helper()
-	return loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	return model
 }
 
 func loadedModelOver(t *testing.T, local, remote vfs.FS, engine transfer.Engine) Model {
 	t.Helper()
-	model := NewModel(local, remote, engine)
-	model.width, model.height = 120, 36
-	return settle(t, model, model.refresh())
+	model, _ := connectModel(t, local, &stubDialer{fs: remote, engine: engine})
+	return model
 }
 
+func loadedModelWithDialer(t *testing.T, dialer *stubDialer) (Model, *stubDialer) {
+	t.Helper()
+	return connectModel(t, localfs.New(), dialer)
+}
+
+// connectModel wires a live connection into a model without going through
+// applyConnected.
+//
+// applyConnected returns the transfer event pump and the connection watcher,
+// and neither ever returns on its own. settle abandons a parked command but
+// cannot stop the goroutine running it, and a parked pump goes on reading the
+// engine's channel — stealing events from any test that owns that stream. So
+// the connection is wired in directly here. The real connect path is covered
+// by TestInitLoadsLocalAndDialsTheFirstTarget, and disconnection by feeding
+// disconnectedMsg in by hand.
+func connectModel(t *testing.T, local vfs.FS, dialer *stubDialer) (Model, *stubDialer) {
+	t.Helper()
+	model := NewModel(local, dialer, []session.Target{testTarget})
+	model.width, model.height = 120, 36
+	model = settle(t, model, listCmd(model.localFS, paneLocal, model.local.requestToken, model.local.path, model.local.showHidden, listingNavigate))
+	if dialer.err != nil {
+		return model, dialer
+	}
+
+	conn, err := dialer.Dial(context.Background(), testTarget)
+	if err != nil {
+		t.Fatalf("stub dial: %v", err)
+	}
+	model.target = testTarget
+	model.conn = conn
+	model.remoteFS = conn.FS()
+	model.engine = conn.Engine()
+	model.state = connConnected
+	model = settle(t, model, model.requestListing(paneRemote, testTarget.Home(), listingNavigate))
+	if !model.connected() {
+		t.Fatalf("test model did not connect: state=%v err=%v", model.state, model.connErr)
+	}
+	return model, dialer
+}
+
+// settleGrace is how long settle waits for one command before treating it as
+// parked. The fakes answer instantly, so anything slower is the transfer event
+// pump or the connection watcher, which by design never return on their own.
+const settleGrace = 50 * time.Millisecond
+
 // settle runs cmd and everything it produces against the model until nothing
-// is left, so tests can treat asynchronous listings as if they were
-// synchronous. It must not be handed a command that blocks (waitForTransferEvent
-// on an open channel), which is why tests drive listings directly.
+// is left, so tests can treat asynchronous work as if it were synchronous.
+// Commands that park are skipped; tests drive those paths by hand.
 func settle(t *testing.T, model Model, cmd tea.Cmd) Model {
 	t.Helper()
 	queue := []tea.Cmd{cmd}
@@ -47,10 +145,20 @@ func settle(t *testing.T, model Model, cmd tea.Cmd) Model {
 		if next == nil {
 			continue
 		}
-		switch msg := next().(type) {
+		result := make(chan tea.Msg, 1)
+		go func() { result <- next() }()
+
+		var msg tea.Msg
+		select {
+		case msg = <-result:
+		case <-time.After(settleGrace):
+			continue
+		}
+
+		switch typed := msg.(type) {
 		case nil:
 		case tea.BatchMsg:
-			queue = append(queue, msg...)
+			queue = append(queue, typed...)
 		default:
 			updated, follow := model.Update(msg)
 			model = updated.(Model)
@@ -562,22 +670,21 @@ func TestCancelStopsActiveTransfers(t *testing.T) {
 	}
 }
 
-func TestQuitSchedulesAnEngineShutdown(t *testing.T) {
-	engine := newScriptedEngine()
-	model := loadedModel(t, engine)
+func TestQuitSchedulesAConnectionShutdown(t *testing.T) {
+	model, dialer := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 
-	_, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	_, cmd := model.updateKey(runes("q"))
 	if cmd == nil {
-		t.Fatalf("quit produced no command, so nothing shuts the engine down")
+		t.Fatalf("quit produced no command, so nothing shuts the connection down")
 	}
 	// tea.Sequence hands its commands to the runtime rather than running them,
 	// so the sequence itself cannot be executed here. Check the shutdown
-	// command it carries does close the engine.
-	if msg := closeEngine(engine)(); msg != nil {
-		t.Fatalf("closeEngine returned %v, want no message", msg)
+	// command it carries does close the connection.
+	if msg := closeConnCmd(model.conn)(); msg != nil {
+		t.Fatalf("closeConnCmd returned %v, want no message", msg)
 	}
-	if !engine.closed {
-		t.Fatalf("closeEngine did not close the engine")
+	if !dialer.conns[0].closed {
+		t.Fatalf("quitting did not close the connection")
 	}
 }
 
@@ -595,27 +702,56 @@ func TestClosedEventStreamStopsThePump(t *testing.T) {
 	}
 }
 
-func TestInitLoadsBothPanes(t *testing.T) {
-	engine := newScriptedEngine()
-	// Closing the stream lets Init's event pump return instead of blocking.
-	close(engine.events)
-
-	model := NewModel(localfs.New(), fakefs.NewRemote(), engine)
+func TestInitLoadsLocalAndDialsTheFirstTarget(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget})
 	model.width, model.height = 120, 36
-	if !model.local.loading || !model.remote.loading {
-		t.Fatalf("both panes should start in their loading state")
+
+	if !model.local.loading {
+		t.Fatalf("the local pane should start in its loading state")
 	}
-	if len(model.remote.entries) != 0 {
-		t.Fatalf("a constructor cannot list asynchronously; entries should be empty")
+	if model.state != connConnecting {
+		t.Fatalf("state = %v before Init, want connecting", model.state)
+	}
+	if model.connected() {
+		t.Fatalf("a constructor cannot dial; the model must not report connected")
 	}
 
 	model = settle(t, model, model.Init())
 
-	if model.local.loading || model.remote.loading {
-		t.Fatalf("panes still loading after Init settled")
+	if model.local.loading || len(model.local.entries) == 0 {
+		t.Fatalf("local pane did not load: loading=%v entries=%d", model.local.loading, len(model.local.entries))
+	}
+	if len(dialer.calls) != 1 || dialer.calls[0] != testTarget {
+		t.Fatalf("dialer calls = %v, want one for the first target", dialer.calls)
+	}
+	if !model.connected() {
+		t.Fatalf("state = %v after Init, want connected", model.state)
+	}
+	// The remote pane opens on the target's start path, not on whatever the
+	// previous connection was showing.
+	if model.remote.path != testTarget.StartPath {
+		t.Fatalf("remote pane opened at %q, want the target's start path %q", model.remote.path, testTarget.StartPath)
 	}
 	if len(model.remote.entries) == 0 {
-		t.Fatalf("remote pane has no entries after Init")
+		t.Fatalf("remote pane has no entries after connecting")
+	}
+}
+
+func TestModelWithNoTargetsStartsDisconnected(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, nil)
+	model.width, model.height = 120, 36
+	model = settle(t, model, model.Init())
+
+	if model.state != connDisconnected || model.connected() {
+		t.Fatalf("state = %v, want disconnected", model.state)
+	}
+	if len(dialer.calls) != 0 {
+		t.Fatalf("dialed %v with no targets configured", dialer.calls)
+	}
+	if len(model.local.entries) == 0 {
+		t.Fatalf("the local pane must work while disconnected")
 	}
 }
 
@@ -783,5 +919,239 @@ func TestEnterOnAFileDoesNothing(t *testing.T) {
 	}
 	if model.remote.requestToken != token {
 		t.Fatalf("enter on a file started a request")
+	}
+}
+
+func TestConnectFailureLeavesTheAppUsable(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: errors.New("no route to host")}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget})
+	model.width, model.height = 120, 36
+
+	model = settle(t, model, model.Init())
+
+	if model.state != connFailed {
+		t.Fatalf("state = %v after a failed dial, want failed", model.state)
+	}
+	if model.connected() {
+		t.Fatalf("a failed dial must not report a connection")
+	}
+	if !model.statusErr || !strings.Contains(model.status, "no route to host") {
+		t.Fatalf("status = %q (err=%v), want the dial failure", model.status, model.statusErr)
+	}
+	// The local pane is unaffected by a remote failure.
+	if len(model.local.entries) == 0 {
+		t.Fatalf("local pane must still work after a failed connect")
+	}
+	if view := model.View(); !strings.Contains(view, "Not connected") {
+		t.Fatalf("remote pane should say it is not connected\n%s", view)
+	}
+}
+
+func TestTransfersRefuseToStartWhileDisconnected(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = settle(t, model, model.disconnect())
+	model = settle(t, model, func() tea.Msg { return disconnectedMsg{conn: model.conn} })
+
+	model.focus = focusLocal
+	model.local.entries = []domain.Entry{{Name: "a.txt", Size: 10}}
+	model.local.cursor = 0
+
+	model = press(t, model, runes("u"))
+
+	if len(model.transfers) != 0 {
+		t.Fatalf("queued %d transfers while disconnected, want none", len(model.transfers))
+	}
+	if !model.statusErr || !strings.Contains(model.status, "not connected") {
+		t.Fatalf("status = %q, want a not-connected error", model.status)
+	}
+}
+
+func TestDisconnectClearsTheRemoteSide(t *testing.T) {
+	engine := newScriptedEngine()
+	model, dialer := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	model.focus = focusRemote
+	if len(model.remote.entries) == 0 {
+		t.Fatalf("expected the remote pane to be loaded before disconnecting")
+	}
+
+	conn := model.conn
+	model = settle(t, model, model.disconnect())
+	if !dialer.conns[0].closed {
+		t.Fatalf("disconnect did not close the connection")
+	}
+	model = settle(t, model, func() tea.Msg { return disconnectedMsg{conn: conn} })
+
+	if model.connected() || model.state != connDisconnected {
+		t.Fatalf("state = %v after disconnect, want disconnected", model.state)
+	}
+	if model.conn != nil || model.remoteFS != nil || model.engine != nil {
+		t.Fatalf("disconnect left a stale adapter wired in")
+	}
+	if len(model.remote.entries) != 0 || model.remote.path != "" {
+		t.Fatalf("remote pane still shows %d entries at %q", len(model.remote.entries), model.remote.path)
+	}
+	if model.focus == focusRemote {
+		t.Fatalf("focus stayed on a pane that no longer has contents")
+	}
+}
+
+func TestDroppedConnectionFailsInFlightTransfers(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.transfers = []domain.Transfer{
+		{ID: 1, BytesTotal: 1000, Status: domain.Active},
+		{ID: 2, BytesTotal: 1000, Status: domain.Queued},
+		{ID: 3, BytesTotal: 1000, BytesDone: 1000, Status: domain.Done},
+	}
+
+	next, _ := model.Update(disconnectedMsg{conn: model.conn, err: errors.New("connection reset by peer")})
+	model = next.(Model)
+
+	if model.state != connFailed {
+		t.Fatalf("state = %v after a drop, want failed", model.state)
+	}
+	for _, id := range []int{1, 2} {
+		row := model.transfers[id-1]
+		if row.Status != domain.Failed {
+			t.Fatalf("transfer %d status = %v after the drop, want Failed", id, row.Status)
+		}
+		if row.Message != "connection reset by peer" {
+			t.Fatalf("transfer %d message = %q, want the drop reason", id, row.Message)
+		}
+	}
+	if model.transfers[2].Status != domain.Done {
+		t.Fatalf("a finished transfer must not be re-marked by a drop")
+	}
+	if !strings.Contains(model.status, "connection lost") {
+		t.Fatalf("status = %q, want it to report the lost connection", model.status)
+	}
+}
+
+func TestLateConnectionIsClosedNotUsed(t *testing.T) {
+	model, dialer := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	live := model.conn
+
+	// A connection for a target the user has already moved away from.
+	stale := &stubConn{fs: fakefs.NewRemote(), engine: newScriptedEngine(), done: make(chan error, 1)}
+	other := session.Target{Name: "other", Protocol: "sftp", Host: "other.local", User: "allie"}
+
+	next, cmd := model.Update(connectedMsg{target: other, conn: stale})
+	model = next.(Model)
+	if cmd != nil {
+		cmd()
+	}
+
+	if model.conn != live {
+		t.Fatalf("a stale connection replaced the live one")
+	}
+	if !stale.closed {
+		t.Fatalf("a connection that arrived too late should be closed, not leaked")
+	}
+	_ = dialer
+}
+
+func TestConnectMenuOffersDisconnectWhenConnected(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+
+	model = press(t, model, runes("c"))
+	if model.overlay != overlayConnect {
+		t.Fatalf("c did not open the connect overlay")
+	}
+	rows := model.connectRows()
+	if len(rows) != 2 || !rows[0].disconnect {
+		t.Fatalf("connect menu = %+v, want a disconnect action then the target", rows)
+	}
+
+	// Enter on the first row disconnects.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	if model.overlay != overlayNone {
+		t.Fatalf("enter did not close the overlay")
+	}
+	model = settle(t, model, func() tea.Msg { return disconnectedMsg{conn: model.conn} })
+	if model.connected() {
+		t.Fatalf("choosing disconnect left the model connected")
+	}
+
+	// With nothing connected the menu is just the targets.
+	model = press(t, model, runes("c"))
+	rows = model.connectRows()
+	if len(rows) != 1 || rows[0].disconnect {
+		t.Fatalf("disconnected menu = %+v, want just the target", rows)
+	}
+}
+
+func TestConnectMenuCursorStaysInRange(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+
+	for i := 0; i < 10; i++ {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if want := len(model.connectRows()) - 1; model.targetIndex != want {
+		t.Fatalf("targetIndex = %d after paging down, want %d", model.targetIndex, want)
+	}
+	for i := 0; i < 10; i++ {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if model.targetIndex != 0 {
+		t.Fatalf("targetIndex = %d after paging up, want 0", model.targetIndex)
+	}
+}
+
+func TestReconnectingClosesThePreviousConnection(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	first := model.conn
+
+	model = settle(t, model, model.connect(testTarget))
+
+	if !dialer.conns[0].closed {
+		t.Fatalf("reconnecting left the previous connection open")
+	}
+	if model.conn == first {
+		t.Fatalf("reconnecting reused the old connection")
+	}
+	if !model.connected() {
+		t.Fatalf("state = %v after reconnecting, want connected", model.state)
+	}
+}
+
+func TestStartQueuedTransfersIsANoopWhileDisconnected(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = settle(t, model, model.disconnect())
+	model = settle(t, model, func() tea.Msg { return disconnectedMsg{conn: model.conn} })
+
+	// Transfers left over from the connection that just ended must not be
+	// handed to an engine that no longer exists.
+	model.transfers = []domain.Transfer{{ID: 1, BytesTotal: 1000, Status: domain.Queued}}
+	model.startQueuedTransfers()
+
+	if got := countStatus(model.transfers, domain.Active); got != 0 {
+		t.Fatalf("%d transfers went active while disconnected", got)
+	}
+	if model.transfers[0].Status != domain.Queued {
+		t.Fatalf("transfer status = %v, want it left Queued", model.transfers[0].Status)
+	}
+}
+
+func TestStaleDisconnectDoesNotTearDownTheLiveConnection(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	old := model.conn
+
+	model = settle(t, model, model.connect(testTarget))
+	live := model.conn
+	if live == old {
+		t.Fatalf("reconnect did not produce a new connection")
+	}
+
+	// The previous connection's watcher reports in after the new one is up.
+	next, _ := model.Update(disconnectedMsg{conn: old, err: errors.New("old connection closed")})
+	model = next.(Model)
+
+	if model.conn != live {
+		t.Fatalf("a stale disconnect tore down the live connection")
+	}
+	if !model.connected() {
+		t.Fatalf("state = %v after a stale disconnect, want still connected", model.state)
 	}
 }

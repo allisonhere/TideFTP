@@ -26,7 +26,7 @@ func (m Model) View() string {
 	// so the content passed in must be sized to height-3 to fill exactly the
 	// space actually visible inside the pane (see renderPane's bodyHeight).
 	local := m.renderPane(renderer, m.paneTitle("Local", m.local), m.local.displayPath(), m.renderFilePane(renderer, m.local, localWidth-2, topHeight-3), localWidth, topHeight, m.focus == focusLocal)
-	remote := m.renderPane(renderer, m.paneTitle("Remote", m.remote), m.remote.displayPath(), m.renderFilePane(renderer, m.remote, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
+	remote := m.renderPane(renderer, m.paneTitle("Remote", m.remote), m.remotePaneHint(), m.renderRemotePane(renderer, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
 	top := lipgloss.JoinHorizontal(lipgloss.Top, local, remote)
 
 	bottomTitle := "Transfers"
@@ -42,6 +42,32 @@ func (m Model) View() string {
 	return clampView(view, m.width, m.height, renderer.Styles.Theme.Bg)
 }
 
+// connectionSummary is the topbar's account of the remote side.
+func (m Model) connectionSummary() string {
+	switch m.state {
+	case connConnecting:
+		return "connecting to " + m.target.Label() + "…"
+	case connConnected:
+		return m.target.Label() + "  " + m.target.Address()
+	case connFailed:
+		if m.connErr != nil {
+			return "disconnected — " + m.connErr.Error()
+		}
+		return "disconnected"
+	default:
+		return "not connected — press c"
+	}
+}
+
+// remotePaneHint is what the remote pane header shows to the right of its
+// title: a directory when there is one, otherwise the connection state.
+func (m Model) remotePaneHint() string {
+	if m.connected() || m.remote.loading {
+		return m.remote.displayPath()
+	}
+	return m.state.String()
+}
+
 // paneTitle appends a spinner-free loading marker while a listing is in
 // flight. It stays in the title rather than replacing the body so the pane's
 // current contents remain readable and usable during a slow listing.
@@ -54,7 +80,7 @@ func (m Model) paneTitle(title string, pane filePane) string {
 
 func (m Model) renderTopbar(renderer tideui.Renderer) string {
 	left := renderer.Styles.StatusNotice.Render(" TideFTP ")
-	conn := renderer.Styles.StatusBar.Render(" demo-sftp.local  sftp  fake adapter ")
+	conn := renderer.Styles.StatusBar.Render(" " + m.connectionSummary() + " ")
 	right := fmt.Sprintf(" %d queued  %s  split %.0f/%.0f ", countStatus(m.transfers, domain.Queued), m.theme.Name, m.fileSplit.Value()*100, (1-m.fileSplit.Value())*100)
 	content := left + conn
 	padding := max(0, m.width-lipgloss.Width(content)-lipgloss.Width(right))
@@ -107,6 +133,30 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render(label))
 	}
 	return strings.Join(rows, "\n")
+}
+
+// renderRemotePane draws the remote listing, or an explanation of why there
+// isn't one. A disconnected pane is not an empty directory and must not look
+// like one.
+func (m Model) renderRemotePane(renderer tideui.Renderer, width, height int) string {
+	if m.connected() || m.remote.loading {
+		return m.renderFilePane(renderer, m.remote, width, height)
+	}
+	lines := []string{""}
+	switch m.state {
+	case connConnecting:
+		lines = append(lines, renderer.Styles.DetailTitle.Render("  Connecting to "+m.target.Label()+"…"))
+	case connFailed:
+		lines = append(lines, renderer.Styles.DetailTitle.Render("  Not connected"))
+		if m.connErr != nil {
+			lines = append(lines, "", renderer.Styles.StatusError.Render("  "+short(m.connErr.Error(), max(1, width-4))+"  "))
+		}
+		lines = append(lines, "", renderer.Styles.DetailMeta.Render("  Press c to pick a server and try again."))
+	default:
+		lines = append(lines, renderer.Styles.DetailTitle.Render("  Not connected"))
+		lines = append(lines, "", renderer.Styles.DetailMeta.Render("  Press c to pick a server."))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) string {
@@ -333,7 +383,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			keyRow(".", "toggle hidden files"),
 			"",
 			renderer.Styles.DetailMeta.Render("View"),
-			keyRow("c", "connect"),
+			keyRow("c", "connect / disconnect"),
 			keyRow("t", "theme picker"),
 			keyRow("i", "toggle icons"),
 			keyRow("shift+left/right", "resize file panes"),
@@ -347,17 +397,23 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "help", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(content, "\n"))})
 		return &overlay
 	case overlayConnect:
-		rows := []string{
-			renderer.RenderSoftRow(tideui.SoftRow{Text: "Protocol", Suffix: "SFTP", Selected: true}, 60),
-			renderer.RenderSoftRow(tideui.SoftRow{Text: "Host", Suffix: "demo-sftp.local"}, 60),
-			renderer.RenderSoftRow(tideui.SoftRow{Text: "User", Suffix: "allie"}, 60),
-			renderer.RenderSoftRow(tideui.SoftRow{Text: "Auth", Suffix: "prompt / agent / key file"}, 60),
+		rows := make([]string, 0, len(m.connectRows())+6)
+		for index, row := range m.connectRows() {
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{Text: row.label, Selected: index == m.targetIndex}, 60))
+		}
+		if len(rows) == 0 {
+			rows = append(rows, renderer.Styles.DetailMeta.Render("No connection profiles configured."))
+		}
+		rows = append(rows,
 			"",
-			renderer.Styles.DetailMeta.Render("Profile preview: strict/ask/off known-host policy, ask by default."),
+			renderer.Styles.DetailMeta.Render("Status: "+m.connectionSummary()),
 			renderer.Styles.DetailMeta.Render("Passwords are redacted and prompt by default."),
 			"",
-			renderer.RenderSoftHints(60, tideui.SoftHint{Key: "enter", Label: "connect fake"}, tideui.SoftHint{Key: "esc", Label: "cancel"}),
-		}
+			renderer.RenderSoftHints(60,
+				tideui.SoftHint{Key: "up/down", Label: "choose"},
+				tideui.SoftHint{Key: "enter", Label: "go"},
+				tideui.SoftHint{Key: "esc", Label: "cancel"}),
+		)
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Width: 66, Content: renderer.RenderSoftBody(66, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlayConflict:

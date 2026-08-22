@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/domain"
+	"tideftp/internal/session"
 	"tideftp/internal/transfer"
 	"tideftp/internal/vfs"
 )
@@ -69,6 +70,50 @@ const (
 	listingRefresh
 )
 
+// connState is where the remote side of the app currently stands. The local
+// pane works in every one of these states; only the remote pane and the
+// transfer queue depend on a live connection.
+type connState int
+
+const (
+	connDisconnected connState = iota
+	connConnecting
+	connConnected
+	connFailed
+)
+
+func (c connState) String() string {
+	switch c {
+	case connConnecting:
+		return "connecting"
+	case connConnected:
+		return "connected"
+	case connFailed:
+		return "failed"
+	default:
+		return "disconnected"
+	}
+}
+
+// connectedMsg carries a live connection back to the UI goroutine.
+type connectedMsg struct {
+	target session.Target
+	conn   session.Conn
+}
+
+// connectFailedMsg reports a connect attempt that never opened.
+type connectFailedMsg struct {
+	target session.Target
+	err    error
+}
+
+// disconnectedMsg reports a connection that has ended: err is nil when the
+// user asked for it, and the reason when the server went away.
+type disconnectedMsg struct {
+	conn session.Conn
+	err  error
+}
+
 // listingMsg is the reply to one List request.
 type listingMsg struct {
 	pane    paneID
@@ -123,11 +168,22 @@ type Model struct {
 	focus         focusPane
 	overlay       overlayMode
 
-	local    filePane
-	remote   filePane
-	localFS  vfs.FS
-	remoteFS vfs.FS
-	engine   transfer.Engine
+	local   filePane
+	remote  filePane
+	localFS vfs.FS
+
+	// Everything below is valid only while state is connConnected. remoteFS
+	// and engine come from conn and are cleared with it, so that a dropped
+	// connection cannot leave a stale adapter wired into the UI.
+	dialer      session.Dialer
+	targets     []session.Target
+	targetIndex int
+	target      session.Target
+	conn        session.Conn
+	remoteFS    vfs.FS
+	engine      transfer.Engine
+	state       connState
+	connErr     error
 
 	transfers      []domain.Transfer
 	nextTransferID int
@@ -157,6 +213,10 @@ type transferStreamClosed struct{}
 // persistence lands and can override Model.maxParallel.
 const defaultParallelTransfers = 2
 
+// dialTimeout bounds a connect attempt, which can otherwise hang as long as
+// the network cares to.
+const dialTimeout = 30 * time.Second
+
 // listTimeout bounds a single directory listing. A real server can accept a
 // connection and then never answer; without this the pane would sit in its
 // loading state forever.
@@ -167,7 +227,9 @@ const listTimeout = 20 * time.Second
 // header (1). Mouse clicks above it are not on an entry.
 const firstFileRow = 4
 
-func NewModel(local, remote vfs.FS, engine transfer.Engine) Model {
+// NewModel builds the UI over a local filesystem and a dialer. It starts
+// disconnected; Init dials the first target so the app opens onto something.
+func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
@@ -182,13 +244,14 @@ func NewModel(local, remote vfs.FS, engine transfer.Engine) Model {
 		},
 		remote: filePane{
 			title:      "Remote",
-			path:       "/public_html",
+			path:       "",
 			selected:   map[string]bool{},
 			showHidden: false,
 		},
 		localFS:        local,
-		remoteFS:       remote,
-		engine:         engine,
+		dialer:         dialer,
+		targets:        targets,
+		state:          connDisconnected,
 		nextTransferID: 1,
 		maxParallel:    defaultParallelTransfers,
 		theme:          tideNight,
@@ -205,26 +268,44 @@ func NewModel(local, remote vfs.FS, engine transfer.Engine) Model {
 		InitialTheme: model.theme.Name,
 		Title:        "THEMES",
 	})
-	// Listings are asynchronous now, and a constructor cannot return commands,
-	// so both panes start in their loading state and Init issues the requests.
+	// Listings are asynchronous, and a constructor cannot return commands, so
+	// the local pane starts in its loading state and Init issues the request.
+	// The remote pane has nothing to list until a connection exists.
 	model.local.beginRequest(model.local.path)
-	model.remote.beginRequest(model.remote.path)
+	if len(targets) > 0 {
+		model.target = targets[0]
+		model.state = connConnecting
+	}
 	return model
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		waitForTransferEvent(m.engine.Events()),
+	cmds := []tea.Cmd{
 		tea.SetWindowTitle("TideFTP"),
 		listCmd(m.localFS, paneLocal, m.local.requestToken, m.local.path, m.local.showHidden, listingNavigate),
-		listCmd(m.remoteFS, paneRemote, m.remote.requestToken, m.remote.path, m.remote.showHidden, listingNavigate),
-	)
+	}
+	// The transfer event pump belongs to a connection, so it starts on connect
+	// rather than here.
+	if m.state == connConnecting {
+		cmds = append(cmds, dialCmd(m.dialer, m.target))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case connectedMsg:
+		return m, m.applyConnected(msg)
+	case connectFailedMsg:
+		m.applyConnectFailed(msg)
+		return m, nil
+	case disconnectedMsg:
+		wasAtBottom := m.isAtBottomPane()
+		m.applyDisconnected(msg)
+		m.settleBottomOffset(wasAtBottom)
 		return m, nil
 	case listingMsg:
 		wasAtBottom := m.isAtBottomPane()
@@ -238,6 +319,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyTransferEvent(msg)
 		m.startQueuedTransfers()
 		m.settleBottomOffset(wasAtBottom)
+		if !m.connected() {
+			return m, nil
+		}
 		return m, waitForTransferEvent(m.engine.Events())
 	case transferStreamClosed:
 		return m, nil
@@ -290,6 +374,21 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.overlay == overlayConnect {
+		switch msg.String() {
+		case "esc", "q":
+			m.overlay = overlayNone
+			m.setStatus("cancelled")
+		case "up", "k":
+			m.moveConnectCursor(-1)
+		case "down", "j":
+			m.moveConnectCursor(1)
+		case "enter":
+			m.overlay = overlayNone
+			cmd = m.activateConnectChoice()
+		}
+		return m, cmd
+	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
@@ -297,10 +396,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			m.setStatus("cancelled")
 		case "enter", "y":
 			switch m.overlay {
-			case overlayConnect:
-				m.overlay = overlayNone
-				m.setStatus("connected to demo-sftp.local using fake adapter")
-				m.logs = append(m.logs, "connect demo-sftp.local:22 as allie (credentials redacted)")
 			case overlayConflict:
 				m.overlay = overlayNone
 				m.queueFocusedTransfer()
@@ -313,7 +408,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Sequence(closeEngine(m.engine), tea.Quit)
+		if m.conn != nil {
+			return m, tea.Sequence(closeConnCmd(m.conn), tea.Quit)
+		}
+		return m, tea.Quit
 	case "tab":
 		m.focus = (m.focus + 1) % 3
 	case "shift+tab":
@@ -361,6 +459,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.refresh()
 	case "c":
 		m.overlay = overlayConnect
+		m.targetIndex = 0
 	case "t":
 		m.overlay = overlayTheme
 		m.themePicker.Open(m.theme.Name)
@@ -424,19 +523,206 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// connect starts dialing target, tearing down any existing connection first.
+func (m *Model) connect(target session.Target) tea.Cmd {
+	cmds := []tea.Cmd{}
+	if m.conn != nil {
+		cmds = append(cmds, closeConnCmd(m.conn))
+		m.clearConnection()
+	}
+	m.target = target
+	m.state = connConnecting
+	m.connErr = nil
+	m.setStatus("connecting to " + target.Label())
+	m.logs = append(m.logs, "connect "+target.Address()+" as "+target.User+" (credentials redacted)")
+	return tea.Batch(append(cmds, dialCmd(m.dialer, target))...)
+}
+
+// disconnect ends the current connection at the user's request.
+func (m *Model) disconnect() tea.Cmd {
+	if m.conn == nil {
+		m.setError("not connected")
+		return nil
+	}
+	conn := m.conn
+	m.setStatus("disconnecting from " + m.target.Label())
+	return closeConnCmd(conn)
+}
+
+func dialCmd(dialer session.Dialer, target session.Target) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+		defer cancel()
+		conn, err := dialer.Dial(ctx, target)
+		if err != nil {
+			return connectFailedMsg{target: target, err: err}
+		}
+		return connectedMsg{target: target, conn: conn}
+	}
+}
+
+// watchConnCmd parks on the connection's Done channel and reports the end,
+// whether that was a Close we asked for or the server going away.
+func watchConnCmd(conn session.Conn) tea.Cmd {
+	return func() tea.Msg {
+		err := <-conn.Done()
+		return disconnectedMsg{conn: conn, err: err}
+	}
+}
+
+func closeConnCmd(conn session.Conn) tea.Cmd {
+	return func() tea.Msg {
+		_ = conn.Close()
+		return nil
+	}
+}
+
+// applyConnected wires a live connection into the UI: its filesystem, its
+// transfer engine, the event pump, the drop watcher, and the first listing.
+func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
+	// A connection that arrives after the user moved on is closed, not used.
+	if m.state != connConnecting || msg.target != m.target {
+		return closeConnCmd(msg.conn)
+	}
+	m.conn = msg.conn
+	m.remoteFS = msg.conn.FS()
+	m.engine = msg.conn.Engine()
+	m.state = connConnected
+	m.connErr = nil
+	m.setStatus("connected to " + msg.target.Label())
+	m.logs = append(m.logs, "connected "+msg.target.Address())
+
+	m.remote.reset()
+	m.remote.path = ""
+	return tea.Batch(
+		waitForTransferEvent(msg.conn.Engine().Events()),
+		watchConnCmd(msg.conn),
+		m.requestListing(paneRemote, msg.target.Home(), listingNavigate),
+	)
+}
+
+func (m *Model) applyConnectFailed(msg connectFailedMsg) {
+	if m.state != connConnecting || msg.target != m.target {
+		return
+	}
+	m.state = connFailed
+	m.connErr = msg.err
+	m.setError(fmt.Sprintf("connect %s: %v", msg.target.Label(), msg.err))
+}
+
+// applyDisconnected tears the connection down. Anything in flight is marked
+// failed: the bytes stopped moving whether or not the user asked them to.
+func (m *Model) applyDisconnected(msg disconnectedMsg) {
+	if msg.conn != m.conn {
+		// A previous connection finishing after we moved on.
+		return
+	}
+	reason := "disconnected"
+	if msg.err != nil {
+		reason = msg.err.Error()
+	}
+	for i := range m.transfers {
+		if m.transfers[i].Status == domain.Queued || m.transfers[i].Status == domain.Active {
+			m.transfers[i].Status = domain.Failed
+			m.transfers[i].FinishedAt = time.Now()
+			m.transfers[i].Message = reason
+		}
+	}
+	m.clearConnection()
+	if msg.err != nil {
+		m.state = connFailed
+		m.connErr = msg.err
+		m.setError("connection lost: " + msg.err.Error())
+	} else {
+		m.state = connDisconnected
+		m.setStatus("disconnected")
+	}
+	m.logs = append(m.logs, "connection ended: "+reason)
+}
+
+// clearConnection drops every reference to the live connection so a stale
+// adapter can never be used after the connection has ended.
+func (m *Model) clearConnection() {
+	m.conn = nil
+	m.remoteFS = nil
+	m.engine = nil
+	m.state = connDisconnected
+	m.remote.entries = nil
+	m.remote.path = ""
+	m.remote.loading = false
+	m.remote.pendingPath = ""
+	m.remote.reset()
+	if m.focus == focusRemote {
+		m.focus = focusLocal
+	}
+}
+
+// connectRow is one line of the connect overlay's menu.
+type connectRow struct {
+	label      string
+	target     session.Target
+	disconnect bool
+}
+
+// connectRows builds the menu: a disconnect action first when there is a live
+// connection, then every known target.
+func (m Model) connectRows() []connectRow {
+	rows := make([]connectRow, 0, len(m.targets)+1)
+	if m.conn != nil {
+		rows = append(rows, connectRow{label: "Disconnect from " + m.target.Label(), disconnect: true})
+	}
+	for _, target := range m.targets {
+		rows = append(rows, connectRow{label: target.Label() + "  " + target.Address(), target: target})
+	}
+	return rows
+}
+
+func (m *Model) moveConnectCursor(delta int) {
+	rows := len(m.connectRows())
+	if rows == 0 {
+		m.targetIndex = 0
+		return
+	}
+	m.targetIndex = min(max(0, m.targetIndex+delta), rows-1)
+}
+
+func (m *Model) activateConnectChoice() tea.Cmd {
+	rows := m.connectRows()
+	if len(rows) == 0 {
+		m.setError("no connection profiles configured")
+		return nil
+	}
+	row := rows[min(max(0, m.targetIndex), len(rows)-1)]
+	if row.disconnect {
+		return m.disconnect()
+	}
+	return m.connect(row.target)
+}
+
+// connected reports whether the remote pane and the transfer queue can do
+// anything at all.
+func (m Model) connected() bool {
+	return m.state == connConnected && m.conn != nil && m.remoteFS != nil && m.engine != nil
+}
+
 // refresh re-reads both panes in place, keeping cursors and selections.
 func (m *Model) refresh() tea.Cmd {
 	m.setStatus("refreshing")
-	return tea.Batch(
-		m.requestListing(paneLocal, m.local.path, listingRefresh),
-		m.requestListing(paneRemote, m.remote.path, listingRefresh),
-	)
+	cmds := []tea.Cmd{m.requestListing(paneLocal, m.local.path, listingRefresh)}
+	if m.connected() {
+		cmds = append(cmds, m.requestListing(paneRemote, m.remote.path, listingRefresh))
+	}
+	return tea.Batch(cmds...)
 }
 
 // requestListing issues a List for dirPath and returns the command that runs
 // it off the UI goroutine. The pane keeps its current contents until the reply
 // arrives, so a listing that fails or never answers leaves the pane usable.
 func (m *Model) requestListing(pane paneID, dirPath string, kind listingKind) tea.Cmd {
+	if pane == paneRemote && m.remoteFS == nil {
+		m.setError("not connected")
+		return nil
+	}
 	target := m.filePaneByID(pane)
 	token := target.beginRequest(dirPath)
 	return listCmd(m.fsByID(pane), pane, token, dirPath, target.showHidden, kind)
@@ -596,6 +882,10 @@ func (m *Model) toggleHidden() tea.Cmd {
 }
 
 func (m *Model) queueUpload() {
+	if !m.connected() {
+		m.setError("not connected")
+		return
+	}
 	if len(m.local.actionEntries()) == 0 {
 		m.setError("nothing selected or highlighted locally")
 		return
@@ -604,6 +894,10 @@ func (m *Model) queueUpload() {
 }
 
 func (m *Model) queueDownload() {
+	if !m.connected() {
+		m.setError("not connected")
+		return
+	}
 	if len(m.remote.actionEntries()) == 0 {
 		m.setError("nothing selected or highlighted remotely")
 		return
@@ -659,6 +953,9 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 // handing each one to the engine. Nothing else moves a transfer forward: all
 // progress after this point arrives as transfer.Event.
 func (m *Model) startQueuedTransfers() {
+	if !m.connected() {
+		return
+	}
 	active := countStatus(m.transfers, domain.Active)
 	for i := range m.transfers {
 		if active >= m.maxParallel {
@@ -718,6 +1015,10 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 // cancelActiveTransfers stops everything in flight. It is all-or-nothing
 // because the transfers pane scrolls but has no row cursor to aim at yet.
 func (m *Model) cancelActiveTransfers() {
+	if !m.connected() {
+		m.setError("not connected")
+		return
+	}
 	ids := make([]int, 0, len(m.transfers))
 	for _, row := range m.transfers {
 		if row.Status == domain.Active {
@@ -877,13 +1178,6 @@ func waitForTransferEvent(events <-chan transfer.Event) tea.Cmd {
 			return transferStreamClosed{}
 		}
 		return event
-	}
-}
-
-func closeEngine(engine transfer.Engine) tea.Cmd {
-	return func() tea.Msg {
-		_ = engine.Close()
-		return nil
 	}
 }
 

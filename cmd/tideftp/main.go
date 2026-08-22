@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"tideftp/internal/fakefs"
-	"tideftp/internal/faketransfer"
+	"tideftp/internal/fakesession"
 	"tideftp/internal/localfs"
+	"tideftp/internal/session"
 	"tideftp/internal/ui"
 )
 
@@ -21,14 +21,19 @@ func main() {
 		fmt.Println("tideftp " + version)
 		return
 	}
-	engine := faketransfer.New()
-	defer engine.Close()
+	// Demo profiles until saved profiles exist. unreachable.invalid is
+	// deliberately absent from the dialer's known hosts, so picking it
+	// exercises the connect-failure path by hand.
+	targets := []session.Target{
+		{Name: "demo sftp", Protocol: "sftp", Host: "demo-sftp.local", User: "allie", StartPath: "/public_html"},
+		{Name: "demo ftps", Protocol: "ftps", Host: "demo-ftps.local", User: "allie"},
+		{Name: "unreachable", Protocol: "sftp", Host: "unreachable.invalid", User: "allie"},
+	}
+	// Fake latency so the connecting and loading states are visible when
+	// running by hand; real adapters will supply their own.
+	dialer := fakesession.New(600*time.Millisecond, 150*time.Millisecond, "demo-sftp.local", "demo-ftps.local")
 
-	// A little fake latency so the panes' loading state is visible when
-	// running the app by hand; real adapters will supply their own.
-	remote := fakefs.NewRemoteWithLatency(150 * time.Millisecond)
-
-	program := tea.NewProgram(ui.NewModel(localfs.New(), remote, engine), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
 		os.Exit(1)

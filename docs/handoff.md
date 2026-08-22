@@ -19,6 +19,9 @@ Implemented:
   (`internal/fakefs`)
 - Asynchronous transfer engine interface (`internal/transfer`) with a
   simulated implementation under `internal/faketransfer`
+- Connection lifecycle (`internal/session`) with a simulated dialer under
+  `internal/fakesession`: connect, disconnect, reconnect, connect failure,
+  and dropped connections
 - Bottom tabs: Queue, Active, Failed, History, Log
 - Theme picker on `t`
 - Connect, help, and conflict modals
@@ -164,6 +167,13 @@ First build slice:
 - `internal/faketransfer/faketransfer.go`: simulated engine, implements
   `transfer.Engine`; emits timed progress events and fails every fifth
   transfer so the Failed tab stays reachable
+- `internal/session/session.go`: `Target`, `Conn`, and `Dialer` — the
+  lifecycle the two adapter seams live inside. A `Conn` hands out a `vfs.FS`
+  and a `transfer.Engine` that are valid only while it is
+- `internal/fakesession/fakesession.go`: simulated dialer, implements
+  `session.Dialer`; succeeds only for hosts it was told about, so the
+  connect-failure path is reachable, and `Conn.Drop` simulates a server
+  going away
 - `internal/ui/model.go`: Bubble Tea state, update loop, listing requests and
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
@@ -198,7 +208,29 @@ FTP/FTPS/SFTP adapters should implement `vfs.FS` (browsing) and
 `fakefs.NewRemote()` and `faketransfer.New()` are today — the UI package
 itself should never import a concrete adapter package.
 
-Both seams are now asynchronous, but in different shapes, because the two jobs
+Nothing in the UI holds an adapter it was handed at startup any more. `vfs.FS`
+and `transfer.Engine` both come from a live `session.Conn` and are cleared with
+it, because the alternative — a stale adapter still wired in after the
+connection ended — is the failure mode that produces confusing bugs later. The
+local pane is the exception: `localfs` needs no connection and keeps working
+while the remote side is down.
+
+Four things the lifecycle has to get right, all in `model.go`:
+
+- **A late connection is closed, not used.** If the user moves on while a dial
+  is in flight, the `Conn` that eventually arrives is closed rather than wired
+  in, or it leaks a live connection nobody can reach.
+- **A stale disconnect is ignored.** Each connection has its own watcher, so an
+  old one reporting in must not tear down the connection that replaced it.
+  Both checks compare against the current `conn`/`target`.
+- **In-flight transfers fail on a drop.** The bytes stopped moving whether or
+  not the user asked them to, so queued and active rows are marked Failed with
+  the reason. Finished rows are left alone.
+- **Transfers refuse to start while disconnected.** `startQueuedTransfers` is
+  guarded as well as `queueUpload`/`queueDownload`, since a queue can outlive
+  the connection that filled it.
+
+Both adapter seams are asynchronous, but in different shapes, because the jobs
 differ. A transfer is long-lived and reports progress, so `transfer.Engine`
 streams events over a channel. A listing is one-shot request/response, so
 `vfs.FS.List` is an ordinary blocking call taking a `context.Context`, and
@@ -245,12 +277,14 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
    - Cache path: `~/.cache/tideftp/`
 
 4. Build profile model and connect form.
-   - Protocol: FTP, FTPS, SFTP
-   - Host, port, username
-   - Password mode: prompt/keyring/config
-   - SFTP agent/key file
-   - FTPS certificate verification mode
-   - SFTP known-host mode
+   - `session.Target` is the beginning of the profile model: protocol, host,
+     port, user, start path. `cmd/tideftp/main.go` hardcodes three demo
+     targets; the connect overlay (`c`) is a menu over them plus a
+     disconnect action
+   - Still missing: an editable form (no text input anywhere in the app
+     yet), persistence, and everything credential-related — password mode
+     (prompt/keyring/config), SFTP agent/key file, FTPS certificate
+     verification, SFTP known-host mode
 
 5. Improve transfer queue behavior.
    - Configurable parallelism — the cap is now `Model.maxParallel`
@@ -268,7 +302,9 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 6. Add protocol adapters.
    - Start with SFTP (`pkg/sftp`): it is testable in-process, unlike FTP,
      which needs a real daemon.
-   - Implement both `vfs.FS` and `transfer.Engine`.
+   - Implement `session.Dialer`, whose `Conn` supplies a `vfs.FS` and a
+     `transfer.Engine` over one SSH connection. Decide there whether
+     parallel transfers share that connection or open their own.
    - The fake adapters and their tests are the contract that proves the UI
      did not regress while real adapters land.
 
@@ -282,13 +318,19 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
 - No real FTP/FTPS/SFTP networking yet; `faketransfer` moves no bytes, it
   only emits a plausible event stream on a timer
-- Both adapter seams (`vfs.FS`, `transfer.Engine`) are ready for real
-  implementations; nothing else blocks an SFTP adapter
+- All three seams (`session.Dialer`, `vfs.FS`, `transfer.Engine`) are ready
+  for real implementations; nothing structural blocks an SFTP adapter
+- The connect overlay is a menu over hardcoded targets, not a form. There is
+  no text input in the app yet, so a host cannot be typed
+- No credential handling of any kind: nothing prompts, stores, or sends a
+  password, and `fakesession` needs none
+- A connection is never retried automatically after a drop
 - A listing that hangs is bounded only by `listTimeout` (20s) and cannot be
   cancelled from the UI — there is no key to abandon a slow directory
 - No config persistence yet
 - No saved profiles yet
 - No real credential storage yet
+- The connect overlay is keyboard-only; mouse clicks do not select a row in it
 - Mouse support is basic: focus/select, not full range selection or context
   menus. The click-to-row mapping depends on the chrome above the file panes
   (`firstFileRow` in `internal/ui/model.go`) and on `topPaneHeight`, which
