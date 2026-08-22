@@ -23,38 +23,36 @@ Implemented:
 - Shift-arrow pane resizing
 - Basic UI tests for layout, theme registration, and resizing
 
-Important caveat:
+Git repository state:
 
-- The project directory currently contains a placeholder `.git` directory that is
-  not a real Git repository. Because of that, `git status`, `git diff --check`,
-  and normal Go VCS stamping fail. Use `-buildvcs=false` until the project is
-  initialized as a normal repository or the placeholder is removed.
+- Initialized as a normal Git repository on `main`, pushed to
+  `git@github.com:allisonhere/TideFTP.git`. The old placeholder `.git`
+  directory is gone, so `-buildvcs=false` and the project-local Go caches
+  are no longer needed.
 
 ## Run And Verify
-
-Use project-local Go caches because the global Go cache paths were read-only in
-the Codex sandbox during setup.
 
 Run the TUI:
 
 ```bash
 cd /home/allieb/Projects/tideftp
-GOMODCACHE=$PWD/.cache/gomod GOCACHE=$PWD/.cache/gobuild GOSUMDB=off go run -buildvcs=false ./cmd/tideftp
+./start.sh
+# or: go run ./cmd/tideftp
 ```
 
 Verification commands used:
 
 ```bash
-GOMODCACHE=$PWD/.cache/gomod GOCACHE=$PWD/.cache/gobuild GOSUMDB=off go test -count=1 ./...
-GOMODCACHE=$PWD/.cache/gomod GOCACHE=$PWD/.cache/gobuild GOSUMDB=off go vet ./...
-GOMODCACHE=$PWD/.cache/gomod GOCACHE=$PWD/.cache/gobuild GOSUMDB=off go build -buildvcs=false -o /tmp/tideftp ./cmd/tideftp
+go test -count=1 ./...
+go vet ./...
+go build -o /tmp/tideftp ./cmd/tideftp
 ```
 
 Last known result:
 
 - `go test -count=1 ./...`: passed
 - `go vet ./...`: passed
-- `go build -buildvcs=false -o /tmp/tideftp ./cmd/tideftp`: passed
+- `go build -o /tmp/tideftp ./cmd/tideftp`: passed
 
 ## Product Decisions
 
@@ -163,9 +161,9 @@ behavior behind that interface.
 
 ## Suggested Next Steps
 
-1. Initialize or fix Git repository state.
-   - Remove the placeholder `.git` directory or replace it with a normal repo.
-   - After that, remove the need for `-buildvcs=false`.
+1. ~~Initialize or fix Git repository state.~~ Done — real repo on `main`,
+   pushed to `git@github.com:allisonhere/TideFTP.git`, `-buildvcs=false` no
+   longer needed.
 
 2. Extract a remote filesystem interface.
    - Keep UI code protocol-agnostic.

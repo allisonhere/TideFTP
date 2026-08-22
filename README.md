@@ -13,11 +13,14 @@ The first slice focuses on the polished app shell:
 
 ## Run
 
-This workspace currently has a placeholder `.git` directory, so disable Go's VCS
-stamping until the project is initialized as a normal repository:
+```bash
+./start.sh
+```
+
+or directly:
 
 ```bash
-GOMODCACHE=$PWD/.cache/gomod GOCACHE=$PWD/.cache/gobuild GOSUMDB=off go run -buildvcs=false ./cmd/tideftp
+go run ./cmd/tideftp
 ```
 
 ## Keys
