@@ -24,6 +24,8 @@ import (
 //	TIDEFTP_TEST_FTP_USER=name
 //	TIDEFTP_TEST_FTP_PASSWORD=secret
 //	TIDEFTP_TEST_FTP_PATH=/writable/dir
+//	TIDEFTP_TEST_FTP_TLS=1                (explicit AUTH TLS)
+//	TIDEFTP_TEST_FTP_CA=/path/to/cert.pem (trust a self-signed server cert)
 func liveConn(t *testing.T) (session.Conn, string) {
 	t.Helper()
 	address := os.Getenv("TIDEFTP_TEST_FTP_ADDR")
@@ -43,11 +45,17 @@ func liveConn(t *testing.T) (session.Conn, string) {
 		remoteDir = "/"
 	}
 
+	protocol := "ftp"
+	if os.Getenv("TIDEFTP_TEST_FTP_TLS") != "" {
+		protocol = "ftps"
+	}
 	conn, err := New(Config{
-		Password: os.Getenv("TIDEFTP_TEST_FTP_PASSWORD"),
-		Timeout:  15 * time.Second,
+		Password:    os.Getenv("TIDEFTP_TEST_FTP_PASSWORD"),
+		ExplicitTLS: protocol == "ftps",
+		RootCAFile:  os.Getenv("TIDEFTP_TEST_FTP_CA"),
+		Timeout:     15 * time.Second,
 	}).Dial(context.Background(), session.Target{
-		Protocol: "ftp", Host: host, Port: port,
+		Protocol: protocol, Host: host, Port: port,
 		User: os.Getenv("TIDEFTP_TEST_FTP_USER"), StartPath: remoteDir,
 	})
 	if err != nil {

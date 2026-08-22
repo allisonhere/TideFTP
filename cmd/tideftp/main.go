@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"os"
@@ -30,6 +31,9 @@ func main() {
 	startPath := flag.String("path", "", "remote directory to open on connect")
 	identity := flag.String("identity", "", "sftp: SSH private key file; without it the agent and the usual ~/.ssh keys are tried")
 	knownHosts := flag.String("known-hosts", "", "sftp: known_hosts file to verify the host key against (default ~/.ssh/known_hosts)")
+	ftpsCA := flag.String("ftps-ca", "", "ftps: PEM file to trust in addition to the system roots, for a self-signed server certificate")
+	ftpsInsecure := flag.Bool("ftps-insecure", false, "ftps: accept any server certificate (unsafe; prefer --ftps-ca)")
+	ftpsTLS13 := flag.Bool("ftps-allow-tls13", false, "ftps: allow TLS 1.3, which some servers mishandle on data connections")
 	flag.Parse()
 
 	if *showVersion {
@@ -37,7 +41,11 @@ func main() {
 		return
 	}
 
-	dialer, targets, err := buildSession(*protocol, *host, *port, *username, *startPath, *identity, *knownHosts)
+	dialer, targets, err := buildSession(sessionOptions{
+		protocol: *protocol, host: *host, port: *port, username: *username,
+		startPath: *startPath, identity: *identity, knownHosts: *knownHosts,
+		ftpsCA: *ftpsCA, ftpsInsecure: *ftpsInsecure, ftpsAllowTLS13: *ftpsTLS13,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
 		os.Exit(1)
@@ -53,7 +61,19 @@ func main() {
 // buildSession picks the real SFTP adapter when a host is named, and the demo
 // fakes otherwise. There is no form to type a host into yet, so the flags are
 // how a real server is reached.
-func buildSession(protocol, host string, port int, username, startPath, identity, knownHosts string) (session.Dialer, []session.Target, error) {
+type sessionOptions struct {
+	protocol, host       string
+	port                 int
+	username, startPath  string
+	identity, knownHosts string
+	ftpsCA               string
+	ftpsInsecure         bool
+	ftpsAllowTLS13       bool
+}
+
+func buildSession(options sessionOptions) (session.Dialer, []session.Target, error) {
+	protocol, host := options.protocol, options.host
+	username, startPath := options.username, options.startPath
 	if host == "" {
 		return demoSession(), demoTargets(), nil
 	}
@@ -75,7 +95,7 @@ func buildSession(protocol, host string, port int, username, startPath, identity
 		Name:      username + "@" + host,
 		Protocol:  protocol,
 		Host:      host,
-		Port:      port,
+		Port:      options.port,
 		User:      username,
 		StartPath: startPath,
 	}
@@ -86,20 +106,28 @@ func buildSession(protocol, host string, port int, username, startPath, identity
 		if os.Getenv(ftpsession.PasswordEnv) == "" {
 			return nil, nil, fmt.Errorf("%s protocol needs a password in %s", protocol, ftpsession.PasswordEnv)
 		}
-		return ftpsession.New(ftpsession.Config{ExplicitTLS: protocol == "ftps"}), []session.Target{target}, nil
+		config := ftpsession.Config{
+			ExplicitTLS:        protocol == "ftps",
+			RootCAFile:         options.ftpsCA,
+			InsecureSkipVerify: options.ftpsInsecure,
+		}
+		if options.ftpsAllowTLS13 {
+			config.MaxTLSVersion = tls.VersionTLS13
+		}
+		return ftpsession.New(config), []session.Target{target}, nil
 	}
 
 	// Password auth is offered only if one is in the environment; key-based
 	// methods are tried first either way.
-	config := sftpsession.DefaultConfig()
-	if identity != "" {
-		config.IdentityFiles = []string{identity}
-		config.UseAgent = false
+	sshConfig := sftpsession.DefaultConfig()
+	if options.identity != "" {
+		sshConfig.IdentityFiles = []string{options.identity}
+		sshConfig.UseAgent = false
 	}
-	if knownHosts != "" {
-		config.KnownHostsPath = knownHosts
+	if options.knownHosts != "" {
+		sshConfig.KnownHostsPath = options.knownHosts
 	}
-	return sftpsession.New(config), []session.Target{target}, nil
+	return sftpsession.New(sshConfig), []session.Target{target}, nil
 }
 
 func demoTargets() []session.Target {

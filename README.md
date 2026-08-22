@@ -29,8 +29,8 @@ That runs on the fake demo adapter. To reach a real server:
 # SFTP (the default protocol)
 go run ./cmd/tideftp --host files.example.com --user allie --path /srv/www
 
-# FTP
-TIDEFTP_FTP_PASSWORD=... go run ./cmd/tideftp --protocol ftp \
+# FTP, or FTPS with explicit TLS
+TIDEFTP_FTP_PASSWORD=... go run ./cmd/tideftp --protocol ftps \
     --host files.example.com --user allie --path /pub
 ```
 
@@ -38,6 +38,12 @@ SFTP authenticates with the SSH agent, the usual `~/.ssh` keys, or `--identity`
 for a specific key file. Host keys are checked strictly against
 `~/.ssh/known_hosts` (`--known-hosts` to point elsewhere); there is no option to
 skip that check.
+
+FTPS verifies the server certificate. For a self-signed one, trust it with
+`--ftps-ca cert.pem` rather than turning verification off; `--ftps-insecure`
+exists but accepts anything. FTPS is capped at TLS 1.2 by default because some
+servers mishandle TLS 1.3 on data connections, corrupting uploads over 16 KB —
+`--ftps-allow-tls13` lifts the cap.
 
 FTP and FTPS need a password. It is read from `TIDEFTP_FTP_PASSWORD`, and SFTP
 will use `TIDEFTP_SFTP_PASSWORD` if key-based methods do not work. Passwords are

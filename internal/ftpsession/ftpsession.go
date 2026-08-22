@@ -11,6 +11,7 @@ package ftpsession
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"os"
@@ -35,6 +36,22 @@ const (
 	// transfer parallelism plus browsing, and stay inside the data-port range
 	// a passive-mode server publishes.
 	DefaultMaxConns = 4
+	// DefaultMaxTLSVersion caps FTPS at TLS 1.2.
+	//
+	// This is deliberate and measured, not caution. Against vsftpd, uploads
+	// over a TLS 1.3 data connection fail at exactly 16384 bytes and above
+	// with 426 "Failure reading network stream", while anything smaller
+	// succeeds; the same uploads at any size succeed over TLS 1.2. The
+	// server is not at fault in general — curl uploads happily over TLS 1.3 —
+	// so this is an interop problem between crypto/tls and vsftpd's data
+	// connection handling that cannot be fixed from the client side.
+	//
+	// FTPS servers skew old, so a cap that works everywhere beats a default
+	// that silently corrupts large uploads. Config.MaxTLSVersion raises it.
+	DefaultMaxTLSVersion = tls.VersionTLS13 - 1
+	// sessionCacheSize only ever holds one session per server, but the cache
+	// is per-connection and a couple of spare slots cost nothing.
+	sessionCacheSize = 8
 	// keepaliveInterval is how often an idle connection is pinged. FTP has no
 	// equivalent of ssh.Client.Wait, so a dropped connection is only noticed by
 	// trying to use one.
@@ -49,14 +66,25 @@ const PasswordEnv = "TIDEFTP_FTP_PASSWORD"
 type Config struct {
 	// Password authenticates the user. Empty means read PasswordEnv.
 	Password string
-	// ExplicitTLS upgrades the connection with AUTH TLS (FTPS). Servers that
-	// do not advertise it will refuse.
+	// ExplicitTLS upgrades the connection with AUTH TLS (FTPS). Note that not
+	// every server advertises AUTH in FEAT even when it supports it — vsftpd
+	// does not — so this is a setting rather than something to autodetect.
 	ExplicitTLS bool
-	// TLSConfig is used when ExplicitTLS is set. Nil means a default config
-	// that verifies the server certificate.
+	// TLSConfig overrides everything below when set.
 	TLSConfig *tls.Config
-	Timeout   time.Duration
-	MaxConns  int
+	// RootCAFile is a PEM bundle trusted in addition to the system roots.
+	// Pointing it at a self-signed server certificate is how to use one
+	// without turning verification off, which is why it exists.
+	RootCAFile string
+	// InsecureSkipVerify accepts any certificate. It is off by default and
+	// belongs nowhere but a lab; prefer RootCAFile.
+	InsecureSkipVerify bool
+	// MaxTLSVersion caps the negotiated version. Zero means
+	// DefaultMaxTLSVersion; see the comment there for why that is not the
+	// newest version crypto/tls supports.
+	MaxTLSVersion uint16
+	Timeout       time.Duration
+	MaxConns      int
 }
 
 type Dialer struct {
@@ -89,9 +117,9 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn,
 			ftp.DialWithTimeout(timeout),
 		}
 		if d.cfg.ExplicitTLS {
-			config := d.cfg.TLSConfig
-			if config == nil {
-				config = &tls.Config{ServerName: target.Host, MinVersion: tls.VersionTLS12}
+			config, err := d.tlsConfig(target)
+			if err != nil {
+				return nil, err
 			}
 			options = append(options, ftp.DialWithExplicitTLS(config))
 		}
@@ -121,6 +149,50 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn,
 	connections.seed(first)
 
 	return newConn(connections), nil
+}
+
+// tlsConfig builds the FTPS client configuration. Verification is on unless
+// explicitly disabled: a self-signed server certificate is meant to be handled
+// by trusting it through RootCAFile, not by accepting every certificate.
+func (d *Dialer) tlsConfig(target session.Target) (*tls.Config, error) {
+	if d.cfg.TLSConfig != nil {
+		return d.cfg.TLSConfig.Clone(), nil
+	}
+	maxVersion := d.cfg.MaxTLSVersion
+	if maxVersion == 0 {
+		maxVersion = DefaultMaxTLSVersion
+	}
+	config := &tls.Config{
+		ServerName:         target.Host,
+		MinVersion:         tls.VersionTLS12,
+		MaxVersion:         maxVersion,
+		InsecureSkipVerify: d.cfg.InsecureSkipVerify,
+		// vsftpd defaults to require_ssl_reuse=YES: the data connection must
+		// resume the control connection's TLS session, or it answers "522 SSL
+		// connection failed: session reuse required". jlaffaye/ftp has no
+		// option for this, but it hands the same config to both connections,
+		// so a session cache lets crypto/tls resume on its own.
+		ClientSessionCache: tls.NewLRUClientSessionCache(sessionCacheSize),
+	}
+	if d.cfg.RootCAFile == "" {
+		return config, nil
+	}
+
+	pemBytes, err := os.ReadFile(d.cfg.RootCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", d.cfg.RootCAFile, err)
+	}
+	// Start from the system roots so pinning one server does not stop every
+	// normally-trusted server from working.
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if !roots.AppendCertsFromPEM(pemBytes) {
+		return nil, fmt.Errorf("%s contains no certificates", d.cfg.RootCAFile)
+	}
+	config.RootCAs = roots
+	return config, nil
 }
 
 // Conn is one logical FTP connection: a pool of control connections plus the

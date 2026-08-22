@@ -218,6 +218,30 @@ only noticed by trying to use one. `Conn.keepalive` sends a periodic `NOOP`;
 if the pool is too busy to lend a connection for it, that is itself evidence
 the connection is alive and the tick is skipped.
 
+### FTPS
+
+Three things had to be right before an upload worked against vsftpd, and each
+is a trap worth knowing:
+
+- **Session reuse.** vsftpd defaults to `require_ssl_reuse=YES`: the data
+  connection must resume the control connection's TLS session or it answers
+  522 "session reuse required". jlaffaye/ftp has no option for it, but it
+  hands the same `tls.Config` to both connections, so a `ClientSessionCache`
+  lets crypto/tls resume by itself.
+- **TLS 1.3.** Uploads over a TLS 1.3 data connection fail at exactly 16384
+  bytes and above with 426 "Failure reading network stream"; anything smaller
+  succeeds, and TLS 1.2 works at every size. curl over TLS 1.3 is fine, so
+  this is crypto/tls against vsftpd's data connection handling, not something
+  fixable here. FTPS is capped at TLS 1.2 (`DefaultMaxTLSVersion`), which
+  `Config.MaxTLSVersion` and `--ftps-allow-tls13` can lift.
+- **Self-signed certificates.** `--ftps-ca` trusts a PEM in addition to the
+  system roots, which is the way to use one. `--ftps-insecure` exists and
+  accepts anything; it is off by default and should stay a lab-only escape
+  hatch.
+
+`AUTH TLS` is not advertised in vsftpd's `FEAT` even when it works, so FTPS is
+a setting rather than something to autodetect.
+
 ### Live tests
 
 Both real adapters have live tests that skip unless their address variable is
@@ -375,9 +399,8 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
    - ~~SFTP.~~ Done — `internal/sftpsession`. Parallel transfers share one
      `sftp.Client`; if that turns out to throttle, giving each transfer its
      own client is the next thing to try.
-   - ~~FTP.~~ Done — `internal/ftpsession`, verified against a real server.
-   - FTPS is implemented (`--protocol ftps`, explicit `AUTH TLS`) but
-     **unverified**: the LAN test server does not advertise `AUTH TLS`.
+   - ~~FTP and FTPS.~~ Done — `internal/ftpsession`, both verified against a
+     real vsftpd server.
    - The fake adapters and their tests are the contract that proves the UI
      did not regress while real adapters land.
 
@@ -389,8 +412,7 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
 ## Known Gaps
 
-- SFTP and FTP work and are verified against a real server. FTPS is
-  implemented but unverified — no test server advertises `AUTH TLS`.
+- SFTP, FTP, and FTPS all work and are verified against real servers.
   `faketransfer` moves no bytes, it only emits a plausible event stream
 - `internal/ftpsession` has no hermetic tests: its unit tests cover listing
   conversion, paths, and the pool, but everything protocol-level needs the
