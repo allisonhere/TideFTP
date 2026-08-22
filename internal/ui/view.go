@@ -169,7 +169,10 @@ func (m Model) renderRemotePane(renderer tideui.Renderer, width, height int) str
 	case connFailed:
 		lines = append(lines, renderer.Styles.DetailTitle.Render("  Not connected"))
 		if m.connErr != nil {
-			lines = append(lines, "", renderer.Styles.StatusError.Render("  "+short(m.connErr.Error(), max(1, width-4))+"  "))
+			// The pane background, not the status bar's: a status-bar chip
+			// dropped into the middle of a pane brings its own colours with it.
+			bg := renderer.Styles.Theme.Bg
+			lines = append(lines, "", segment(bg, readableOn(renderer.Styles.Theme.Error, bg, textMinContrast), "  "+short(m.connErr.Error(), max(1, width-4))))
 		}
 		lines = append(lines, "", renderer.Styles.DetailMeta.Render("  Press c to pick a server and try again."))
 	default:
@@ -276,7 +279,11 @@ func (m Model) entryIcon(renderer tideui.Renderer, entry domain.Entry) string {
 	}
 }
 
-func (m Model) renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked bool, width int) string {
+// entryPalette resolves the colours one file row is painted with. Every
+// foreground is checked against the row's own background, which selection and
+// marking both change; a colour that fails the check gives way to plain black
+// or white, because a readable row matters more than a decorative one.
+func entryPalette(renderer tideui.Renderer, entry domain.Entry, cursor, marked bool) (bg, fg, name lipgloss.Color) {
 	base := renderer.Styles.Item
 	switch {
 	case cursor:
@@ -286,17 +293,30 @@ func (m Model) renderEntryRow(renderer tideui.Renderer, entry domain.Entry, curs
 	case entry.Hidden:
 		base = renderer.Styles.ItemMuted
 	}
-	bg, fg := rowSurface(renderer, base)
+	bg, fg = rowSurface(renderer, base)
 
-	nameColor := fg
+	// Hidden entries are meant to read as secondary, so they keep tideui's
+	// lower floor for muted text rather than being forced to full contrast.
+	floor := textMinContrast
+	if entry.Hidden && !cursor && !marked {
+		floor = dimMinContrast
+	}
+	fg = readableOn(fg, bg, floor)
+
+	name = fg
 	if !entry.Hidden {
 		switch entry.Kind {
 		case domain.EntryDir:
-			nameColor = renderer.Styles.Theme.BorderFocus
+			name = readableOn(renderer.Styles.Theme.BorderFocus, bg, textMinContrast)
 		case domain.EntrySymlink:
-			nameColor = renderer.Styles.Theme.Unread
+			name = readableOn(renderer.Styles.Theme.Unread, bg, textMinContrast)
 		}
 	}
+	return bg, fg, name
+}
+
+func (m Model) renderEntryRow(renderer tideui.Renderer, entry domain.Entry, cursor, marked bool, width int) string {
+	bg, fg, nameColor := entryPalette(renderer, entry, cursor, marked)
 
 	mark := "  "
 	if marked {
@@ -315,26 +335,45 @@ func (m Model) renderEntryRow(renderer tideui.Renderer, entry domain.Entry, curs
 	return clampView(content, width, 1, bg)
 }
 
-func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width int) string {
+// transferPalette resolves the colours one transfer row is painted with, on
+// the same terms as entryPalette: every foreground checked against the row's
+// own background.
+func transferPalette(renderer tideui.Renderer, status domain.TransferStatus) (bg, fg, accent lipgloss.Color) {
 	base := renderer.Styles.Item
-	if transfer.Status == domain.Done {
+	if status == domain.Done {
 		base = renderer.Styles.ItemMuted
 	}
-	bg, fg := rowSurface(renderer, base)
+	bg, fg = rowSurface(renderer, base)
 
-	statusColor := fg
+	floor := textMinContrast
+	if status == domain.Done {
+		floor = dimMinContrast
+	}
+	fg = readableOn(fg, bg, floor)
+
+	accent = fg
+	switch status {
+	case domain.Active:
+		accent = readableOn(renderer.Styles.Theme.BorderFocus, bg, textMinContrast)
+	case domain.Done:
+		accent = readableOn(renderer.Styles.Theme.Unread, bg, dimMinContrast)
+	case domain.Failed:
+		accent = readableOn(renderer.Styles.Theme.Error, bg, textMinContrast)
+	case domain.Queued:
+		accent = readableOn(renderer.Styles.Theme.Dimmed, bg, dimMinContrast)
+	}
+	return bg, fg, accent
+}
+
+func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width int) string {
+	bg, fg, statusColor := transferPalette(renderer, transfer.Status)
+
 	statusIcon := " "
 	switch transfer.Status {
-	case domain.Active:
-		statusColor = renderer.Styles.Theme.BorderFocus
 	case domain.Done:
-		statusColor = renderer.Styles.Theme.Unread
 		statusIcon = m.glyph(renderer, "✓", "+")
 	case domain.Failed:
-		statusColor = renderer.Styles.Theme.Error
 		statusIcon = m.glyph(renderer, "✗", "x")
-	case domain.Queued:
-		statusColor = renderer.Styles.Theme.Dimmed
 	}
 
 	dir := m.glyph(renderer, "↑", "^")

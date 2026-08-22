@@ -196,6 +196,29 @@ First build slice:
 
 ## Design Notes
 
+### Contrast
+
+tideui runs every foreground in `BuildStyles` through its own `readableText`,
+but that helper is **unexported**, and v0.2.2 is the latest release. Anywhere
+`internal/ui` picks a colour of its own — directory and symlink names, transfer
+status, the progress bar — it bypassed tideui's styles entirely and wrote a raw
+theme colour onto whatever background the row had. Selected and marked rows
+change that background, and nothing checked the result: 304 theme/row/kind
+combinations failed the 4.5 floor, the worst being a directory name painted in
+exactly the marked-row background colour.
+
+`internal/ui/contrast.go` mirrors tideui's maths (same WCAG relative luminance,
+same 4.5 and 3.0 thresholds) so that this package can apply the same check.
+**It is a duplicate, and should not stay one**: exporting `readableText` from
+tideui turns `readableOn` into a one-line call and deletes the rest of the
+file. Until then, keep the two in step.
+
+Colours are resolved in `entryPalette` and `transferPalette` rather than inline,
+so `TestEntryRowColoursAreReadable` and `TestTransferRowColoursAreReadable` can
+check every theme against every row state directly. Any new coloured text must
+go through `readableOn` against the background it is actually painted on, and
+gain a case in those tests.
+
 TideUI v0.2.2 has a built-in `ThreeColumn` layout, but TideFTP needs a
 FileZilla-like two-over-one layout. The current implementation uses TideUI for
 themes, pane frame styles, rows, soft panels, theme picker, and ratio helpers,
