@@ -14,6 +14,8 @@ package vfs
 
 import (
 	"context"
+	"path"
+	"strings"
 
 	"tideftp/internal/domain"
 )
@@ -28,4 +30,31 @@ type FS interface {
 	// Parent resolves the parent of current, returning current unchanged at
 	// the root. Pure path math, like Child.
 	Parent(current string) string
+}
+
+// Remote paths are always slash-separated, whatever the client's own OS is,
+// so these use path rather than filepath. Both remote adapters share them so
+// their navigation cannot drift apart.
+
+// CleanRemote normalises a remote path to an absolute POSIX one.
+func CleanRemote(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "/"
+	}
+	return path.Clean("/" + strings.TrimPrefix(value, "/"))
+}
+
+// ChildRemote resolves name inside current.
+func ChildRemote(current, name string) string {
+	return CleanRemote(path.Join(CleanRemote(current), name))
+}
+
+// ParentRemote resolves the parent of current, returning "/" at the root so
+// the UI knows there is nowhere further up to go.
+func ParentRemote(current string) string {
+	parent := path.Dir(CleanRemote(current))
+	if parent == "." {
+		return "/"
+	}
+	return parent
 }

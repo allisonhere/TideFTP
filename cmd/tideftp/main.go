@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"tideftp/internal/fakesession"
+	"tideftp/internal/ftpsession"
 	"tideftp/internal/localfs"
 	"tideftp/internal/session"
 	"tideftp/internal/sftpsession"
@@ -22,12 +23,13 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.BoolVar(showVersion, "v", false, "print the version and exit")
-	host := flag.String("host", "", "SFTP host to connect to; without it the app runs on the fake demo adapter")
-	port := flag.Int("port", 0, "SFTP port (default 22)")
-	username := flag.String("user", "", "SFTP username (default: the current user)")
+	host := flag.String("host", "", "host to connect to; without it the app runs on the fake demo adapter")
+	protocol := flag.String("protocol", "sftp", "sftp, ftp, or ftps")
+	port := flag.Int("port", 0, "port (default: 22 for sftp, 21 for ftp, 990 for ftps)")
+	username := flag.String("user", "", "username (default: the current user)")
 	startPath := flag.String("path", "", "remote directory to open on connect")
-	identity := flag.String("identity", "", "SSH private key file; without it the agent and the usual ~/.ssh keys are tried")
-	knownHosts := flag.String("known-hosts", "", "known_hosts file to verify the host key against (default ~/.ssh/known_hosts)")
+	identity := flag.String("identity", "", "sftp: SSH private key file; without it the agent and the usual ~/.ssh keys are tried")
+	knownHosts := flag.String("known-hosts", "", "sftp: known_hosts file to verify the host key against (default ~/.ssh/known_hosts)")
 	flag.Parse()
 
 	if *showVersion {
@@ -35,7 +37,7 @@ func main() {
 		return
 	}
 
-	dialer, targets, err := buildSession(*host, *port, *username, *startPath, *identity, *knownHosts)
+	dialer, targets, err := buildSession(*protocol, *host, *port, *username, *startPath, *identity, *knownHosts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
 		os.Exit(1)
@@ -51,9 +53,14 @@ func main() {
 // buildSession picks the real SFTP adapter when a host is named, and the demo
 // fakes otherwise. There is no form to type a host into yet, so the flags are
 // how a real server is reached.
-func buildSession(host string, port int, username, startPath, identity, knownHosts string) (session.Dialer, []session.Target, error) {
+func buildSession(protocol, host string, port int, username, startPath, identity, knownHosts string) (session.Dialer, []session.Target, error) {
 	if host == "" {
 		return demoSession(), demoTargets(), nil
+	}
+	switch protocol {
+	case "sftp", "ftp", "ftps":
+	default:
+		return nil, nil, fmt.Errorf("unknown protocol %q: want sftp, ftp, or ftps", protocol)
 	}
 
 	if username == "" {
@@ -64,6 +71,26 @@ func buildSession(host string, port int, username, startPath, identity, knownHos
 		username = current.Username
 	}
 
+	target := session.Target{
+		Name:      username + "@" + host,
+		Protocol:  protocol,
+		Host:      host,
+		Port:      port,
+		User:      username,
+		StartPath: startPath,
+	}
+
+	if protocol == "ftp" || protocol == "ftps" {
+		// The password comes from the environment, not a flag: a flag would
+		// put it in the process table for every other user on the box to read.
+		if os.Getenv(ftpsession.PasswordEnv) == "" {
+			return nil, nil, fmt.Errorf("%s protocol needs a password in %s", protocol, ftpsession.PasswordEnv)
+		}
+		return ftpsession.New(ftpsession.Config{ExplicitTLS: protocol == "ftps"}), []session.Target{target}, nil
+	}
+
+	// Password auth is offered only if one is in the environment; key-based
+	// methods are tried first either way.
 	config := sftpsession.DefaultConfig()
 	if identity != "" {
 		config.IdentityFiles = []string{identity}
@@ -71,15 +98,6 @@ func buildSession(host string, port int, username, startPath, identity, knownHos
 	}
 	if knownHosts != "" {
 		config.KnownHostsPath = knownHosts
-	}
-
-	target := session.Target{
-		Name:      username + "@" + host,
-		Protocol:  "sftp",
-		Host:      host,
-		Port:      port,
-		User:      username,
-		StartPath: startPath,
 	}
 	return sftpsession.New(config), []session.Target{target}, nil
 }

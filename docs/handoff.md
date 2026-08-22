@@ -22,8 +22,8 @@ Implemented:
 - Connection lifecycle (`internal/session`) with a simulated dialer under
   `internal/fakesession`: connect, disconnect, reconnect, connect failure,
   and dropped connections
-- Real SFTP under `internal/sftpsession`, tested against an in-process SSH
-  server, reachable with `--host`
+- Real SFTP under `internal/sftpsession` and real FTP under
+  `internal/ftpsession`, reachable with `--protocol`/`--host`
 - Bottom tabs: Queue, Active, Failed, History, Log
 - Theme picker on `t`
 - Connect, help, and conflict modals
@@ -183,6 +183,8 @@ First build slice:
 - `internal/sftpsession/testserver_test.go`: a real SSH server with pkg/sftp's
   server half, on a loopback listener rooted at a temp directory. The adapter
   is tested against genuine protocol traffic, with no external sshd
+- `internal/ftpsession/`: the real FTP/FTPS adapter, over jlaffaye/ftp.
+  `pool.go` is the part that differs from SFTP and drives the package
 - `internal/ui/model.go`: Bubble Tea state, update loop, listing requests and
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
@@ -195,6 +197,42 @@ First build slice:
 - `README.md`: quick run instructions and keybindings
 
 ## Design Notes
+
+### FTP connections are borrowed, not shared
+
+An SSH connection multiplexes, so `internal/sftpsession` shares one
+`sftp.Client` between both panes and every transfer. An FTP control connection
+does not: it carries one command at a time, so a listing and two running
+transfers each need their own. `internal/ftpsession/pool.go` caps how many
+exist and lends them out, which also keeps the count inside the range of data
+ports a passive-mode server publishes.
+
+Two consequences worth remembering. The pool's cap has to cover the UI's
+transfer parallelism *plus* browsing, or a listing waits behind transfers. And
+a connection whose command failed or was cancelled is discarded rather than
+returned: its control stream may be mid-response, and reusing it corrupts every
+later command.
+
+FTP also has no equivalent of `ssh.Client.Wait`, so a dropped connection is
+only noticed by trying to use one. `Conn.keepalive` sends a periodic `NOOP`;
+if the pool is too busy to lend a connection for it, that is itself evidence
+the connection is alive and the tick is skipped.
+
+### Live tests
+
+Both real adapters have live tests that skip unless their address variable is
+set, so `go test ./...` stays green anywhere:
+
+```bash
+TIDEFTP_TEST_FTP_ADDR=host:port TIDEFTP_TEST_FTP_USER=... \
+TIDEFTP_TEST_FTP_PASSWORD=... TIDEFTP_TEST_FTP_PATH=/dir \
+go test -run Live ./internal/ftpsession
+```
+
+`internal/sftpsession` takes the same variables with `SFTP` in place of `FTP`,
+plus `TIDEFTP_TEST_SFTP_KNOWN_HOSTS`. These complement the hermetic tests
+rather than replacing them; SFTP still has a full in-process server, FTP does
+not.
 
 ### Contrast
 
@@ -337,8 +375,9 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
    - ~~SFTP.~~ Done — `internal/sftpsession`. Parallel transfers share one
      `sftp.Client`; if that turns out to throttle, giving each transfer its
      own client is the next thing to try.
-   - FTP and FTPS remain. They need a real daemon to test against, so
-     budget for that before starting.
+   - ~~FTP.~~ Done — `internal/ftpsession`, verified against a real server.
+   - FTPS is implemented (`--protocol ftps`, explicit `AUTH TLS`) but
+     **unverified**: the LAN test server does not advertise `AUTH TLS`.
    - The fake adapters and their tests are the contract that proves the UI
      did not regress while real adapters land.
 
@@ -350,10 +389,16 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
 ## Known Gaps
 
-- SFTP works; FTP and FTPS do not exist yet. `faketransfer` moves no bytes,
-  it only emits a plausible event stream on a timer
-- SFTP auth is the agent and key files only. A passphrase-protected key is
-  reported, not prompted for, and password auth waits on the connect form
+- SFTP and FTP work and are verified against a real server. FTPS is
+  implemented but unverified — no test server advertises `AUTH TLS`.
+  `faketransfer` moves no bytes, it only emits a plausible event stream
+- `internal/ftpsession` has no hermetic tests: its unit tests cover listing
+  conversion, paths, and the pool, but everything protocol-level needs the
+  live server. SFTP has an in-process server and FTP should get one too
+- Passwords come from the environment (`TIDEFTP_FTP_PASSWORD`,
+  `TIDEFTP_SFTP_PASSWORD`), never a flag. A passphrase-protected SSH key is
+  reported rather than prompted for; real credential handling waits on the
+  connect form
 - Host keys are verified strictly against known_hosts, with no ask or
   accept-once flow: both need a prompt that does not exist yet. A missing
   known_hosts fails the connection closed, which is deliberate

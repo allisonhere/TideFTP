@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"sort"
 	"strings"
 
@@ -32,7 +31,7 @@ func (f *FS) List(ctx context.Context, dirPath string, showHidden bool) ([]domai
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	dirPath = cleanPath(dirPath)
+	dirPath = vfs.CleanRemote(dirPath)
 
 	type result struct {
 		entries []domain.Entry
@@ -78,19 +77,9 @@ func (f *FS) List(ctx context.Context, dirPath string, showHidden bool) ([]domai
 	}
 }
 
-func (f *FS) Child(current, name string) string {
-	return cleanPath(path.Join(cleanPath(current), name))
-}
+func (f *FS) Child(current, name string) string { return vfs.ChildRemote(current, name) }
 
-// Parent returns current unchanged at the root, which is how the UI knows
-// there is nowhere further up to go.
-func (f *FS) Parent(current string) string {
-	parent := path.Dir(cleanPath(current))
-	if parent == "." {
-		return "/"
-	}
-	return parent
-}
+func (f *FS) Parent(current string) string { return vfs.ParentRemote(current) }
 
 func entryKind(mode os.FileMode) domain.EntryKind {
 	switch {
@@ -101,14 +90,4 @@ func entryKind(mode os.FileMode) domain.EntryKind {
 	default:
 		return domain.EntryFile
 	}
-}
-
-// cleanPath normalises a remote path to an absolute POSIX one. Remote paths are
-// always slash-separated regardless of the client's own OS, so path is correct
-// here and filepath would not be.
-func cleanPath(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "/"
-	}
-	return path.Clean("/" + strings.TrimPrefix(value, "/"))
 }

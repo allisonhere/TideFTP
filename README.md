@@ -9,7 +9,7 @@ The first slice focuses on the polished app shell:
 - Whatthedock-style soft modal screens with drop shadows.
 - `tide-night` default theme plus a live theme picker.
 - Shift-arrow pane resizing.
-- Real SFTP over the same adapter interfaces, plus a fake adapter for UI work.
+- Real SFTP and FTP over the same adapter interfaces, plus fakes for UI work.
 
 ## Run
 
@@ -23,17 +23,26 @@ or directly:
 go run ./cmd/tideftp
 ```
 
-That runs on the fake demo adapter. To reach a real server over SFTP:
+That runs on the fake demo adapter. To reach a real server:
 
 ```bash
+# SFTP (the default protocol)
 go run ./cmd/tideftp --host files.example.com --user allie --path /srv/www
+
+# FTP
+TIDEFTP_FTP_PASSWORD=... go run ./cmd/tideftp --protocol ftp \
+    --host files.example.com --user allie --path /pub
 ```
 
-Authentication is the SSH agent and the usual `~/.ssh` keys, or `--identity`
-for a specific key file. Password entry does not exist yet, so a
-passphrase-protected key needs an agent. Host keys are checked strictly
-against `~/.ssh/known_hosts` (`--known-hosts` to point elsewhere); there is no
-option to skip that check.
+SFTP authenticates with the SSH agent, the usual `~/.ssh` keys, or `--identity`
+for a specific key file. Host keys are checked strictly against
+`~/.ssh/known_hosts` (`--known-hosts` to point elsewhere); there is no option to
+skip that check.
+
+FTP and FTPS need a password. It is read from `TIDEFTP_FTP_PASSWORD`, and SFTP
+will use `TIDEFTP_SFTP_PASSWORD` if key-based methods do not work. Passwords are
+deliberately not flags: a flag puts the secret in the process table for every
+other user on the machine to read.
 
 Check the version of a built binary with `tideftp --version` (release builds inject it
 via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag reports

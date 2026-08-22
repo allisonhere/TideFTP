@@ -2,9 +2,10 @@
 // three adapter seams for it: session.Dialer, and — through the Conn it
 // returns — vfs.FS for browsing and transfer.Engine for moving bytes.
 //
-// Authentication is limited to the SSH agent and key files on purpose. Both
-// work without typing a secret, and the app has no text input yet; password
-// auth arrives with the connect form.
+// Authentication is the SSH agent, key files, and a password read from the
+// environment. None of them need the text input the app does not have yet. A
+// password is deliberately not a command-line flag: that would put it in the
+// process table for every other user on the machine to read.
 //
 // Host keys are checked strictly against a known_hosts file. There is no
 // option here to skip that check: "accept anything for now" is the kind of
@@ -14,6 +15,8 @@ package sftpsession
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
@@ -38,10 +41,17 @@ var (
 )
 
 // Config is how a Dialer authenticates and verifies hosts.
+// PasswordEnv is the environment variable a password is read from when the
+// server wants one.
+const PasswordEnv = "TIDEFTP_SFTP_PASSWORD"
+
 type Config struct {
 	// KnownHostsPath is the file host keys are checked against. Empty means
 	// ~/.ssh/known_hosts.
 	KnownHostsPath string
+	// Password authenticates when key-based methods do not. Empty means read
+	// PasswordEnv; still empty means no password is offered at all.
+	Password string
 	// IdentityFiles are private key paths to offer, in order. Encrypted keys
 	// are reported rather than prompted for.
 	IdentityFiles []string
@@ -112,12 +122,20 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn,
 		_ = conn.SetDeadline(time.Now().Add(timeout))
 	}
 
-	clientConn, channels, requests, err := ssh.NewClientConn(conn, address, &ssh.ClientConfig{
+	clientConfig := &ssh.ClientConfig{
 		User:            target.User,
 		Auth:            auth,
 		HostKeyCallback: hostKeys,
 		Timeout:         timeout,
-	})
+	}
+	// Restrict negotiation to the host key types actually pinned for this
+	// host, or the server offers whichever type the client prefers and a
+	// known host fails as a "key mismatch".
+	if algorithms := pinnedHostKeyAlgorithms(hostKeys, address); len(algorithms) > 0 {
+		clientConfig.HostKeyAlgorithms = algorithms
+	}
+
+	clientConn, channels, requests, err := ssh.NewClientConn(conn, address, clientConfig)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("ssh %s: %w", address, err)
@@ -157,10 +175,21 @@ func (d *Dialer) authMethods() ([]ssh.AuthMethod, error) {
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
+	// Password goes last so the key-based methods are tried first.
+	if password := d.password(); password != "" {
+		methods = append(methods, ssh.Password(password))
+	}
 	if len(methods) == 0 {
-		return nil, errors.New("no usable credentials: start an ssh agent or configure a key file")
+		return nil, fmt.Errorf("no usable credentials: start an ssh agent, configure a key file, or set %s", PasswordEnv)
 	}
 	return methods, nil
+}
+
+func (d *Dialer) password() string {
+	if d.cfg.Password != "" {
+		return d.cfg.Password
+	}
+	return os.Getenv(PasswordEnv)
 }
 
 func agentAuth() (ssh.AuthMethod, error) {
@@ -189,6 +218,55 @@ func (d *Dialer) hostKeyCallback() (ssh.HostKeyCallback, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return callback, nil
+}
+
+// pinnedHostKeyAlgorithms reports which host key types known_hosts holds for
+// address.
+//
+// A host with several host keys — most do — offers whichever type the client
+// asks for. If known_hosts pins only the ed25519 key and the client negotiates
+// RSA, verification fails with "key mismatch" even though the host is known
+// and unchanged. x/crypto has no helper for this, so the trick is to ask the
+// callback about a key that cannot possibly match: for a known host it returns
+// a KeyError listing the keys it does have.
+func pinnedHostKeyAlgorithms(callback ssh.HostKeyCallback, address string) []string {
+	_, probe, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil
+	}
+	signer, err := ssh.NewSignerFromKey(probe)
+	if err != nil {
+		return nil
+	}
+	remote, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return nil
+	}
+
+	var keyErr *knownhosts.KeyError
+	if !errors.As(callback(address, remote, signer.PublicKey()), &keyErr) {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	algorithms := make([]string, 0, len(keyErr.Want)*3)
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			algorithms = append(algorithms, name)
+		}
+	}
+	for _, known := range keyErr.Want {
+		kind := known.Key.Type()
+		add(kind)
+		if kind == ssh.KeyAlgoRSA {
+			// The same RSA host key also serves the SHA-2 signature
+			// algorithms, which modern servers prefer and some require.
+			add(ssh.KeyAlgoRSASHA256)
+			add(ssh.KeyAlgoRSASHA512)
+		}
+	}
+	return algorithms
 }
 
 // Conn is one live SSH connection, shared by the filesystem and the engine.
