@@ -1,0 +1,4 @@
+.cache/
+/tideftp
+dist/
+*.log
