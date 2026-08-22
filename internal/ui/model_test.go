@@ -10,6 +10,7 @@ import (
 
 	"github.com/allisonhere/tideui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
@@ -1194,5 +1195,68 @@ func TestQueuingOnlyDirectoriesReportsAnError(t *testing.T) {
 	}
 	if !model.statusErr || !strings.Contains(model.status, "recursive transfers are not supported") {
 		t.Fatalf("status = %q (err=%v), want a clear explanation", model.status, model.statusErr)
+	}
+}
+
+// TestFirstFileRowMatchesTheRenderedLayout pins the mouse row mapping to what
+// the view actually draws.
+//
+// firstFileRow is a constant asserting how tall the chrome above the file
+// panes is. Nothing enforced that, and it was wrong: the topbar laid itself
+// out against the full width while its style added a column of padding on each
+// side, so it wrapped onto a second row and shifted every row below it. The
+// pane header and the column header wrapped at narrow widths too. Because the
+// final view is clamped to the terminal height, a wrap is invisible — it just
+// pushes the status bar off the bottom — so only a check like this catches it.
+func TestFirstFileRowMatchesTheRenderedLayout(t *testing.T) {
+	// The marker goes in the mode column, which renders near the left edge of
+	// the row. A name would be truncated away entirely in a narrow pane and
+	// the test would be measuring its own marker rather than the layout.
+	const marker = "ZZfirstZZ"
+	sizes := [][2]int{{60, 20}, {80, 24}, {100, 30}, {120, 36}, {160, 44}, {200, 50}}
+
+	for _, size := range sizes {
+		model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+		model.width, model.height = size[0], size[1]
+		model.local.entries = []domain.Entry{{Name: "first", Mode: marker}, {Name: "second"}, {Name: "third"}}
+		model.local.cursor, model.local.offset = 0, 0
+
+		lines := strings.Split(model.View(), "\n")
+		row := -1
+		for index, line := range lines {
+			if strings.Contains(ansi.Strip(line), marker) {
+				row = index
+				break
+			}
+		}
+		if row != firstFileRow {
+			t.Fatalf("%dx%d: first entry drawn on row %d, but firstFileRow is %d — clicks would be off by %d",
+				size[0], size[1], row, firstFileRow, row-firstFileRow)
+		}
+
+		// A wrap anywhere in the chrome pushes the status bar off the bottom,
+		// so its presence on the last row is a second check on the same thing.
+		// The hint is truncated at narrow widths, so match its opening words.
+		if last := ansi.Strip(lines[len(lines)-1]); !strings.Contains(last, "tab pane") {
+			t.Fatalf("%dx%d: status bar missing from the last row, got %q", size[0], size[1], last)
+		}
+	}
+}
+
+func TestMouseClickRespectsTheScrollOffset(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.width, model.height = 120, 36
+	entries := make([]domain.Entry, 40)
+	for i := range entries {
+		entries[i] = domain.Entry{Name: string(rune('a' + i%26))}
+	}
+	model.local.entries = entries
+	model.local.cursor, model.local.offset = 0, 7
+
+	next, _ := model.updateMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 5, Y: firstFileRow + 3})
+	model = next.(Model)
+
+	if want := 7 + 3; model.local.cursor != want {
+		t.Fatalf("click three rows into a pane scrolled to %d selected %d, want %d", 7, model.local.cursor, want)
 	}
 }

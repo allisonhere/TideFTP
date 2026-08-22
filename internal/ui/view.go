@@ -68,6 +68,24 @@ func (m Model) remotePaneHint() string {
 	return m.state.String()
 }
 
+// fitRow renders text as exactly one row of the given width. Every row in the
+// panes is laid out at a fixed width, and anything longer wraps onto a second
+// line, pushing everything below it down — which is how a click lands on the
+// wrong entry, and how the bottom pane's row count stops matching what it
+// draws. Truncating is the fix; firstLine is the backstop.
+func fitRow(style lipgloss.Style, width int, text string) string {
+	return firstLine(style.Width(width).Render(short(text, width)))
+}
+
+// firstLine guards against a style wrapping content onto a second row, which
+// would push every row below it down and break the mouse row mapping.
+func firstLine(value string) string {
+	if index := strings.IndexByte(value, '\n'); index >= 0 {
+		return value[:index]
+	}
+	return value
+}
+
 // paneTitle appends a spinner-free loading marker while a listing is in
 // flight. It stays in the title rather than replacing the body so the pane's
 // current contents remain readable and usable during a slow listing.
@@ -82,9 +100,10 @@ func (m Model) renderTopbar(renderer tideui.Renderer) string {
 	left := renderer.Styles.StatusNotice.Render(" TideFTP ")
 	conn := renderer.Styles.StatusBar.Render(" " + m.connectionSummary() + " ")
 	right := fmt.Sprintf(" %d queued  %s  split %.0f/%.0f ", countStatus(m.transfers, domain.Queued), m.theme.Name, m.fileSplit.Value()*100, (1-m.fileSplit.Value())*100)
-	content := left + conn
-	padding := max(0, m.width-lipgloss.Width(content)-lipgloss.Width(right))
-	return renderer.Styles.StatusBar.Width(m.width).Render(content + strings.Repeat(" ", padding) + right)
+	// The StatusBar style pads one column on each side, so the line it is
+	// given must be m.width-2. Laying out against m.width made the topbar
+	// wrap onto a second row, which shifted every row below it.
+	return renderer.Styles.StatusBar.Width(m.width).Render(align(left+conn, right, m.width-statusBarPadding))
 }
 
 func (m Model) renderStatus(renderer tideui.Renderer) string {
@@ -94,7 +113,7 @@ func (m Model) renderStatus(renderer tideui.Renderer) string {
 	}
 	left := leftStyle.Render(" " + m.status + " ")
 	right := "tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arrows resize  ? help  q quit"
-	return renderer.Styles.StatusBar.Width(m.width).Render(align(left, right, m.width-2))
+	return renderer.Styles.StatusBar.Width(m.width).Render(align(left, right, m.width-statusBarPadding))
 }
 
 func (m Model) renderPane(renderer tideui.Renderer, title, hint, content string, width, height int, focused bool) string {
@@ -106,6 +125,7 @@ func (m Model) renderPane(renderer tideui.Renderer, title, hint, content string,
 	innerW := max(1, width-2)
 	innerH := max(1, height-2)
 	header := headerStyle.Width(innerW).Render(align(title, hint, innerW))
+	header = firstLine(header)
 	bodyHeight := max(0, innerH-1)
 	body := clampView(content, innerW, bodyHeight, renderer.Styles.Theme.Bg)
 	frame := renderer.Styles.PaneFrame(focused, "").Width(innerW).Height(innerH)
@@ -115,7 +135,7 @@ func (m Model) renderPane(renderer tideui.Renderer, title, hint, content string,
 func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, height int) string {
 	width, height = max(1, width), max(1, height)
 	rows := make([]string, 0, len(pane.entries)+1)
-	rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render("mode        size        modified        name"))
+	rows = append(rows, fitRow(renderer.Styles.DetailMeta, width, "mode        size        modified        name"))
 	visible := max(0, height-1)
 	// Render from a local offset: pane is a copy, so writing back to
 	// pane.offset here would be silently discarded. clampCursors owns the
@@ -130,7 +150,7 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 		if pane.loading {
 			label = "loading…"
 		}
-		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render(label))
+		rows = append(rows, fitRow(renderer.Styles.DetailMeta, width, label))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -178,11 +198,11 @@ func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) str
 		start := min(m.bottomOffset, max(0, len(m.logs)-visible))
 		end := min(len(m.logs), start+visible)
 		for i := start; i < end; i++ {
-			rows = append(rows, renderer.Styles.DetailBody.Width(width).Render(m.logs[i]))
+			rows = append(rows, fitRow(renderer.Styles.DetailBody, width, m.logs[i]))
 		}
 	}
 	if len(rows) == 1 {
-		rows = append(rows, renderer.Styles.DetailMeta.Width(width).Render("no rows yet"))
+		rows = append(rows, fitRow(renderer.Styles.DetailMeta, width, "no rows yet"))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -352,7 +372,7 @@ func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
 		}
 		parts = append(parts, style.Render(" "+label+" "))
 	}
-	return renderer.Styles.DetailBody.Width(width).Render(strings.Join(parts, " "))
+	return fitRow(renderer.Styles.DetailBody, width, strings.Join(parts, " "))
 }
 
 func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
@@ -595,7 +615,27 @@ func clampView(value string, width, height int, bg lipgloss.Color) string {
 	return strings.Join(out, "\n")
 }
 
+// statusBarPadding is the horizontal padding tideui's StatusBar style adds,
+// one column per side.
+const statusBarPadding = 2
+
+// align lays left and right out on a single line of exactly width columns.
+//
+// It must never return more than width: every caller renders the result into
+// a fixed-width style, and an over-long line wraps onto a second row. For the
+// pane headers and the status bars that silently shifts everything below them
+// down, which is how mouse clicks end up on the wrong row. The left side wins
+// when there is not enough space, since it holds the title.
 func align(left, right string, width int) string {
+	width = max(1, width)
+	left = ansi.Truncate(left, width, "")
+	room := width - lipgloss.Width(left) - 1
+	if room <= 0 {
+		return left
+	}
+	if lipgloss.Width(right) > room {
+		right = short(right, room)
+	}
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
-	return left + strings.Repeat(" ", gap) + right
+	return ansi.Truncate(left+strings.Repeat(" ", gap)+right, width, "")
 }

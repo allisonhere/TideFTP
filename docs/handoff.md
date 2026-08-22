@@ -359,8 +359,15 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 - Mouse support is basic: focus/select, not full range selection or context
   menus. The click-to-row mapping depends on the chrome above the file panes
   (`firstFileRow` in `internal/ui/model.go`) and on `topPaneHeight`, which
-  `View` and the hit test must keep sharing — changing the topbar or pane
-  header height means updating `firstFileRow`
+  `View` and the hit test must keep sharing.
+  `TestFirstFileRowMatchesTheRenderedLayout` pins `firstFileRow` to what the
+  view actually draws, across several terminal sizes — keep it passing rather
+  than adjusting the constant by hand.
+  Every row in the panes is drawn at a fixed width, and a row longer than that
+  width wraps onto a second line, shifting everything below it. The final view
+  is clamped to the terminal height, so a wrap is invisible: it pushes the
+  status bar off the bottom instead of showing up. `fitRow` and `align` exist
+  to stop that, and any new fixed-width row should go through one of them
 - No recursive transfer summary yet
 - Conflict modal is visual/simulated, not wired to transfer policy yet;
   it is a demo opened with `o` (it used to be `delete`, which read as
