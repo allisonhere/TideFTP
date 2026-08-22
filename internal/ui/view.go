@@ -172,17 +172,40 @@ func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
 func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 	switch m.overlay {
 	case overlayHelp:
+		keyRow := func(key, label string) string {
+			return renderer.RenderSoftRow(tideui.SoftRow{Text: key, Suffix: label}, 64)
+		}
 		content := []string{
 			renderer.Styles.DetailTitle.Render("Keyboard"),
-			"tab/shift+tab switch panes   enter open   backspace parent",
-			"space select   ctrl+a select all   esc clear/cancel",
-			"u upload   d download   delete conflict actions",
-			"shift+left/right resize file panes   shift+up/down resize transfers",
-			"t theme   c connect   . hidden files   1-5 bottom tabs",
 			"",
-			renderer.RenderSoftHints(56, tideui.SoftHint{Key: "esc", Label: "close"}),
+			renderer.Styles.DetailMeta.Render("Navigate"),
+			keyRow("tab / shift+tab", "switch panes"),
+			keyRow("up/down, k/j", "move cursor"),
+			keyRow("pgup / pgdown", "page up / down"),
+			keyRow("enter", "open directory"),
+			keyRow("backspace / h", "parent directory"),
+			"",
+			renderer.Styles.DetailMeta.Render("Act"),
+			keyRow("space", "toggle selection"),
+			keyRow("ctrl+a", "select all"),
+			keyRow("esc", "clear selection / cancel"),
+			keyRow("u", "upload"),
+			keyRow("d", "download"),
+			keyRow("r", "refresh"),
+			keyRow(".", "toggle hidden files"),
+			"",
+			renderer.Styles.DetailMeta.Render("View"),
+			keyRow("c", "connect"),
+			keyRow("t", "theme picker"),
+			keyRow("shift+left/right", "resize file panes"),
+			keyRow("shift+up/down", "resize transfer pane"),
+			keyRow("ctrl+0", "reset layout"),
+			keyRow("1-5", "bottom tabs"),
+			keyRow("q / ctrl+c", "quit"),
+			"",
+			renderer.RenderSoftHints(64, tideui.SoftHint{Key: "esc", Label: "close"}),
 		}
-		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "help", Width: 62, Content: renderer.RenderSoftBody(62, strings.Join(content, "\n"))})
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "help", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(content, "\n"))})
 		return &overlay
 	case overlayConnect:
 		rows := []string{
