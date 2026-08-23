@@ -67,6 +67,15 @@ Implemented:
   *already-known* host still always fails closed, unconditionally — this
   flow only ever applies to a host with no entry at all (see **Host key
   trust**)
+- Real conflict resolution (see **Conflict resolution**): queuing a file now
+  checks its destination, and any that already exists opens `overlayConflict`
+  with the full FileZilla-style option list from Product Decisions —
+  Overwrite / Overwrite if source newer / Overwrite if different size /
+  Overwrite if different size or source newer / Resume / Rename / Skip —
+  applied to the whole conflicting batch at once. `enter` applies it to this
+  queue, `s` applies it and remembers it for the session. Resume is real:
+  both `internal/sftpsession` and `internal/ftpsession` now move bytes
+  starting from an offset instead of always truncating the destination
 
 Git repository state:
 
@@ -892,6 +901,81 @@ Decisions above. There's no config-level way to say "never prompt, just
 fail" or "never prompt, just accept" for a given profile or globally —
 every unknown host reaches `overlayHostKey` today, with no override.
 
+### Conflict resolution
+
+Detecting a conflict does not need a new `vfs.FS` method. `internal/ui`
+already has `dstFS.List(ctx, dir, true)` — the same call
+`beginPreflightScan` (`internal/ui/model.go`) already uses to walk the
+*source* side of a folder queue — so checking the *destination* side is
+just a second pass over the same scan: group the flattened file list by
+`dstFS.Parent(f.dst)`, list each unique directory once, and match names.
+A directory that fails to list (doesn't exist yet) just means nothing
+conflicts there, not a scan failure. This is why `internal/vfs`,
+`internal/localfs`, `internal/fakefs`, `internal/sftpsession/fs.go`, and
+`internal/ftpsession/fs.go` needed no changes at all for this feature.
+
+Every queue action goes through `beginPreflightScan` now, not just a folder
+selection — a plain single file has to be checked for a conflict too, and
+the only way to check is a `List` of its destination directory. This costs
+one extra async round trip even in the common no-conflict case, trading
+away the old synchronous "instant queue" for a plain file. It's a
+deliberate trade, not an oversight: the alternative is not checking, which
+defeats the feature. `applyPreflightScan` is what keeps the *outcome*
+unchanged for that common case — no conflicts and no folder still queues
+immediately, no overlay, exactly as before; only when a conflict is
+actually found does anything visibly change.
+
+`commitScan` (`internal/ui/conflict.go`) is the one place a resolved
+`preflightScan` becomes queued `domain.Transfer` rows. It replaces three
+previously-separate copies of nearly the same append loop: the plain-file
+instant-queue path (now gone), `confirmPreflightQueue`'s folder-summary
+confirm, and the new conflict-resolved path all funnel through it now,
+parameterized by an optional `*conflictPolicy` (nil means "nothing to
+resolve, queue everything"). A fix to how a `domain.Transfer` gets built
+from a scan now lives in one place.
+
+Six of the seven Product Decisions options are per-file rules evaluated
+inside `commitScan`'s loop even though the *prompt* is a single batch
+decision (see **Context** in the plan this shipped from — a deliberate
+scope cut from FileZilla's true per-file "this file" scope, which would
+prompt once per conflicting file): "Overwrite if source newer" still only
+overwrites the files that are actually newer, "Resume" still only resumes
+files with something left to resume, and so on — one policy choice, evaluated
+per file. `conflictResume`'s guard (`f.conflict.Size >= f.size`) matters
+here: a destination already at least as large as the source has nothing
+left to continue, so it's treated as already complete and skipped rather
+than resumed into a corrupt state or silently truncated.
+
+`Model.sessionConflictPolicy` (the "s" key's scope) is a bare
+`*conflictPolicy` field, not persisted through `config.SaveFunc` the way
+every other setting in `internal/config` is. That's deliberate: "this
+session" in the product decision means exactly that — it resets on
+restart — and there's no precedent anywhere in `internal/config` for a
+transient, non-persisted override, so inventing one would be solving a
+problem the feature doesn't have.
+
+`renameDestination` (`internal/ui/conflict.go`) tries `"stem (1)ext"`,
+`"stem (2)ext"`, and so on, checking both the destination directory's real
+listing (gathered during the scan, so no extra round trip) and a `claimed`
+set of names already handed out earlier in the same batch — two renamed
+files landing on the same new name would be its own silent conflict
+otherwise. `path.Ext`/`strings.TrimSuffix` on the bare leaf name is safe
+regardless of whether the destination is local or remote, since a leaf name
+has no directory separator to complicate the split either way.
+
+Resume needed real changes in both protocol engines, not just the UI:
+`transfer.Request` gained an `Offset int64` (0 means an ordinary full
+transfer), and both `internal/sftpsession/engine.go` and
+`internal/ftpsession/engine.go` open their destination without truncating
+and seek both ends to `Offset` when it's non-zero, starting their `sent`
+counter there too so progress reports the *total* bytes done, not just
+what this run copied. Neither engine needed a new capability from its
+underlying library: `*sftp.File`/`*os.File` already implement `io.Seeker`
+and `sftp.Client.OpenFile` already supports opening without `O_TRUNC`, and
+`github.com/jlaffaye/ftp`'s `ServerConn` already has native
+`RetrFrom(path, offset)`/`StorFrom(path, r, offset)` built for exactly
+this.
+
 ## Suggested Next Steps
 
 1. ~~Initialize or fix Git repository state.~~ Done — real repo on `main`,
@@ -1021,8 +1105,14 @@ every unknown host reaches `overlayHostKey` today, with no override.
   force pure-strict (never prompt, fail on anything unknown) or
   pure-accept-anything (no known_hosts check at all) globally or per
   profile — every unknown host always prompts today
-- Transfers overwrite the destination. Resume and the rest of the conflict
-  policy are not wired to the UI, so nothing can ask for anything else
+- Conflict resolution is real now (see **Conflict resolution**): a queued
+  file whose destination already exists opens `overlayConflict` with every
+  option from Product Decisions above, including Resume. The one deliberate
+  simplification from that list: there is no true per-file "this file"
+  scope — a batch's conflicts are resolved with one chosen policy applied to
+  all of them (per-file rules like "if source newer" still evaluate
+  per-file, just without a separate prompt for each). "Current queue" and
+  "this session" both work as described
 - Folders now queue recursively — a preflight scan flattens them into
   individual file transfers before confirming (see **Recursive folders**);
   no adapter changes needed, since `transfer.Engine` still only ever sees
@@ -1067,9 +1157,6 @@ every unknown host reaches `overlayHostKey` today, with no override.
   status bar off the bottom instead of showing up. `fitRow` and `align` exist
   to stop that, and any new fixed-width row should go through one of them
 - No recursive transfer summary yet
-- Conflict modal is visual/simulated, not wired to transfer policy yet;
-  it is a demo opened with `o` (it used to be `delete`, which read as
-  "delete this file")
 - Transfer failures are simulated deterministically by `failsAt` in
   `internal/faketransfer` so the Failed tab and error styling are reachable
   without real networking; the whole package goes away once real engines land

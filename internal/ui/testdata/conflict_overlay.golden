@@ -5,19 +5,19 @@
 │  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
 │    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
 │    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
-│                                                ││                                                │
 │           ╭─ tideftp · file exists ──────────────────────────────────────────────────╮           │
 │           │                                                                          │           │
-│           │    Overwrite                                                             │           │
+│           │  1 file(s) already exist at their destination                            │           │
+│           │                                                                          │           │
+│           │  ▌ Overwrite                                                             │           │
 │           │    Overwrite if source newer                                             │           │
 │           │    Overwrite if different size                                           │           │
 │           │    Overwrite if different size or source newer                           │           │
 │           │    Resume                                                                │           │
 │           │    Rename                                                                │           │
-│           │  ▌ Skip                                                                  │           │
+│           │    Skip                                                                  │           │
 │           │                                                                          │           │
-│           │  Scope: this file / current queue / session                              │           │
-│           │    enter simulate   esc cancel                                           │           │
+│           │    ↑↓ select   enter apply to queue   s apply & remember   esc cancel    │           │
 │           │                                                                          │           │
 ╰───────────╰──────────────────────────────────────────────────────────────────────────╯───────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮

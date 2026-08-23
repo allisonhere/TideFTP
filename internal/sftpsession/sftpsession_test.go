@@ -451,6 +451,78 @@ func TestDownloadWritesTheFileLocally(t *testing.T) {
 	}
 }
 
+func TestUploadResumesFromOffset(t *testing.T) {
+	server := startTestServer(t)
+	conn := connect(t, server)
+
+	body := bytes.Repeat([]byte("tideftp resume upload\n"), 5000)
+	local := filepath.Join(t.TempDir(), "payload.bin")
+	if err := os.WriteFile(local, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A partial destination that genuinely matches the source's own first
+	// half — Offset only tells the engine where to start; it never verifies
+	// the bytes already there, that's the conflict policy's job upstream.
+	offset := int64(len(body) / 2)
+	if err := os.WriteFile(server.path("resumed.bin"), body[:offset], 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	conn.Engine().Start(transfer.Request{
+		ID: 20, Direction: domain.Upload,
+		Source: local, Destination: server.path("resumed.bin"), Size: int64(len(body)), Offset: offset,
+	})
+	event := awaitTerminal(t, conn.Engine(), 20)
+
+	if event.Kind != transfer.Completed {
+		t.Fatalf("terminal event = %v (err %v), want Completed", event.Kind, event.Err)
+	}
+	if event.BytesDone != int64(len(body)) {
+		t.Fatalf("reported %d bytes done, want the full %d (offset plus what was actually copied)", event.BytesDone, len(body))
+	}
+	got, err := os.ReadFile(server.path("resumed.bin"))
+	if err != nil {
+		t.Fatalf("read resumed file: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("resumed content differs from the full source: got %d bytes, want %d", len(got), len(body))
+	}
+}
+
+func TestDownloadResumesFromOffset(t *testing.T) {
+	server := startTestServer(t)
+	body := bytes.Repeat([]byte("tideftp resume download\n"), 5000)
+	server.writeFile(t, "remote.bin", body)
+	conn := connect(t, server)
+
+	offset := int64(len(body) / 3)
+	local := filepath.Join(t.TempDir(), "resumed.bin")
+	if err := os.WriteFile(local, body[:offset], 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	conn.Engine().Start(transfer.Request{
+		ID: 21, Direction: domain.Download,
+		Source: server.path("remote.bin"), Destination: local, Size: int64(len(body)), Offset: offset,
+	})
+	event := awaitTerminal(t, conn.Engine(), 21)
+
+	if event.Kind != transfer.Completed {
+		t.Fatalf("terminal event = %v (err %v), want Completed", event.Kind, event.Err)
+	}
+	if event.BytesDone != int64(len(body)) {
+		t.Fatalf("reported %d bytes done, want the full %d", event.BytesDone, len(body))
+	}
+	got, err := os.ReadFile(local)
+	if err != nil {
+		t.Fatalf("read resumed file: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("resumed content differs from the full source: got %d bytes, want %d", len(got), len(body))
+	}
+}
+
 func TestTransferOfAMissingSourceFails(t *testing.T) {
 	server := startTestServer(t)
 	conn := connect(t, server)

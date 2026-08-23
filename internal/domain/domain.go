@@ -45,10 +45,14 @@ type Transfer struct {
 	Destination string
 	BytesTotal  int64
 	BytesDone   int64
-	Status      TransferStatus
-	Message     string
-	StartedAt   time.Time
-	FinishedAt  time.Time
+	// ResumeFrom is the byte offset this transfer started from — non-zero
+	// only when it was queued to resume a partial destination file. 0 means
+	// an ordinary full transfer.
+	ResumeFrom int64
+	Status     TransferStatus
+	Message    string
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 func (t Transfer) Progress() float64 {

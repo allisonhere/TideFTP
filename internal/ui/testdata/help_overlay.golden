@@ -19,12 +19,12 @@
 │             │    x                    cancel active transfer (queue pane) / all    │             │
 │             │    R                               retry selected failed transfer    │             │
 │             │    +/-                              more/fewer parallel transfers    │             │
-╰─────────────│    o                                       conflict prompt (demo)    │─────────────╯
-╭─────────────│    .                                          toggle hidden files    │─────────────╮
-│Transfers    │                                                                      │        queue│
-│  1 Queue (2x│  View                                                                │             │
-│↑ [========= │    c                                         connect / disconnect    │ transferring│
-│↓ [          │    t                                                 theme picker    │    0% queued│
-│             │    ,                                                     settings    │             │
-╰─────────────│    i                                                 toggle icons    │─────────────╯
-   ready   tab│    shift+left/right                             resize file panes    │e  shift+arr… 
+╰─────────────│    .                                          toggle hidden files    │─────────────╯
+╭─────────────│                                                                      │─────────────╮
+│Transfers    │  View                                                                │        queue│
+│  1 Queue (2x│    c                                         connect / disconnect    │             │
+│↑ [========= │    t                                                 theme picker    │ transferring│
+│↓ [          │    ,                                                     settings    │    0% queued│
+│             │    i                                                 toggle icons    │             │
+╰─────────────│    shift+left/right                             resize file panes    │─────────────╯
+   ready   tab│    shift+up/down                             resize transfer pane    │e  shift+arr… 

@@ -103,6 +103,12 @@ func TestGoldenSettingsOverlay(t *testing.T) {
 func TestGoldenConflictOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlayConflict
+	entry := domain.Entry{Name: "index.html", Size: 8192}
+	model.preflight = &preflightScan{
+		direction: domain.Upload,
+		files:     []preflightFile{{src: "/home/allie/projects/index.html", dst: "/public_html/index.html", name: "index.html", size: 8192, conflict: &entry}},
+		cursor:    int(conflictOverwrite),
+	}
 	assertGolden(t, "conflict_overlay", ansi.Strip(model.View()))
 }
 

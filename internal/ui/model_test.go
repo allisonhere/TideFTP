@@ -385,11 +385,11 @@ func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
 		t.Fatalf("expected to be scrolled to the bottom before new activity arrives")
 	}
 
-	// "u" queues a new transfer inside the same updateKey call whose
-	// wasAtBottom snapshot precedes it, exactly like real usage (a
-	// transferTick or queued transfer growing the list mid-update).
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
-	model = updated.(Model)
+	// "u" starts a preflight scan; queuing lands asynchronously once it
+	// settles, via preflightScanMsg's own wasAtBottom/settleBottomOffset
+	// handling (model.go), exactly like real usage (a transferTick or
+	// queued transfer growing the list mid-session).
+	model = press(t, model, runes("u"))
 	if len(model.transfers) != 31 {
 		t.Fatalf("expected queueUpload to add exactly one transfer, got %d total", len(model.transfers))
 	}
@@ -644,8 +644,7 @@ func TestQueuingHandsTheRequestToTheEngine(t *testing.T) {
 	model.local.entries = []domain.Entry{{Name: "report.pdf", Size: 500_000}}
 	model.local.cursor = 0
 
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
-	model = updated.(Model)
+	model = press(t, model, runes("u"))
 
 	if len(engine.started) != 1 {
 		t.Fatalf("engine received %d requests, want 1", len(engine.started))

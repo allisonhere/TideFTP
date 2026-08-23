@@ -20,6 +20,10 @@ type Request struct {
 	Source      string
 	Destination string
 	Size        int64
+	// Offset is where to start moving bytes from — the source is read
+	// starting here and the destination is written starting here too,
+	// without truncating it first. 0 means an ordinary full transfer.
+	Offset int64
 }
 
 // EventKind is what just happened to a transfer.

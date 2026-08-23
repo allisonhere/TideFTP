@@ -46,30 +46,6 @@ func TestEscClearsSelectionInTheFocusedPaneOnly(t *testing.T) {
 	}
 }
 
-// TestConflictOverlayConfirmQueuesTheFocusedTransfer exercises the "o"
-// demo-conflict-prompt path, whose confirm goes through
-// queueFocusedTransfer rather than queueUpload/queueDownload directly.
-func TestConflictOverlayConfirmQueuesTheFocusedTransfer(t *testing.T) {
-	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
-	model.focus = focusLocal
-	model.local.entries = []domain.Entry{{Name: "file.txt", Kind: domain.EntryFile, Size: 10}}
-	model.local.cursor = 0
-
-	model = press(t, model, runes("o"))
-	if model.overlay != overlayConflict {
-		t.Fatalf("o did not open the conflict overlay, overlay = %v", model.overlay)
-	}
-
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
-
-	if model.overlay != overlayNone {
-		t.Fatalf("confirming the conflict overlay left it open, overlay = %v", model.overlay)
-	}
-	if len(model.transfers) != 1 || model.transfers[0].Direction != domain.Upload {
-		t.Fatalf("transfers = %+v, want one upload queued via the focused pane", model.transfers)
-	}
-}
-
 // TestTransferRowFallsBackToStatusLabelWhenMessageIsEmpty exercises
 // transferStatus, the label a row falls back to when nothing set Message.
 func TestTransferRowFallsBackToStatusLabelWhenMessageIsEmpty(t *testing.T) {

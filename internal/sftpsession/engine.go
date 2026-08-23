@@ -34,9 +34,10 @@ func newEngine(client *sftp.Client) *Engine {
 	return e
 }
 
-// move opens both ends and streams between them. Destinations are truncated:
-// resume and the rest of the conflict policy are not wired to the UI yet, so
-// there is nothing here that could ask for anything else.
+// move opens both ends and streams between them. req.Offset is where both
+// ends start: 0 for an ordinary full transfer, or the destination's current
+// size when the conflict policy resolved to Resume — open (below) seeks both
+// sides to it rather than truncating the destination.
 func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	src, dst, err := e.open(req)
 	if err != nil {
@@ -68,7 +69,7 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 		closeBoth()
 	}()
 
-	var sent int64
+	sent := req.Offset
 	buf := make([]byte, transfer.CopyChunk)
 	lastReport := time.Now()
 
@@ -112,21 +113,40 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 }
 
 // open resolves the direction into a reader and a writer. Upload reads local
-// disk and writes the server; download is the reverse.
+// disk and writes the server; download is the reverse. Both ends are seeked
+// to req.Offset when it's non-zero — the destination is opened without
+// truncating so the bytes already there survive.
 func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, error) {
 	if req.Direction == domain.Download {
 		src, err := e.client.Open(req.Source)
 		if err != nil {
 			return nil, nil, fmt.Errorf("open %s: %w", req.Source, err)
 		}
+		if req.Offset > 0 {
+			if _, err := src.Seek(req.Offset, io.SeekStart); err != nil {
+				src.Close()
+				return nil, nil, fmt.Errorf("seek %s: %w", req.Source, err)
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(req.Destination), 0o755); err != nil {
 			src.Close()
 			return nil, nil, fmt.Errorf("create %s: %w", filepath.Dir(req.Destination), err)
 		}
-		dst, err := os.Create(req.Destination)
+		flags := os.O_WRONLY | os.O_CREATE
+		if req.Offset == 0 {
+			flags |= os.O_TRUNC
+		}
+		dst, err := os.OpenFile(req.Destination, flags, 0o644)
 		if err != nil {
 			src.Close()
 			return nil, nil, fmt.Errorf("create %s: %w", req.Destination, err)
+		}
+		if req.Offset > 0 {
+			if _, err := dst.Seek(req.Offset, io.SeekStart); err != nil {
+				src.Close()
+				dst.Close()
+				return nil, nil, fmt.Errorf("seek %s: %w", req.Destination, err)
+			}
 		}
 		return src, dst, nil
 	}
@@ -135,15 +155,33 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s: %w", req.Source, err)
 	}
+	if req.Offset > 0 {
+		if _, err := src.Seek(req.Offset, io.SeekStart); err != nil {
+			src.Close()
+			return nil, nil, fmt.Errorf("seek %s: %w", req.Source, err)
+		}
+	}
 	if dir := path.Dir(req.Destination); dir != "" && dir != "." {
 		// A missing parent is not an error worth failing on by itself; the
 		// create below reports it if it really is one.
 		_ = e.client.MkdirAll(dir)
 	}
-	dst, err := e.client.Create(req.Destination)
+	var dst *sftp.File
+	if req.Offset > 0 {
+		dst, err = e.client.OpenFile(req.Destination, os.O_WRONLY|os.O_CREATE)
+	} else {
+		dst, err = e.client.Create(req.Destination)
+	}
 	if err != nil {
 		src.Close()
 		return nil, nil, fmt.Errorf("create %s: %w", req.Destination, err)
+	}
+	if req.Offset > 0 {
+		if _, err := dst.Seek(req.Offset, io.SeekStart); err != nil {
+			src.Close()
+			dst.Close()
+			return nil, nil, fmt.Errorf("seek %s: %w", req.Destination, err)
+		}
 	}
 	return src, dst, nil
 }

@@ -30,6 +30,10 @@ func TestViewSurvivesTinyTerminals(t *testing.T) {
 			if overlay == overlayPreflight {
 				model.preflight = &preflightScan{direction: domain.Download, files: make([]preflightFile, 3), folders: 1, totalBytes: 4096}
 			}
+			if overlay == overlayConflict {
+				entry := domain.Entry{Name: "a", Size: 10}
+				model.preflight = &preflightScan{direction: domain.Download, files: []preflightFile{{name: "a", size: 20, conflict: &entry}}}
+			}
 			if overlay == overlayHostKey {
 				model.hostKeyPrompt = &hostKeyPrompt{
 					target: testTarget,

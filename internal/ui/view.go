@@ -439,7 +439,6 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			keyRow("x", "cancel active transfer (queue pane) / all"),
 			keyRow("R", "retry selected failed transfer"),
 			keyRow("+/-", "more/fewer parallel transfers"),
-			keyRow("o", "conflict prompt (demo)"),
 			keyRow(".", "toggle hidden files"),
 			"",
 			renderer.Styles.DetailMeta.Render("View"),
@@ -497,12 +496,21 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Content: content, Width: width})
 		return &overlay
 	case overlayConflict:
-		options := []string{"Overwrite", "Overwrite if source newer", "Overwrite if different size", "Overwrite if different size or source newer", "Resume", "Rename", "Skip"}
-		rows := make([]string, 0, len(options)+4)
-		for index, option := range options {
-			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{Text: option, Selected: index == len(options)-1}, 68))
+		if m.preflight == nil {
+			return nil
 		}
-		rows = append(rows, "", renderer.Styles.DetailMeta.Render("Scope: this file / current queue / session"), renderer.RenderSoftHints(68, tideui.SoftHint{Key: "enter", Label: "simulate"}, tideui.SoftHint{Key: "esc", Label: "cancel"}))
+		scan := m.preflight
+		summary := fmt.Sprintf("%d file(s) already exist at their destination", scan.conflictCount())
+		rows := make([]string, 0, int(conflictPolicyCount)+4)
+		rows = append(rows, renderer.Styles.DetailBody.Width(68).Render(summary), "")
+		for p := conflictPolicy(0); p < conflictPolicyCount; p++ {
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{Text: conflictPolicyLabel(p), Selected: int(p) == scan.cursor}, 68))
+		}
+		rows = append(rows, "", renderer.RenderSoftHints(68,
+			tideui.SoftHint{Key: "↑↓", Label: "select"},
+			tideui.SoftHint{Key: "enter", Label: "apply to queue"},
+			tideui.SoftHint{Key: "s", Label: "apply & remember"},
+			tideui.SoftHint{Key: "esc", Label: "cancel"}))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "file exists", Width: 74, Content: renderer.RenderSoftBody(74, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlayTheme:

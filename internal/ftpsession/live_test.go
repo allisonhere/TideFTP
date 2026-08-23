@@ -139,6 +139,63 @@ func TestLiveListAndRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLiveResumeUploadAndDownload proves Offset actually reaches the wire —
+// RetrFrom/StorFrom, not just a local seek — which only a real server can
+// confirm.
+func TestLiveResumeUploadAndDownload(t *testing.T) {
+	conn, remoteDir := liveConn(t)
+
+	body := bytes.Repeat([]byte("tideftp live resume\n"), 4000)
+	local := filepath.Join(t.TempDir(), "payload.bin")
+	if err := os.WriteFile(local, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	remote := path.Join(remoteDir, "tideftp-live-resume-upload.bin")
+
+	// Seed the server with a matching first half — an ordinary, non-resumed
+	// upload of a separate local file holding just that half — then resume
+	// the full body onto it from the halfway offset.
+	half := int64(len(body) / 2)
+	seed := filepath.Join(t.TempDir(), "seed.bin")
+	if err := os.WriteFile(seed, body[:half], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conn.Engine().Start(transfer.Request{
+		ID: 11, Direction: domain.Upload,
+		Source: seed, Destination: remote, Size: half,
+	})
+	if event := awaitTerminal(t, conn.Engine(), 11); event.Kind != transfer.Completed {
+		t.Fatalf("seed upload ended as %v (err %v)", event.Kind, event.Err)
+	}
+
+	conn.Engine().Start(transfer.Request{
+		ID: 12, Direction: domain.Upload,
+		Source: local, Destination: remote, Size: int64(len(body)), Offset: half,
+	})
+	if event := awaitTerminal(t, conn.Engine(), 12); event.Kind != transfer.Completed {
+		t.Fatalf("resumed upload ended as %v (err %v)", event.Kind, event.Err)
+	}
+
+	back := filepath.Join(t.TempDir(), "resumed-download.bin")
+	if err := os.WriteFile(back, body[:half], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conn.Engine().Start(transfer.Request{
+		ID: 13, Direction: domain.Download,
+		Source: remote, Destination: back, Size: int64(len(body)), Offset: half,
+	})
+	if event := awaitTerminal(t, conn.Engine(), 13); event.Kind != transfer.Completed {
+		t.Fatalf("resumed download ended as %v (err %v)", event.Kind, event.Err)
+	}
+	got, err := os.ReadFile(back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("resumed round trip differs: %d bytes back, %d sent", len(got), len(body))
+	}
+}
+
 // TestLiveParallelTransfersShareThePool is the case the pool exists for: FTP
 // control connections carry one command at a time, so concurrent transfers
 // must each get their own.

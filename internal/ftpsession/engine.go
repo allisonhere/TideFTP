@@ -79,7 +79,7 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 
 func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	source := vfs.CleanRemote(req.Source)
-	remote, err := conn.Retr(source)
+	remote, err := conn.RetrFrom(source, uint64(req.Offset))
 	if err != nil {
 		return 0, fmt.Errorf("retrieve %s: %w", source, err)
 	}
@@ -88,9 +88,19 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 	if err := os.MkdirAll(filepath.Dir(req.Destination), 0o755); err != nil {
 		return 0, fmt.Errorf("create %s: %w", filepath.Dir(req.Destination), err)
 	}
-	local, err := os.Create(req.Destination)
+	flags := os.O_WRONLY | os.O_CREATE
+	if req.Offset == 0 {
+		flags |= os.O_TRUNC
+	}
+	local, err := os.OpenFile(req.Destination, flags, 0o644)
 	if err != nil {
 		return 0, fmt.Errorf("create %s: %w", req.Destination, err)
+	}
+	if req.Offset > 0 {
+		if _, err := local.Seek(req.Offset, io.SeekStart); err != nil {
+			local.Close()
+			return 0, fmt.Errorf("seek %s: %w", req.Destination, err)
+		}
 	}
 
 	var closeOnce sync.Once
@@ -116,7 +126,7 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 		closeBoth()
 	}()
 
-	var sent int64
+	sent := req.Offset
 	buf := make([]byte, transfer.CopyChunk)
 	lastReport := time.Now()
 	for {
@@ -159,6 +169,11 @@ func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop, quit <
 		return 0, fmt.Errorf("open %s: %w", req.Source, err)
 	}
 	defer local.Close()
+	if req.Offset > 0 {
+		if _, err := local.Seek(req.Offset, io.SeekStart); err != nil {
+			return 0, fmt.Errorf("seek %s: %w", req.Source, err)
+		}
+	}
 
 	destination := vfs.CleanRemote(req.Destination)
 	if dir := path.Dir(destination); dir != "" && dir != "/" {
@@ -170,8 +185,9 @@ func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop, quit <
 		stop:   stop,
 		quit:   quit,
 		report: report,
+		sent:   req.Offset,
 	}
-	storErr := conn.Stor(destination, reader)
+	storErr := conn.StorFrom(destination, reader, uint64(req.Offset))
 	if storErr != nil {
 		if errors.Is(storErr, transfer.ErrCanceled) || transfer.IsCanceled(stop, quit) {
 			return reader.sent, transfer.ErrCanceled

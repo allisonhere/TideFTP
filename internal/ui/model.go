@@ -215,9 +215,15 @@ type Model struct {
 	// select.
 	bottomCursor int
 	// preflight holds the result of walking a folder queued for transfer,
-	// while overlayPreflight is asking the user to confirm it. Nil the rest
-	// of the time.
+	// while overlayPreflight (no conflicts, just a folder summary) or
+	// overlayConflict (some files already exist at their destination) is
+	// asking the user to confirm it. Nil the rest of the time.
 	preflight *preflightScan
+	// sessionConflictPolicy is set by the conflict overlay's "apply &
+	// remember" key. Once set, a future conflicting batch resolves with it
+	// automatically instead of prompting again. In-memory only — matches
+	// "this session" literally, and resets on restart.
+	sessionConflictPolicy *conflictPolicy
 	// hostKeyPrompt holds an unknown SFTP host key while overlayHostKey asks
 	// the user whether to trust it, and what target/creds to resume
 	// connecting with if they do. Nil the rest of the time.
@@ -546,6 +552,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlaySettings {
 		return m, m.handleSettingsKey(msg)
 	}
+	if m.overlay == overlayConflict {
+		return m, m.handleConflictKey(msg)
+	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
@@ -559,9 +568,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			m.setStatus("cancelled")
 		case "enter", "y":
 			switch m.overlay {
-			case overlayConflict:
-				m.overlay = overlayNone
-				return m, m.queueFocusedTransfer()
 			case overlayPreflight:
 				m.overlay = overlayNone
 				return m, m.confirmPreflightQueue()
@@ -626,8 +632,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.queueUpload()
 	case "d":
 		cmd = m.queueDownload()
-	case "o":
-		m.overlay = overlayConflict
 	case "x":
 		m.cancelActiveTransfers()
 	case "R":
@@ -1105,12 +1109,15 @@ func (m *Model) queueFocusedTransfer() tea.Cmd {
 	return m.queueTransfer(domain.Upload)
 }
 
-// queueTransfer queues the focused pane's selection. Plain files queue
-// instantly, unchanged from before. Any folder in the selection instead
-// starts a preflight scan (beginPreflightScan) covering the whole
-// selection — plain files included — so there is one predictable path
-// rather than some files queuing immediately while the rest wait on a
-// scan.
+// queueTransfer scans the focused pane's selection — walking any folder in
+// it, and checking every file's destination for an existing conflict — and
+// delivers the result as preflightScanMsg. Every queue action goes through
+// this now, plain files included: a conflict can only be caught by looking
+// at the destination side, and that's exactly what this scan already
+// gathers the machinery to do (see beginPreflightScan). A selection with
+// nothing to report — no folders, no conflicts — still reaches
+// applyPreflightScan and queues immediately from there; the one-extra-List
+// round trip that costs is the price of the feature actually working.
 func (m *Model) queueTransfer(direction domain.TransferDirection) tea.Cmd {
 	var entries []domain.Entry
 	var srcBase, dstBase string
@@ -1130,35 +1137,7 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) tea.Cmd {
 	if len(entries) == 0 {
 		return nil
 	}
-
-	hasFolder := false
-	for _, entry := range entries {
-		if entry.IsDir() {
-			hasFolder = true
-			break
-		}
-	}
-	if hasFolder {
-		return m.beginPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden)
-	}
-
-	queued := 0
-	for _, entry := range entries {
-		m.transfers = append(m.transfers, domain.Transfer{
-			ID:          m.nextTransferID,
-			Direction:   direction,
-			Source:      srcFS.Child(srcBase, entry.Name),
-			Destination: dstFS.Child(dstBase, entry.Name),
-			BytesTotal:  entry.Size,
-			Status:      domain.Queued,
-			Message:     "queued",
-		})
-		m.nextTransferID++
-		queued++
-	}
-	m.setStatus(fmt.Sprintf("queued %d transfer(s)", queued))
-	m.startQueuedTransfers()
-	return nil
+	return m.beginPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden)
 }
 
 // preflightScanCap bounds how many files one preflight scan will discover
@@ -1174,21 +1153,58 @@ const preflightScanTimeout = 60 * time.Second
 
 // preflightFile is one file discovered while walking a folder queued for
 // transfer — everything queueTransfer needs to turn it into a
-// domain.Transfer once the scan is confirmed.
+// domain.Transfer once the scan is confirmed. conflict is non-nil when dst
+// already exists, holding what's actually there.
 type preflightFile struct {
 	src, dst string
+	name     string
 	size     int64
+	modified time.Time
+	conflict *domain.Entry
 }
 
 // preflightScan is the result of walking every folder in a queueTransfer
-// selection, held in Model.preflight and shown as overlayPreflight before
-// any of it is actually queued.
+// selection plus checking every file's destination, held in Model.preflight
+// and shown as overlayPreflight (no conflicts, just a folder summary) or
+// overlayConflict (some files already exist) before any of it is actually
+// queued.
 type preflightScan struct {
 	direction  domain.TransferDirection
 	files      []preflightFile
 	folders    int
 	totalBytes int64
 	truncated  bool // hit preflightScanCap; files/totalBytes are a lower bound
+	cursor     int  // selects a policy row in overlayConflict
+
+	// dstFS and siblings exist only to resolve a Rename: dstFS builds the
+	// renamed path, siblings (destination dir -> name -> entry) is what a
+	// candidate name must avoid colliding with.
+	dstFS    vfs.FS
+	siblings map[string]map[string]domain.Entry
+}
+
+// hasConflicts reports whether any file in the scan already exists at its
+// destination.
+func (s *preflightScan) hasConflicts() bool {
+	return s.conflictCount() > 0
+}
+
+// conflictCount is how many files in the scan already exist at their
+// destination.
+func (s *preflightScan) conflictCount() int {
+	n := 0
+	for _, f := range s.files {
+		if f.conflict != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// moveCursor steps the conflict overlay's policy row, wrapping.
+func (s *preflightScan) moveCursor(delta int) {
+	n := int(conflictPolicyCount)
+	s.cursor = ((s.cursor+delta)%n + n) % n
 }
 
 // preflightScanMsg reports beginPreflightScan's result.
@@ -1199,21 +1215,26 @@ type preflightScanMsg struct {
 
 // beginPreflightScan walks every directory in entries with srcFS.List
 // (plain files need no walk — their size is already known from the
-// listing) and delivers the result as preflightScanMsg. It is the only
-// path a folder is ever queued through: transfer.Engine has no
-// folder-copy primitive, so every file it ever moves for a folder queue
-// action is flattened into an ordinary domain.Transfer here first, in the
-// UI, which is where the queue has always lived (see Design Notes).
-// EntrySymlink is queued as a leaf, matching entry.IsDir()'s existing
-// semantics elsewhere — never followed, so a symlink cannot turn the walk
-// into a cycle.
+// listing), then checks every resulting file's destination directory for an
+// existing entry of the same name, and delivers the result as
+// preflightScanMsg. It is the only path any file is ever queued through —
+// even a lone plain file with no conflict takes this route now, so
+// applyPreflightScan is the one place that decides whether that means an
+// instant queue, a folder-summary confirm, or a conflict prompt.
+//
+// transfer.Engine has no folder-copy primitive, so every file a folder
+// queue action ever moves is flattened into an ordinary domain.Transfer
+// here first, in the UI, which is where the queue has always lived (see
+// Design Notes). EntrySymlink is queued as a leaf, matching
+// entry.IsDir()'s existing semantics elsewhere — never followed, so a
+// symlink cannot turn the walk into a cycle.
 func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
 	m.setStatus("scanning…")
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), preflightScanTimeout)
 		defer cancel()
 
-		scan := preflightScan{direction: direction}
+		scan := preflightScan{direction: direction, dstFS: dstFS}
 		type walkItem struct{ srcPath, dstPath string }
 		var stack []walkItem
 		for _, entry := range entries {
@@ -1223,7 +1244,7 @@ func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries [
 				stack = append(stack, walkItem{srcPath, dstPath})
 				continue
 			}
-			scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, size: entry.Size})
+			scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, name: entry.Name, size: entry.Size, modified: entry.Modified})
 			scan.totalBytes += entry.Size
 		}
 
@@ -1249,22 +1270,56 @@ func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries [
 					scan.truncated = true
 					break
 				}
-				scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, size: child.Size})
+				scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, name: child.Name, size: child.Size, modified: child.Modified})
 				scan.totalBytes += child.Size
 			}
 		}
 		if len(stack) > 0 {
 			scan.truncated = true
 		}
+
+		// Phase 2: which of the flattened files already exist at their
+		// destination? Grouped by destination directory so each one is
+		// listed at most once, however many files land in it. A directory
+		// that fails to list — most often because it doesn't exist yet, a
+		// nested folder destination not yet created — just means nothing
+		// conflicts there, not a scan failure.
+		byDir := map[string][]int{}
+		for i, f := range scan.files {
+			dir := dstFS.Parent(f.dst)
+			byDir[dir] = append(byDir[dir], i)
+		}
+		scan.siblings = make(map[string]map[string]domain.Entry, len(byDir))
+		for dir, indices := range byDir {
+			listed, err := dstFS.List(ctx, dir, true)
+			if err != nil {
+				continue
+			}
+			byName := make(map[string]domain.Entry, len(listed))
+			for _, e := range listed {
+				byName[e.Name] = e
+			}
+			scan.siblings[dir] = byName
+			for _, i := range indices {
+				if hit, ok := byName[scan.files[i].name]; ok {
+					entry := hit
+					scan.files[i].conflict = &entry
+				}
+			}
+		}
+
 		return preflightScanMsg{scan: scan}
 	}
 }
 
-// applyPreflightScan folds a completed scan into the model: an error is
-// reported directly, an empty result (every selected folder was empty, and
+// applyPreflightScan folds a completed scan into the model. An error is
+// reported directly; an empty result (every selected folder was empty, and
 // the selection had no plain files) needs no confirmation and is reported
-// directly too, and anything else opens overlayPreflight so the user
-// confirms before it is actually queued.
+// directly too. Otherwise: no conflicts and a folder was involved opens
+// overlayPreflight to confirm the summary, exactly as before; no conflicts
+// and no folder queues instantly, exactly as before; any conflict either
+// resolves immediately against a remembered sessionConflictPolicy, or opens
+// overlayConflict to ask.
 func (m *Model) applyPreflightScan(msg preflightScanMsg) {
 	if msg.err != nil {
 		m.setError(fmt.Sprintf("scan: %v", msg.err))
@@ -1275,34 +1330,34 @@ func (m *Model) applyPreflightScan(msg preflightScanMsg) {
 		return
 	}
 	scan := msg.scan
+	if !scan.hasConflicts() {
+		if scan.folders > 0 {
+			m.preflight = &scan
+			m.overlay = overlayPreflight
+			return
+		}
+		m.commitScan(scan, nil)
+		return
+	}
+	if m.sessionConflictPolicy != nil {
+		m.commitScan(scan, m.sessionConflictPolicy)
+		return
+	}
 	m.preflight = &scan
-	m.overlay = overlayPreflight
+	m.overlay = overlayConflict
 }
 
 // confirmPreflightQueue queues every file the last preflight scan found and
-// clears it. Only reachable from the overlayPreflight confirm key, so
-// m.preflight is never nil in practice, but the check keeps it safe
-// regardless.
+// clears it. Only reachable from the overlayPreflight confirm key (the
+// no-conflicts, folder-summary path), so m.preflight is never nil in
+// practice, but the check keeps it safe regardless.
 func (m *Model) confirmPreflightQueue() tea.Cmd {
 	if m.preflight == nil {
 		return nil
 	}
 	scan := m.preflight
 	m.preflight = nil
-	for _, file := range scan.files {
-		m.transfers = append(m.transfers, domain.Transfer{
-			ID:          m.nextTransferID,
-			Direction:   scan.direction,
-			Source:      file.src,
-			Destination: file.dst,
-			BytesTotal:  file.size,
-			Status:      domain.Queued,
-			Message:     "queued",
-		})
-		m.nextTransferID++
-	}
-	m.setStatus(fmt.Sprintf("queued %d transfer(s) from %d folder(s)", len(scan.files), scan.folders))
-	m.startQueuedTransfers()
+	m.commitScan(*scan, nil)
 	return nil
 }
 
@@ -1343,6 +1398,7 @@ func (m *Model) startQueuedTransfers() {
 			Source:      m.transfers[i].Source,
 			Destination: m.transfers[i].Destination,
 			Size:        m.transfers[i].BytesTotal,
+			Offset:      m.transfers[i].ResumeFrom,
 		})
 		active++
 	}
