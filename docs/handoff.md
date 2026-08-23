@@ -769,9 +769,23 @@ says nothing new, since that status already covers it.
 tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins
 (`v0.2.3-0.20260820020614-441c283e776f`) for two things the older release
 lacks: `SoftRow`'s selected-row background highlight and the `ModalShadow`
-style option. The app still composites overlays itself (`overlayOnBase`), so
-`ModalShadow` is unused here — the drop shadow keeps coming from the app's own
-path.
+style option. At first the app kept compositing overlays itself
+(`overlayOnBase`) with its own flat shadow — a fixed glyph and color appended
+to the modal's edge, blind to whatever it actually fell across — because
+`ModalShadow`'s real behavior (`blendShadowRect`, alpha-blending the shadow
+into the base view's actual per-cell colors) was only reachable through
+`Renderer.Render`'s own `Layout.Modal`, and tideftp's hand-assembled
+local/remote/transfer layout does not go through that. Rather than duplicate
+that blending math the way `internal/ui/contrast.go` had to duplicate
+`readableText` (see **Contrast** above — same problem, same lesson), tideui
+gained a second exported entry point, `Renderer.OverlayModal(base,
+overlayContent, width, height)`, that performs the identical modal-shadow
+compositing step `Render` does internally but takes an already-assembled
+base view instead of requiring `Layout.Panes`/`Mode`. `internal/ui/view.go`'s
+own `overlayOnBase`/`addShadow`/`replaceAt` are gone; `View` now sets
+`ModalShadow: m.shadow` in `StyleOptions` and calls
+`renderer.OverlayModal(view, overlay.Content, m.width, m.height)`, the same
+contrast-aware shadow whatthedock gets from `Render` directly.
 
 ## Suggested Next Steps
 

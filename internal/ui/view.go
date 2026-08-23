@@ -15,7 +15,7 @@ func (m Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
-	renderer := tideui.NewRenderer(m.theme, tideui.StyleOptions{Density: m.density, PaneCorners: tideui.RoundCorners})
+	renderer := tideui.NewRenderer(m.theme, tideui.StyleOptions{Density: m.density, PaneCorners: tideui.RoundCorners, ModalShadow: m.shadow})
 	topbar := m.renderTopbar(renderer)
 	topHeight := m.topPaneHeight()
 	bottomHeight := m.bottomPaneHeight()
@@ -37,7 +37,7 @@ func (m Model) View() string {
 	view := lipgloss.JoinVertical(lipgloss.Left, topbar, main, status)
 
 	if overlay := m.renderOverlay(renderer); overlay != nil && overlay.Visible {
-		view = overlayOnBase(view, overlay.Content, m.width, m.height, renderer.Styles.Theme.Bg, m.shadow)
+		view = renderer.OverlayModal(view, overlay.Content, m.width, m.height)
 	}
 	return clampView(view, m.width, m.height, renderer.Styles.Theme.Bg)
 }
@@ -612,55 +612,6 @@ func countStatus(transfers []domain.Transfer, status domain.TransferStatus) int 
 		}
 	}
 	return count
-}
-
-func overlayOnBase(base, box string, width, height int, bg lipgloss.Color, shadow bool) string {
-	if shadow {
-		box = addShadow(box, bg)
-	}
-	baseLines := strings.Split(clampView(base, width, height, bg), "\n")
-	boxLines := strings.Split(box, "\n")
-	boxWidth := 0
-	for _, line := range boxLines {
-		boxWidth = max(boxWidth, lipgloss.Width(line))
-	}
-	x := max(0, (width-boxWidth)/2)
-	y := max(0, (height-len(boxLines))/2)
-	for row, line := range boxLines {
-		target := y + row
-		if target < 0 || target >= len(baseLines) {
-			continue
-		}
-		baseLines[target] = replaceAt(baseLines[target], line, x, width, bg)
-	}
-	return strings.Join(baseLines, "\n")
-}
-
-func addShadow(box string, bg lipgloss.Color) string {
-	shadowStyle := lipgloss.NewStyle().Background(bg).Foreground(lipgloss.Color("#243946"))
-	lines := strings.Split(box, "\n")
-	for i := range lines {
-		lines[i] += shadowStyle.Render("░")
-	}
-	if len(lines) > 0 {
-		lines = append(lines, shadowStyle.Render(" "+strings.Repeat("░", max(0, lipgloss.Width(lines[0])-1))))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func replaceAt(base, insert string, x, width int, bg lipgloss.Color) string {
-	left := ansi.Truncate(base, x, "")
-	rightStart := x + lipgloss.Width(insert)
-	right := ""
-	if rightStart < width {
-		right = ansi.Truncate(base, width, "")
-		if lipgloss.Width(right) > rightStart {
-			right = ansi.Cut(right, rightStart, width)
-		} else {
-			right = lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width-rightStart))
-		}
-	}
-	return ansi.Truncate(left+insert+right, width, "")
 }
 
 func clampView(value string, width, height int, bg lipgloss.Color) string {
