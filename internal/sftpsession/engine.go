@@ -1,7 +1,6 @@
 package sftpsession
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,110 +17,27 @@ import (
 
 var _ transfer.Engine = (*Engine)(nil)
 
-// progressInterval is how often a running transfer reports. Every chunk would
-// flood the UI's event channel on a fast link.
-const progressInterval = 200 * time.Millisecond
-
-// copyChunk is the read/write size. 32KiB is a reasonable compromise for SFTP,
-// which pipelines requests internally.
-const copyChunk = 32 * 1024
-
-// Engine moves bytes over the connection's sftp.Client. It runs whatever it is
-// handed and never queues: the UI decides what starts and when.
+// Engine moves bytes over the connection's sftp.Client. It runs whatever it
+// is handed and never queues: the UI decides what starts and when.
+//
+// Starting, canceling, closing, and the exactly-one-terminal-event contract
+// all live in transfer.Runner, shared with internal/ftpsession — this type
+// is only the SFTP-specific part: how to move one transfer's bytes.
 type Engine struct {
+	*transfer.Runner
 	client *sftp.Client
-	events chan transfer.Event
-	quit   chan struct{}
-
-	mu      sync.Mutex
-	running map[int]chan struct{}
-	closed  bool
-	wg      sync.WaitGroup
 }
 
 func newEngine(client *sftp.Client) *Engine {
-	return &Engine{
-		client:  client,
-		events:  make(chan transfer.Event, 64),
-		quit:    make(chan struct{}),
-		running: map[int]chan struct{}{},
-	}
+	e := &Engine{client: client}
+	e.Runner = transfer.NewRunner(e.move)
+	return e
 }
 
-func (e *Engine) Events() <-chan transfer.Event { return e.events }
-
-func (e *Engine) Start(req transfer.Request) {
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return
-	}
-	if _, busy := e.running[req.ID]; busy {
-		e.mu.Unlock()
-		return
-	}
-	stop := make(chan struct{})
-	e.running[req.ID] = stop
-	e.wg.Add(1)
-	e.mu.Unlock()
-
-	go e.run(req, stop)
-}
-
-func (e *Engine) Cancel(id int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if stop, ok := e.running[id]; ok {
-		close(stop)
-		delete(e.running, id)
-	}
-}
-
-// Close stops everything in flight and closes Events. quit is closed first so
-// an emit waiting on a full buffer cannot deadlock the wait below.
-func (e *Engine) Close() error {
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return nil
-	}
-	e.closed = true
-	close(e.quit)
-	for id, stop := range e.running {
-		close(stop)
-		delete(e.running, id)
-	}
-	e.mu.Unlock()
-
-	e.wg.Wait()
-	close(e.events)
-	return nil
-}
-
-// run performs one transfer and reports exactly one terminal event, which is
-// what the transfer.Engine contract requires: without it the UI's queue would
-// stall waiting for a slot to free up.
-func (e *Engine) run(req transfer.Request, stop chan struct{}) {
-	defer e.wg.Done()
-	defer e.done(req.ID)
-
-	sent, err := e.copy(req, stop)
-	switch {
-	case err == nil:
-		e.emit(transfer.Event{ID: req.ID, Kind: transfer.Completed, BytesDone: sent})
-	case errors.Is(err, errCanceled):
-		e.emit(transfer.Event{ID: req.ID, Kind: transfer.Canceled, BytesDone: sent})
-	default:
-		e.emit(transfer.Event{ID: req.ID, Kind: transfer.Failed, BytesDone: sent, Err: err})
-	}
-}
-
-var errCanceled = errors.New("canceled")
-
-// copy opens both ends and streams between them. Destinations are truncated:
+// move opens both ends and streams between them. Destinations are truncated:
 // resume and the rest of the conflict policy are not wired to the UI yet, so
 // there is nothing here that could ask for anything else.
-func (e *Engine) copy(req transfer.Request, stop chan struct{}) (int64, error) {
+func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	src, dst, err := e.open(req)
 	if err != nil {
 		return 0, err
@@ -145,7 +61,7 @@ func (e *Engine) copy(req transfer.Request, stop chan struct{}) (int64, error) {
 	go func() {
 		select {
 		case <-stop:
-		case <-e.quit:
+		case <-quit:
 		case <-finished:
 			return
 		}
@@ -153,12 +69,12 @@ func (e *Engine) copy(req transfer.Request, stop chan struct{}) (int64, error) {
 	}()
 
 	var sent int64
-	buf := make([]byte, copyChunk)
+	buf := make([]byte, transfer.CopyChunk)
 	lastReport := time.Now()
 
 	for {
-		if canceled(stop, e.quit) {
-			return sent, errCanceled
+		if transfer.IsCanceled(stop, quit) {
+			return sent, transfer.ErrCanceled
 		}
 
 		n, readErr := src.Read(buf)
@@ -166,14 +82,14 @@ func (e *Engine) copy(req transfer.Request, stop chan struct{}) (int64, error) {
 			written, writeErr := dst.Write(buf[:n])
 			sent += int64(written)
 			if writeErr != nil {
-				if canceled(stop, e.quit) {
-					return sent, errCanceled
+				if transfer.IsCanceled(stop, quit) {
+					return sent, transfer.ErrCanceled
 				}
 				return sent, fmt.Errorf("write %s: %w", req.Destination, writeErr)
 			}
-			if time.Since(lastReport) >= progressInterval {
+			if time.Since(lastReport) >= transfer.ProgressInterval {
 				lastReport = time.Now()
-				e.emit(transfer.Event{ID: req.ID, Kind: transfer.Progress, BytesDone: sent})
+				report(sent)
 			}
 		}
 		if readErr == io.EOF {
@@ -187,23 +103,11 @@ func (e *Engine) copy(req transfer.Request, stop chan struct{}) (int64, error) {
 		if readErr != nil {
 			// A read that fails because cancellation closed the handle is a
 			// cancellation, not a transfer error.
-			if canceled(stop, e.quit) {
-				return sent, errCanceled
+			if transfer.IsCanceled(stop, quit) {
+				return sent, transfer.ErrCanceled
 			}
 			return sent, fmt.Errorf("read %s: %w", req.Source, readErr)
 		}
-	}
-}
-
-// canceled reports whether either channel has been closed, without blocking.
-func canceled(stop, quit chan struct{}) bool {
-	select {
-	case <-stop:
-		return true
-	case <-quit:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -242,17 +146,4 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 		return nil, nil, fmt.Errorf("create %s: %w", req.Destination, err)
 	}
 	return src, dst, nil
-}
-
-func (e *Engine) emit(event transfer.Event) {
-	select {
-	case e.events <- event:
-	case <-e.quit:
-	}
-}
-
-func (e *Engine) done(id int) {
-	e.mu.Lock()
-	delete(e.running, id)
-	e.mu.Unlock()
 }

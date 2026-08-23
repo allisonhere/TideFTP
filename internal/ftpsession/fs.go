@@ -21,9 +21,9 @@ type FS struct {
 
 // List reads a directory. jlaffaye/ftp's calls are blocking with no context of
 // their own, so the work runs on its own goroutine and ctx decides only how
-// long to wait for it; an abandoned listing finishes into a discarded channel
-// and its connection is dropped rather than reused, since a control connection
-// left mid-response would corrupt every later command on it.
+// long to wait for it; an abandoned listing's connection is dropped rather
+// than reused, since a control connection left mid-response would corrupt
+// every later command on it.
 func (f *FS) List(ctx context.Context, dirPath string, showHidden bool) ([]domain.Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -39,22 +39,26 @@ func (f *FS) List(ctx context.Context, dirPath string, showHidden bool) ([]domai
 		entries []*ftp.Entry
 		err     error
 	}
+	// done is unconditionally sent to exactly once, never selected against
+	// another case on the send side: a buffered send that could otherwise
+	// "win" a race against ctx expiring is what let a listing's connection
+	// go unclaimed by either branch below, leaking it and its pool slot
+	// forever.
 	done := make(chan result, 1)
-	abandoned := make(chan struct{})
 	go func() {
 		entries, err := conn.List(dirPath)
-		select {
-		case done <- result{entries: entries, err: err}:
-		case <-abandoned:
-			// Nobody is waiting any more, and this connection's state is
-			// unknown, so it goes rather than returning to the pool.
-			f.pool.discard(conn)
-		}
+		done <- result{entries: entries, err: err}
 	}()
 
 	select {
 	case <-ctx.Done():
-		close(abandoned)
+		// The goroutine above still owns conn until conn.List returns, which
+		// this cannot cancel. Hand its disposal to a cleanup goroutine that
+		// waits for it, rather than leaking the connection and its pool slot.
+		go func() {
+			<-done
+			f.pool.discard(conn)
+		}()
 		return nil, ctx.Err()
 	case out := <-done:
 		if out.err != nil {

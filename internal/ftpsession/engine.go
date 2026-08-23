@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,108 +21,32 @@ import (
 
 var _ transfer.Engine = (*Engine)(nil)
 
-const (
-	progressInterval = 200 * time.Millisecond
-	copyChunk        = 32 * 1024
-)
-
-var errCanceled = errors.New("canceled")
-
 // Engine moves bytes over borrowed control connections. Each running transfer
 // holds one for its whole duration, which is why the pool's cap has to cover
 // the UI's transfer parallelism as well as browsing.
+//
+// Starting, canceling, closing, and the exactly-one-terminal-event contract
+// all live in transfer.Runner, shared with internal/sftpsession — this type
+// is only the FTP-specific part: how to move one transfer's bytes over a
+// pooled control connection.
 type Engine struct {
-	pool   *pool
-	events chan transfer.Event
-	quit   chan struct{}
-
-	mu      sync.Mutex
-	running map[int]chan struct{}
-	closed  bool
-	wg      sync.WaitGroup
+	*transfer.Runner
+	pool *pool
 }
 
 func newEngine(connections *pool) *Engine {
-	return &Engine{
-		pool:    connections,
-		events:  make(chan transfer.Event, 64),
-		quit:    make(chan struct{}),
-		running: map[int]chan struct{}{},
-	}
+	e := &Engine{pool: connections}
+	e.Runner = transfer.NewRunner(e.move)
+	return e
 }
 
-func (e *Engine) Events() <-chan transfer.Event { return e.events }
-
-func (e *Engine) Start(req transfer.Request) {
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return
-	}
-	if _, busy := e.running[req.ID]; busy {
-		e.mu.Unlock()
-		return
-	}
-	stop := make(chan struct{})
-	e.running[req.ID] = stop
-	e.wg.Add(1)
-	e.mu.Unlock()
-
-	go e.run(req, stop)
-}
-
-func (e *Engine) Cancel(id int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if stop, ok := e.running[id]; ok {
-		close(stop)
-		delete(e.running, id)
-	}
-}
-
-func (e *Engine) Close() error {
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		return nil
-	}
-	e.closed = true
-	close(e.quit)
-	for id, stop := range e.running {
-		close(stop)
-		delete(e.running, id)
-	}
-	e.mu.Unlock()
-
-	e.wg.Wait()
-	close(e.events)
-	return nil
-}
-
-// run performs one transfer and reports exactly one terminal event, as the
-// transfer.Engine contract requires.
-func (e *Engine) run(req transfer.Request, stop chan struct{}) {
-	defer e.wg.Done()
-	defer e.done(req.ID)
-
-	sent, err := e.move(req, stop)
-	switch {
-	case err == nil:
-		e.emit(transfer.Event{ID: req.ID, Kind: transfer.Completed, BytesDone: sent})
-	case errors.Is(err, errCanceled):
-		e.emit(transfer.Event{ID: req.ID, Kind: transfer.Canceled, BytesDone: sent})
-	default:
-		e.emit(transfer.Event{ID: req.ID, Kind: transfer.Failed, BytesDone: sent, Err: err})
-	}
-}
-
-func (e *Engine) move(req transfer.Request, stop chan struct{}) (int64, error) {
+func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
 		select {
 		case <-stop:
-		case <-e.quit:
+		case <-quit:
 		case <-ctx.Done():
 		}
 		cancel()
@@ -129,17 +54,17 @@ func (e *Engine) move(req transfer.Request, stop chan struct{}) (int64, error) {
 
 	conn, err := e.pool.get(ctx)
 	if err != nil {
-		if canceled(stop, e.quit) {
-			return 0, errCanceled
+		if transfer.IsCanceled(stop, quit) {
+			return 0, transfer.ErrCanceled
 		}
 		return 0, err
 	}
 
 	var sent int64
 	if req.Direction == domain.Download {
-		sent, err = e.download(conn, req, stop)
+		sent, err = e.download(conn, req, stop, quit, report)
 	} else {
-		sent, err = e.upload(conn, req, stop)
+		sent, err = e.upload(conn, req, stop, quit, report)
 	}
 
 	// A transfer that failed or was cancelled may have left the control
@@ -152,7 +77,7 @@ func (e *Engine) move(req transfer.Request, stop chan struct{}) (int64, error) {
 	return sent, err
 }
 
-func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop chan struct{}) (int64, error) {
+func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	source := vfs.CleanRemote(req.Source)
 	remote, err := conn.Retr(source)
 	if err != nil {
@@ -184,7 +109,7 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop chan 
 	go func() {
 		select {
 		case <-stop:
-		case <-e.quit:
+		case <-quit:
 		case <-finished:
 			return
 		}
@@ -192,11 +117,11 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop chan 
 	}()
 
 	var sent int64
-	buf := make([]byte, copyChunk)
+	buf := make([]byte, transfer.CopyChunk)
 	lastReport := time.Now()
 	for {
-		if canceled(stop, e.quit) {
-			return sent, errCanceled
+		if transfer.IsCanceled(stop, quit) {
+			return sent, transfer.ErrCanceled
 		}
 		n, readErr := remote.Read(buf)
 		if n > 0 {
@@ -205,9 +130,9 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop chan 
 			if writeErr != nil {
 				return sent, fmt.Errorf("write %s: %w", req.Destination, writeErr)
 			}
-			if time.Since(lastReport) >= progressInterval {
+			if time.Since(lastReport) >= transfer.ProgressInterval {
 				lastReport = time.Now()
-				e.emit(transfer.Event{ID: req.ID, Kind: transfer.Progress, BytesDone: sent})
+				report(sent)
 			}
 		}
 		if readErr == io.EOF {
@@ -217,8 +142,8 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop chan 
 			return sent, nil
 		}
 		if readErr != nil {
-			if canceled(stop, e.quit) {
-				return sent, errCanceled
+			if transfer.IsCanceled(stop, quit) {
+				return sent, transfer.ErrCanceled
 			}
 			return sent, fmt.Errorf("read %s: %w", source, readErr)
 		}
@@ -228,7 +153,7 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop chan 
 // upload hands Stor a reader rather than driving the copy itself: jlaffaye's
 // Stor drains the reader and only returns when it is done. Progress and
 // cancellation therefore live in the reader.
-func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop chan struct{}) (int64, error) {
+func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	local, err := os.Open(req.Source)
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", req.Source, err)
@@ -237,75 +162,66 @@ func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop chan st
 
 	destination := vfs.CleanRemote(req.Destination)
 	if dir := path.Dir(destination); dir != "" && dir != "/" {
-		// A missing parent is not fatal by itself; Stor reports it if it is.
-		_ = conn.MakeDir(dir)
+		makeDirAll(conn, dir)
 	}
 
 	reader := &progressReader{
 		reader: local,
 		stop:   stop,
-		quit:   e.quit,
-		report: func(sent int64) {
-			e.emit(transfer.Event{ID: req.ID, Kind: transfer.Progress, BytesDone: sent})
-		},
+		quit:   quit,
+		report: report,
 	}
 	storErr := conn.Stor(destination, reader)
 	if storErr != nil {
-		if errors.Is(storErr, errCanceled) || canceled(stop, e.quit) {
-			return reader.sent, errCanceled
+		if errors.Is(storErr, transfer.ErrCanceled) || transfer.IsCanceled(stop, quit) {
+			return reader.sent, transfer.ErrCanceled
 		}
 		return reader.sent, fmt.Errorf("store %s: %w", destination, storErr)
 	}
 	return reader.sent, nil
 }
 
+// makeDirAll creates dir and every missing parent above it. MKD, unlike
+// SFTP's MkdirAll, only ever creates the one directory named — it fails if
+// its parent does not exist yet — so a destination nested under directories
+// that do not exist needs each level created from the root down. A
+// directory that already exists is not an error worth stopping for; Stor
+// reports anything that is actually wrong with the final destination.
+func makeDirAll(conn *ftp.ServerConn, dir string) {
+	dir = strings.Trim(dir, "/")
+	if dir == "" {
+		return
+	}
+	current := ""
+	for _, part := range strings.Split(dir, "/") {
+		current += "/" + part
+		_ = conn.MakeDir(current)
+	}
+}
+
 // progressReader counts what Stor consumes, reports it no more often than
-// progressInterval, and fails the read when the transfer is cancelled, which
-// is what aborts Stor.
+// transfer.ProgressInterval, and fails the read when the transfer is
+// cancelled, which is what aborts Stor.
 type progressReader struct {
 	reader     io.Reader
-	stop       chan struct{}
-	quit       chan struct{}
+	stop       <-chan struct{}
+	quit       <-chan struct{}
 	report     func(int64)
 	sent       int64
 	lastReport time.Time
 }
 
 func (p *progressReader) Read(buf []byte) (int, error) {
-	if canceled(p.stop, p.quit) {
-		return 0, errCanceled
+	if transfer.IsCanceled(p.stop, p.quit) {
+		return 0, transfer.ErrCanceled
 	}
 	n, err := p.reader.Read(buf)
 	if n > 0 {
 		p.sent += int64(n)
-		if time.Since(p.lastReport) >= progressInterval {
+		if time.Since(p.lastReport) >= transfer.ProgressInterval {
 			p.lastReport = time.Now()
 			p.report(p.sent)
 		}
 	}
 	return n, err
-}
-
-func canceled(stop, quit chan struct{}) bool {
-	select {
-	case <-stop:
-		return true
-	case <-quit:
-		return true
-	default:
-		return false
-	}
-}
-
-func (e *Engine) emit(event transfer.Event) {
-	select {
-	case e.events <- event:
-	case <-e.quit:
-	}
-}
-
-func (e *Engine) done(id int) {
-	e.mu.Lock()
-	delete(e.running, id)
-	e.mu.Unlock()
 }
