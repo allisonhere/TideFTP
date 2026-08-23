@@ -204,7 +204,12 @@ type Model struct {
 	maxParallel    int
 	bottomTab      bottomTab
 	bottomOffset   int
-	logs           []string
+	// bottomCursor selects one row within the current bottom-pane tab's
+	// transfers, the target for a contextual x (cancel)/R (retry). It has
+	// no meaning on tabLog, which is plain scrolling text with no rows to
+	// select.
+	bottomCursor int
+	logs         []string
 
 	theme       tideui.Theme
 	themePicker tideui.ThemePicker
@@ -583,6 +588,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.overlay = overlayConflict
 	case "x":
 		m.cancelActiveTransfers()
+	case "R":
+		cmd = m.retrySelectedTransfer()
 	case "+":
 		cmd = m.adjustMaxParallel(1)
 	case "-":
@@ -910,7 +917,12 @@ func (m *Model) moveCursor(delta int) {
 	case focusRemote:
 		m.remote.cursor += delta
 	case focusQueue:
-		m.bottomOffset = max(0, m.bottomOffset+delta)
+		if m.bottomTab == tabLog {
+			// The log has lines to scroll through, not rows to select.
+			m.bottomOffset = max(0, m.bottomOffset+delta)
+			return
+		}
+		m.bottomCursor += delta
 	}
 }
 
@@ -1147,7 +1159,8 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 		m.setError(fmt.Sprintf("transfer %d failed: %s", row.ID, row.Message))
 	case transfer.Canceled:
 		// Canceled transfers share the Failed tab — there is no tab of their
-		// own — but keep their own status so a future retry flow can tell a
+		// own — but keep their own status distinct from Failed so
+		// retrySelectedTransfer, and the user reading the row, can tell a
 		// cancellation apart from a real failure.
 		row.Status = domain.Canceled
 		row.FinishedAt = time.Now()
@@ -1156,11 +1169,54 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 	}
 }
 
-// cancelActiveTransfers stops everything in flight. It is all-or-nothing
-// because the transfers pane scrolls but has no row cursor to aim at yet.
+// bottomTabFilter reports whether a transfer belongs in the currently
+// selected bottom-pane tab. tabQueue deliberately excludes Done: a transfer
+// that finishes simply stops matching Queue's filter on its very next
+// render and lives on only in tabHistory from then on — that is the whole
+// of "aging" a completed transfer out of the live queue, no timer involved.
+func (m Model) bottomTabFilter() func(domain.Transfer) bool {
+	switch m.bottomTab {
+	case tabQueue:
+		return func(t domain.Transfer) bool { return t.Status == domain.Queued || t.Status == domain.Active }
+	case tabActive:
+		return func(t domain.Transfer) bool { return t.Status == domain.Active }
+	case tabFailed:
+		return func(t domain.Transfer) bool { return t.Status == domain.Failed || t.Status == domain.Canceled }
+	case tabHistory:
+		return func(t domain.Transfer) bool { return t.Status == domain.Done }
+	default:
+		return func(domain.Transfer) bool { return false }
+	}
+}
+
+// bottomTabTransfers returns the transfers belonging to the current
+// bottom-pane tab, in queue order — the single source of truth both
+// rendering (renderBottomPane, bottomRowCount) and row targeting
+// (bottomCursor, cancelActiveTransfers, retrySelectedTransfer) go through,
+// so a row's on-screen position and what x/R act on can never disagree.
+func (m Model) bottomTabTransfers() []domain.Transfer {
+	keep := m.bottomTabFilter()
+	rows := make([]domain.Transfer, 0, len(m.transfers))
+	for _, t := range m.transfers {
+		if keep(t) {
+			rows = append(rows, t)
+		}
+	}
+	return rows
+}
+
+// cancelActiveTransfers stops transfers. With the queue pane focused on a
+// transfer tab (not tabLog, which has no rows), it targets only the row
+// under bottomCursor; otherwise — including from a file pane, or from the
+// queue pane on tabLog — it is the original all-or-nothing behavior and
+// stops everything in flight.
 func (m *Model) cancelActiveTransfers() {
 	if !m.connected() {
 		m.setError("not connected")
+		return
+	}
+	if m.focus == focusQueue && m.bottomTab != tabLog {
+		m.cancelTransferAt(m.bottomCursor)
 		return
 	}
 	ids := make([]int, 0, len(m.transfers))
@@ -1177,6 +1233,72 @@ func (m *Model) cancelActiveTransfers() {
 		m.engine.Cancel(id)
 	}
 	m.setStatus(fmt.Sprintf("cancelling %d transfer(s)", len(ids)))
+}
+
+// cancelTransferAt cancels or drops the transfer at index within the
+// current tab's rows (see bottomTabTransfers): an Active one is canceled
+// through the engine, like the all-active path; a Queued one is simply
+// removed, since it was never handed to the engine in the first place and
+// there is nothing to cancel. Anything else under the cursor (Done, Failed,
+// Canceled) is left alone — x has nothing to do to a row already finished.
+func (m *Model) cancelTransferAt(index int) {
+	rows := m.bottomTabTransfers()
+	if index < 0 || index >= len(rows) {
+		m.setError("no transfer selected")
+		return
+	}
+	target := rows[index]
+	switch target.Status {
+	case domain.Active:
+		m.engine.Cancel(target.ID)
+		m.setStatus(fmt.Sprintf("cancelling transfer %d", target.ID))
+	case domain.Queued:
+		if i := m.transferIndex(target.ID); i >= 0 {
+			m.transfers = append(m.transfers[:i], m.transfers[i+1:]...)
+		}
+		m.setStatus(fmt.Sprintf("removed queued transfer %d", target.ID))
+	default:
+		m.setError("selected transfer is not active or queued")
+	}
+}
+
+// retrySelectedTransfer re-queues the Failed or Canceled transfer under
+// bottomCursor as a brand new Transfer — fresh ID, zeroed progress — rather
+// than mutating the original row in place, so the original stays in the
+// Failed tab as a record of what happened while the retry runs its own
+// course as a normal queued transfer.
+func (m *Model) retrySelectedTransfer() tea.Cmd {
+	if !m.connected() {
+		m.setError("not connected")
+		return nil
+	}
+	if m.focus != focusQueue || m.bottomTab == tabLog {
+		m.setError("select a failed transfer to retry")
+		return nil
+	}
+	rows := m.bottomTabTransfers()
+	if m.bottomCursor < 0 || m.bottomCursor >= len(rows) {
+		m.setError("no transfer selected")
+		return nil
+	}
+	target := rows[m.bottomCursor]
+	if target.Status != domain.Failed && target.Status != domain.Canceled {
+		m.setError("selected transfer did not fail")
+		return nil
+	}
+	m.transfers = append(m.transfers, domain.Transfer{
+		ID:          m.nextTransferID,
+		Direction:   target.Direction,
+		Source:      target.Source,
+		Destination: target.Destination,
+		BytesTotal:  target.BytesTotal,
+		Status:      domain.Queued,
+		Message:     "queued",
+	})
+	m.nextTransferID++
+	m.setStatus(fmt.Sprintf("retrying transfer %d as %d", target.ID, m.nextTransferID-1))
+	m.startQueuedTransfers()
+	return nil
 }
 
 func (m Model) transferIndex(id int) int {
@@ -1206,17 +1328,47 @@ func (m *Model) focusedFilePane() *filePane {
 	}
 }
 
+// clampCursors keeps every cursor — both file panes' and the transfers
+// pane's row cursor — within bounds after whatever the last key did. It
+// runs after every keypress, not just navigation, since actions like
+// dropping a queued transfer or switching tabs can shrink the list a
+// cursor was pointing into.
 func (m *Model) clampCursors() {
 	visible := m.filePaneVisibleRows()
 	m.local.clamp(visible)
 	m.remote.clamp(visible)
+	m.clampBottomCursor()
+}
+
+// clampBottomCursor keeps bottomCursor inside the current tab's row count
+// and scrolls bottomOffset to follow it into view — the same shape as
+// filePane.clamp, over bottomTabTransfers() instead of a filePane's
+// entries. tabLog has no rows to select, and owns bottomOffset itself
+// (settleBottomOffset/clampBottomOffset, driven by bottomRowCount), so this
+// leaves it alone entirely.
+func (m *Model) clampBottomCursor() {
+	if m.bottomTab == tabLog {
+		return
+	}
+	rows := len(m.bottomTabTransfers())
+	visible := max(1, m.bottomVisibleRows())
+	m.bottomCursor = min(max(0, m.bottomCursor), max(0, rows-1))
+	if m.bottomCursor < m.bottomOffset {
+		m.bottomOffset = m.bottomCursor
+	}
+	if m.bottomCursor >= m.bottomOffset+visible {
+		m.bottomOffset = m.bottomCursor - visible + 1
+	}
+	m.bottomOffset = min(m.bottomOffset, max(0, rows-visible))
+	m.bottomOffset = max(0, m.bottomOffset)
 }
 
 // setBottomTab switches the focused bottom-pane tab and resets its scroll
-// position. The log tab opens scrolled to the latest entries, matching a
-// tail view; the transfer tabs open scrolled to the top.
+// position and row cursor. The log tab opens scrolled to the latest
+// entries, matching a tail view; the transfer tabs open scrolled to the top.
 func (m *Model) setBottomTab(tab bottomTab) {
 	m.bottomTab = tab
+	m.bottomCursor = 0
 	if tab == tabLog {
 		m.bottomOffset = max(0, len(m.logs)-m.bottomVisibleRows())
 	} else {

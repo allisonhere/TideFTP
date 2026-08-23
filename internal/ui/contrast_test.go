@@ -82,15 +82,20 @@ func TestTransferRowColoursAreReadable(t *testing.T) {
 	for _, theme := range allThemes() {
 		renderer := tideui.NewRenderer(theme, tideui.StyleOptions{Density: tideui.Compact})
 		for name, status := range statuses {
-			bg, fg, accent := transferPalette(renderer, status)
+			for _, cursor := range []bool{false, true} {
+				bg, fg, accent := transferPalette(renderer, status, cursor)
 
-			floor := textMinContrast
-			if status == domain.Done || status == domain.Queued {
-				floor = dimMinContrast
+				floor := textMinContrast
+				if (status == domain.Done || status == domain.Queued) && !cursor {
+					floor = dimMinContrast
+				}
+				label := theme.Name + "/" + name
+				if cursor {
+					label += "/cursor"
+				}
+				checkContrast(t, label+" text", fg, bg, floor)
+				checkContrast(t, label+" accent", accent, bg, floor)
 			}
-			label := theme.Name + "/" + name
-			checkContrast(t, label+" text", fg, bg, floor)
-			checkContrast(t, label+" accent", accent, bg, floor)
 		}
 	}
 }

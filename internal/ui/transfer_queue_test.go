@@ -11,6 +11,7 @@ import (
 	"tideftp/internal/fakefs"
 	"tideftp/internal/localfs"
 	"tideftp/internal/session"
+	"tideftp/internal/transfer"
 )
 
 func TestAdjustMaxParallelClampsAtOneAndTheCap(t *testing.T) {
@@ -77,5 +78,141 @@ func TestParallelismShownInTheQueueTab(t *testing.T) {
 	view := model.View()
 	if !strings.Contains(view, "(3x)") {
 		t.Fatalf("queue tab does not show the current parallelism:\n%s", view)
+	}
+}
+
+func TestXOnAnActiveRowCancelsOnlyThatTransfer(t *testing.T) {
+	engine := newScriptedEngine()
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, Source: "/a", Destination: "/a"},
+		{ID: 2, Status: domain.Active, Source: "/b", Destination: "/b"},
+	}
+	model.bottomCursor = 1
+
+	model = press(t, model, runes("x"))
+
+	if len(engine.canceled) != 1 || engine.canceled[0] != 2 {
+		t.Fatalf("engine.canceled = %v, want just transfer 2 (the one under the cursor)", engine.canceled)
+	}
+}
+
+func TestXOnAQueuedRowDropsItWithoutTouchingTheEngine(t *testing.T) {
+	engine := newScriptedEngine()
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, Source: "/a", Destination: "/a"},
+		{ID: 2, Status: domain.Queued, Source: "/b", Destination: "/b"},
+	}
+	model.bottomCursor = 1
+
+	model = press(t, model, runes("x"))
+
+	if len(engine.canceled) != 0 {
+		t.Fatalf("engine.canceled = %v, a Queued transfer was never started and needs no engine call", engine.canceled)
+	}
+	if len(model.transfers) != 1 || model.transfers[0].ID != 1 {
+		t.Fatalf("transfers = %+v, want only transfer 1 left", model.transfers)
+	}
+}
+
+func TestXUnfocusedStillCancelsEveryActiveTransfer(t *testing.T) {
+	engine := newScriptedEngine()
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	model.focus = focusLocal
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, Source: "/a", Destination: "/a"},
+		{ID: 2, Status: domain.Active, Source: "/b", Destination: "/b"},
+	}
+
+	model = press(t, model, runes("x"))
+
+	if len(engine.canceled) != 2 {
+		t.Fatalf("engine.canceled = %v, want both active transfers (queue pane not focused)", engine.canceled)
+	}
+}
+
+func TestRetryQueuesAFreshTransferAndKeepsTheFailedRow(t *testing.T) {
+	engine := newScriptedEngine()
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
+	model.focus = focusQueue
+	model.bottomTab = tabFailed
+	model.nextTransferID = 100
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Failed, Direction: domain.Upload, Source: "/a", Destination: "/a", BytesTotal: 500, Message: "boom"},
+	}
+	model.bottomCursor = 0
+
+	model = press(t, model, runes("R"))
+
+	if len(model.transfers) != 2 {
+		t.Fatalf("transfers = %+v, want the original plus a new retry", model.transfers)
+	}
+	original, retry := model.transfers[0], model.transfers[1]
+	if original.Status != domain.Failed || original.Message != "boom" {
+		t.Fatalf("original transfer changed: %+v", original)
+	}
+	if retry.ID == original.ID {
+		t.Fatalf("retry reused the original ID %d, want a fresh one", retry.ID)
+	}
+	if retry.Status != domain.Active && retry.Status != domain.Queued {
+		t.Fatalf("retry status = %v, want Queued or Active (started immediately)", retry.Status)
+	}
+	if retry.Source != original.Source || retry.Destination != original.Destination || retry.BytesTotal != original.BytesTotal {
+		t.Fatalf("retry = %+v, want the same source/destination/size as the original", retry)
+	}
+}
+
+func TestRetryDoesNothingOutsideTheQueuePane(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.focus = focusLocal
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Failed, Source: "/a", Destination: "/a"},
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+
+	if len(model.transfers) != 1 {
+		t.Fatalf("transfers = %+v, want R to be a no-op outside the queue pane", model.transfers)
+	}
+}
+
+func TestRetryOnANonFailedRowDoesNothing(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.focus = focusQueue
+	model.bottomTab = tabActive
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, Source: "/a", Destination: "/a"},
+	}
+	model.bottomCursor = 0
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+
+	if len(model.transfers) != 1 {
+		t.Fatalf("transfers = %+v, want R on an Active row to be a no-op", model.transfers)
+	}
+}
+
+func TestADoneTransferAgesOutOfTheQueueTabIntoHistory(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.transfers = []domain.Transfer{{ID: 1, Status: domain.Queued, BytesTotal: 100}}
+
+	next, _ := model.Update(transfer.Event{ID: 1, Kind: transfer.Completed, BytesDone: 100})
+	model = next.(Model)
+	if model.transfers[0].Status != domain.Done {
+		t.Fatalf("status after Completed = %v, want Done", model.transfers[0].Status)
+	}
+
+	model.bottomTab = tabQueue
+	if rows := model.bottomTabTransfers(); len(rows) != 0 {
+		t.Fatalf("Queue tab rows = %+v, want the finished transfer gone", rows)
+	}
+	model.bottomTab = tabHistory
+	if rows := model.bottomTabTransfers(); len(rows) != 1 || rows[0].ID != 1 {
+		t.Fatalf("History tab rows = %+v, want the finished transfer", rows)
 	}
 }

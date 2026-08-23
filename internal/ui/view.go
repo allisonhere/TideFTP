@@ -185,26 +185,15 @@ func (m Model) renderRemotePane(renderer tideui.Renderer, width, height int) str
 func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) string {
 	width, height = max(1, width), max(1, height)
 	rows := []string{m.renderBottomTabs(renderer, width)}
-	switch m.bottomTab {
-	case tabQueue:
-		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool {
-			return t.Status == domain.Queued || t.Status == domain.Active || t.Status == domain.Done
-		})...)
-	case tabActive:
-		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool { return t.Status == domain.Active })...)
-	case tabFailed:
-		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool {
-			return t.Status == domain.Failed || t.Status == domain.Canceled
-		})...)
-	case tabHistory:
-		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool { return t.Status == domain.Done })...)
-	case tabLog:
+	if m.bottomTab == tabLog {
 		visible := height - 1
 		start := min(m.bottomOffset, max(0, len(m.logs)-visible))
 		end := min(len(m.logs), start+visible)
 		for i := start; i < end; i++ {
 			rows = append(rows, fitRow(renderer.Styles.DetailBody, width, m.logs[i]))
 		}
+	} else {
+		rows = append(rows, m.renderTransferRows(renderer, width, height-1)...)
 	}
 	if len(rows) == 1 {
 		rows = append(rows, fitRow(renderer.Styles.DetailMeta, width, "no rows yet"))
@@ -212,21 +201,17 @@ func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) str
 	return strings.Join(rows, "\n")
 }
 
-func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int, keep func(domain.Transfer) bool) []string {
+// renderTransferRows draws the current tab's rows starting at bottomOffset,
+// highlighting bottomCursor's row when the queue pane has focus — the same
+// windowing filePane rendering does over cursor/offset, but over
+// bottomTabTransfers() instead of a filePane's entries.
+func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int) []string {
+	all := m.bottomTabTransfers()
 	rows := make([]string, 0, limit)
-	skip := m.bottomOffset
-	for _, transfer := range m.transfers {
-		if !keep(transfer) {
-			continue
-		}
-		if skip > 0 {
-			skip--
-			continue
-		}
-		if len(rows) >= limit {
-			break
-		}
-		rows = append(rows, m.renderTransferRow(renderer, transfer, width))
+	end := min(len(all), m.bottomOffset+limit)
+	for i := m.bottomOffset; i < end; i++ {
+		cursor := m.focus == focusQueue && i == m.bottomCursor
+		rows = append(rows, m.renderTransferRow(renderer, all[i], cursor, width))
 	}
 	return rows
 }
@@ -340,15 +325,25 @@ func (m Model) renderEntryRow(renderer tideui.Renderer, entry domain.Entry, curs
 // transferPalette resolves the colours one transfer row is painted with, on
 // the same terms as entryPalette: every foreground checked against the row's
 // own background.
-func transferPalette(renderer tideui.Renderer, status domain.TransferStatus) (bg, fg, accent lipgloss.Color) {
+func transferPalette(renderer tideui.Renderer, status domain.TransferStatus, cursor bool) (bg, fg, accent lipgloss.Color) {
 	base := renderer.Styles.Item
-	if status == domain.Done {
+	switch {
+	case cursor:
+		base = renderer.Styles.ItemSelected
+	case status == domain.Done:
 		base = renderer.Styles.ItemMuted
 	}
 	bg, fg = rowSurface(renderer, base)
 
 	floor := textMinContrast
-	if status == domain.Done {
+	dimFloor := dimMinContrast
+	if cursor {
+		// The cursor row's background is much brighter than a plain row's;
+		// an accent picked to merely clear the dim floor against a plain
+		// background can fail outright against the selected one.
+		floor = textMinContrast
+		dimFloor = textMinContrast
+	} else if status == domain.Done {
 		floor = dimMinContrast
 	}
 	fg = readableOn(fg, bg, floor)
@@ -358,17 +353,17 @@ func transferPalette(renderer tideui.Renderer, status domain.TransferStatus) (bg
 	case domain.Active:
 		accent = readableOn(renderer.Styles.Theme.BorderFocus, bg, textMinContrast)
 	case domain.Done:
-		accent = readableOn(renderer.Styles.Theme.Unread, bg, dimMinContrast)
+		accent = readableOn(renderer.Styles.Theme.Unread, bg, dimFloor)
 	case domain.Failed, domain.Canceled:
 		accent = readableOn(renderer.Styles.Theme.Error, bg, textMinContrast)
 	case domain.Queued:
-		accent = readableOn(renderer.Styles.Theme.Dimmed, bg, dimMinContrast)
+		accent = readableOn(renderer.Styles.Theme.Dimmed, bg, dimFloor)
 	}
 	return bg, fg, accent
 }
 
-func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, width int) string {
-	bg, fg, statusColor := transferPalette(renderer, transfer.Status)
+func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, cursor bool, width int) string {
+	bg, fg, statusColor := transferPalette(renderer, transfer.Status, cursor)
 
 	statusIcon := " "
 	switch transfer.Status {
@@ -441,7 +436,8 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			keyRow("u", "upload"),
 			keyRow("d", "download"),
 			keyRow("r", "refresh"),
-			keyRow("x", "cancel active transfers"),
+			keyRow("x", "cancel active transfer (queue pane) / all"),
+			keyRow("R", "retry selected failed transfer"),
 			keyRow("+/-", "more/fewer parallel transfers"),
 			keyRow("o", "conflict prompt (demo)"),
 			keyRow(".", "toggle hidden files"),
@@ -548,26 +544,10 @@ func (m Model) bottomVisibleRows() int {
 // bottomRowCount returns how many rows exist for the currently selected
 // bottom-pane tab, regardless of how many are actually visible.
 func (m Model) bottomRowCount() int {
-	switch m.bottomTab {
-	case tabQueue:
-		count := 0
-		for _, transfer := range m.transfers {
-			if transfer.Status == domain.Queued || transfer.Status == domain.Active || transfer.Status == domain.Done {
-				count++
-			}
-		}
-		return count
-	case tabActive:
-		return countStatus(m.transfers, domain.Active)
-	case tabFailed:
-		return countStatus(m.transfers, domain.Failed) + countStatus(m.transfers, domain.Canceled)
-	case tabHistory:
-		return countStatus(m.transfers, domain.Done)
-	case tabLog:
+	if m.bottomTab == tabLog {
 		return len(m.logs)
-	default:
-		return 0
 	}
+	return len(m.bottomTabTransfers())
 }
 
 func (m Model) bottomTabLabel() string {

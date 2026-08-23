@@ -320,25 +320,32 @@ func TestBottomPaneScrolls(t *testing.T) {
 		t.Fatalf("expected a visible row count smaller than the transfer count, got %d visible of %d", visible, len(model.transfers))
 	}
 
+	// One down moves the row cursor; the offset does not move yet, since the
+	// cursor is still inside the visible window.
 	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyDown})
 	model = updated.(Model)
-	if model.bottomOffset != 1 {
-		t.Fatalf("bottomOffset after one down = %d, want 1", model.bottomOffset)
+	if model.bottomCursor != 1 {
+		t.Fatalf("bottomCursor after one down = %d, want 1", model.bottomCursor)
+	}
+	if model.bottomOffset != 0 {
+		t.Fatalf("bottomOffset after one down = %d, want 0 (cursor still inside the visible window)", model.bottomOffset)
 	}
 
 	for i := 0; i < 100; i++ {
 		updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	wantMax := len(model.transfers) - visible
-	if model.bottomOffset != wantMax {
-		t.Fatalf("bottomOffset after many downs = %d, want clamped to %d", model.bottomOffset, wantMax)
+	if wantCursor := len(model.transfers) - 1; model.bottomCursor != wantCursor {
+		t.Fatalf("bottomCursor after many downs = %d, want clamped to %d", model.bottomCursor, wantCursor)
+	}
+	if wantOffset := len(model.transfers) - visible; model.bottomOffset != wantOffset {
+		t.Fatalf("bottomOffset after many downs = %d, want clamped to %d", model.bottomOffset, wantOffset)
 	}
 
 	updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
 	model = updated.(Model)
-	if model.bottomOffset != 0 {
-		t.Fatalf("switching tabs should reset bottomOffset, got %d", model.bottomOffset)
+	if model.bottomOffset != 0 || model.bottomCursor != 0 {
+		t.Fatalf("switching tabs should reset bottomOffset and bottomCursor, got offset=%d cursor=%d", model.bottomOffset, model.bottomCursor)
 	}
 }
 
@@ -400,11 +407,16 @@ func TestBottomPaneStaysPutWhenScrolledUpDuringActivity(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		model.transfers = append(model.transfers, domain.Transfer{ID: i, Status: domain.Queued})
 	}
+	visible := model.bottomVisibleRows()
 
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyDown})
-	model = updated.(Model)
+	// Push the cursor exactly one row past the visible window, so the
+	// offset advances by exactly one -- scrolled, but nowhere near the end.
+	for i := 0; i < visible; i++ {
+		updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
 	if model.bottomOffset != 1 {
-		t.Fatalf("bottomOffset after one down = %d, want 1", model.bottomOffset)
+		t.Fatalf("bottomOffset after scrolling one row past the visible window = %d, want 1", model.bottomOffset)
 	}
 	if model.isAtBottomPane() {
 		t.Fatalf("expected to not be at the bottom after scrolling only one row into a long list")
@@ -428,12 +440,12 @@ func TestManualScrollUpIsNotOverriddenByFollow(t *testing.T) {
 		updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	atBottom := model.bottomOffset
+	atBottom := model.bottomCursor
 
 	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyUp})
 	model = updated.(Model)
-	if model.bottomOffset != atBottom-1 {
-		t.Fatalf("scrolling up from the bottom = %d, want %d (not snapped back by auto-follow)", model.bottomOffset, atBottom-1)
+	if model.bottomCursor != atBottom-1 {
+		t.Fatalf("scrolling up from the bottom = %d, want %d (not snapped back by auto-follow)", model.bottomCursor, atBottom-1)
 	}
 }
 
