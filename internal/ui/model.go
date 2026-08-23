@@ -233,9 +233,15 @@ type Model struct {
 // more events, so the UI stops waiting on the channel.
 type transferStreamClosed struct{}
 
-// defaultParallelTransfers is how many transfers run at once until config
-// persistence lands and can override Model.maxParallel.
+// defaultParallelTransfers is how many transfers run at once when no config
+// value overrides Model.maxParallel.
 const defaultParallelTransfers = 2
+
+// maxParallelCap bounds how high +/- can push Model.maxParallel. It exists so
+// a runaway keypress cannot start hundreds of concurrent transfers; the pools
+// behind ftpsession/sftpsession have their own smaller caps too, but this
+// keeps the number sane before it ever reaches them.
+const maxParallelCap = 8
 
 // dialTimeout bounds a connect attempt, which can otherwise hang as long as
 // the network cares to.
@@ -577,6 +583,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.overlay = overlayConflict
 	case "x":
 		m.cancelActiveTransfers()
+	case "+":
+		cmd = m.adjustMaxParallel(1)
+	case "-":
+		cmd = m.adjustMaxParallel(-1)
 	case "r":
 		cmd = m.refresh()
 	case "c":
@@ -1056,6 +1066,19 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 	}
 	m.setStatus(fmt.Sprintf("queued %d transfer(s)", queued))
 	m.startQueuedTransfers()
+}
+
+// adjustMaxParallel changes how many transfers run at once, clamped to
+// [1, maxParallelCap]. Raising it can immediately start transfers that were
+// sitting in Queued waiting for a slot, so it calls startQueuedTransfers;
+// lowering it never stops one already Active, since Runner has no pause —
+// active transfers stay running until the queue naturally has fewer than the
+// new cap.
+func (m *Model) adjustMaxParallel(delta int) tea.Cmd {
+	m.maxParallel = min(maxParallelCap, max(1, m.maxParallel+delta))
+	m.setStatus(fmt.Sprintf("parallel transfers: %d", m.maxParallel))
+	m.startQueuedTransfers()
+	return m.persist()
 }
 
 // startQueuedTransfers promotes queued transfers to active, up to maxParallel,

@@ -406,7 +406,7 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 }
 
 func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
-	labels := []string{"1 Queue", "2 Active", "3 Failed", "4 History", "5 Log"}
+	labels := []string{fmt.Sprintf("1 Queue (%dx)", m.maxParallel), "2 Active", "3 Failed", "4 History", "5 Log"}
 	parts := make([]string, 0, len(labels))
 	for index, label := range labels {
 		style := renderer.Styles.DetailMeta
@@ -442,6 +442,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			keyRow("d", "download"),
 			keyRow("r", "refresh"),
 			keyRow("x", "cancel active transfers"),
+			keyRow("+/-", "more/fewer parallel transfers"),
 			keyRow("o", "conflict prompt (demo)"),
 			keyRow(".", "toggle hidden files"),
 			"",
