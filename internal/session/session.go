@@ -70,6 +70,21 @@ func (t Target) Home() string {
 	return t.StartPath
 }
 
+// Credentials authenticates one Dial attempt. Unlike Target, it is never
+// persisted — a saved profile keeps where to connect and as whom, never how
+// to prove it.
+type Credentials struct {
+	// Password authenticates the connection. FTP and FTPS always need one;
+	// SFTP only uses it when PasswordOnly is set. Empty defers to however the
+	// Dialer was already configured (an env var, typically).
+	Password string
+	// PasswordOnly is SFTP-specific: it forces password authentication and
+	// skips the SSH agent and key files entirely, rather than trying Password
+	// only as a fallback after they fail. FTP and FTPS ignore it, since they
+	// have no other auth method to skip.
+	PasswordOnly bool
+}
+
 // Conn is a live connection. Its FS and Engine are valid only until the
 // connection ends; callers must stop using them once Done fires.
 type Conn interface {
@@ -88,7 +103,8 @@ type Conn interface {
 // Dialer opens connections. Implementations are protocol-specific; the UI
 // holds one and knows nothing about what it dials.
 type Dialer interface {
-	// Dial connects to target, honouring ctx for the connect attempt only.
-	// Cancelling ctx afterwards does not close the returned Conn.
-	Dial(ctx context.Context, target Target) (Conn, error)
+	// Dial connects to target as creds, honouring ctx for the connect attempt
+	// only. Cancelling ctx afterwards does not close the returned Conn. A
+	// Dialer that authenticates itself (the demo fakes) ignores creds.
+	Dial(ctx context.Context, target Target, creds Credentials) (Conn, error)
 }

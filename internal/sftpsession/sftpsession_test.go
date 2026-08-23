@@ -41,7 +41,7 @@ func dialerFor(t *testing.T, server *testServer) *Dialer {
 
 func connect(t *testing.T, server *testServer) session.Conn {
 	t.Helper()
-	conn, err := dialerFor(t, server).Dial(context.Background(), targetFor(server))
+	conn, err := dialerFor(t, server).Dial(context.Background(), targetFor(server), session.Credentials{})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestDialRejectsAnUnknownHostKey(t *testing.T) {
 		Timeout:        10 * time.Second,
 	})
 
-	_, err := dialer.Dial(context.Background(), targetFor(server))
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
 	if err == nil {
 		t.Fatalf("dialing a server whose host key does not match known_hosts succeeded")
 	}
@@ -80,12 +80,34 @@ func TestDialFailsWithoutCredentials(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	dialer := New(Config{KnownHostsPath: server.knownHostsFile(t)})
 
-	_, err := dialer.Dial(context.Background(), targetFor(server))
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
 	if err == nil {
 		t.Fatalf("dialing with no keys and no agent succeeded")
 	}
 	if !strings.Contains(err.Error(), "no usable credentials") {
 		t.Fatalf("error = %v, want it to explain there are no credentials", err)
+	}
+}
+
+func TestDialWithPasswordOnlySkipsConfiguredKeyFiles(t *testing.T) {
+	server := startTestServer(t)
+	// dialerFor configures a valid key file that TestDialWithAKeyFile proves
+	// succeeds on its own; PasswordOnly must still refuse to use it.
+	dialer := dialerFor(t, server)
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{PasswordOnly: true, Password: "whatever"})
+	if err == nil {
+		t.Fatalf("PasswordOnly should have skipped the configured key file, but the dial succeeded")
+	}
+}
+
+func TestDialRejectsPasswordOnlyWithNoPassword(t *testing.T) {
+	server := startTestServer(t)
+	dialer := dialerFor(t, server)
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{PasswordOnly: true})
+	if err == nil || !strings.Contains(err.Error(), "no password was given") {
+		t.Fatalf("error = %v, want it to explain that password auth needs a password", err)
 	}
 }
 
@@ -98,7 +120,7 @@ func TestDialFailsWithoutAKnownHostsFile(t *testing.T) {
 
 	// A missing known_hosts must fail closed, never fall back to accepting
 	// whatever key the server offers.
-	if _, err := dialer.Dial(context.Background(), targetFor(server)); err == nil {
+	if _, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{}); err == nil {
 		t.Fatalf("dialing with no known_hosts file succeeded")
 	}
 }
@@ -107,7 +129,7 @@ func TestDialFailsForARefusedServer(t *testing.T) {
 	server := startTestServer(t)
 	server.refuse()
 
-	if _, err := dialerFor(t, server).Dial(context.Background(), targetFor(server)); err == nil {
+	if _, err := dialerFor(t, server).Dial(context.Background(), targetFor(server), session.Credentials{}); err == nil {
 		t.Fatalf("dialing a server that drops connections succeeded")
 	}
 }
@@ -292,7 +314,7 @@ func TestCancelStopsATransfer(t *testing.T) {
 
 func TestCloseEndsTheConnectionWithNoReason(t *testing.T) {
 	server := startTestServer(t)
-	conn, err := dialerFor(t, server).Dial(context.Background(), targetFor(server))
+	conn, err := dialerFor(t, server).Dial(context.Background(), targetFor(server), session.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +336,7 @@ func TestCloseEndsTheConnectionWithNoReason(t *testing.T) {
 
 func TestServerGoingAwayReportsADrop(t *testing.T) {
 	server := startTestServer(t)
-	conn, err := dialerFor(t, server).Dial(context.Background(), targetFor(server))
+	conn, err := dialerFor(t, server).Dial(context.Background(), targetFor(server), session.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}

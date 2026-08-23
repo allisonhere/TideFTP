@@ -463,6 +463,9 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("Status  "+m.connectionSummary()))
 		rows = append(rows, "")
 		for field := connectFieldProfile; field < connectFieldCount; field++ {
+			if !m.connectFieldVisible(field) {
+				continue
+			}
 			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
 				Text:     connectFieldLabel(field),
 				Suffix:   m.connectFieldDisplay(field),
@@ -471,8 +474,8 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		}
 		if m.statusErr {
 			rows = append(rows, "", renderer.Styles.StatusError.Width(contentWidth).Render(m.status))
-		} else {
-			rows = append(rows, "", renderer.Styles.DetailMeta.Width(contentWidth).Render("Passwords come from the environment; a password field lands with credential handling."))
+		} else if m.connectFieldVisible(connectFieldPassword) {
+			rows = append(rows, "", renderer.Styles.DetailMeta.Width(contentWidth).Render("Password can be left blank to fall back to the environment variable."))
 		}
 		rows = append(rows, "",
 			renderer.RenderSoftHints(contentWidth,

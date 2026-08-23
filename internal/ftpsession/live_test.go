@@ -57,7 +57,7 @@ func liveConn(t *testing.T) (session.Conn, string) {
 	}).Dial(context.Background(), session.Target{
 		Protocol: protocol, Host: host, Port: port,
 		User: os.Getenv("TIDEFTP_TEST_FTP_USER"), StartPath: remoteDir,
-	})
+	}, session.Credentials{})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestLiveWrongPasswordFails(t *testing.T) {
 	_, err := New(Config{Password: "definitely-not-the-password", Timeout: 15 * time.Second}).
 		Dial(context.Background(), session.Target{
 			Protocol: "ftp", Host: host, Port: port, User: os.Getenv("TIDEFTP_TEST_FTP_USER"),
-		})
+		}, session.Credentials{})
 	if err == nil {
 		t.Fatalf("connected with a wrong password")
 	}

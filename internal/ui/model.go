@@ -377,7 +377,7 @@ func (m Model) Init() tea.Cmd {
 	// The transfer event pump belongs to a connection, so it starts on connect
 	// rather than here.
 	if m.state == connConnecting {
-		cmds = append(cmds, dialCmd(m.dialer, m.target))
+		cmds = append(cmds, dialCmd(m.dialer, m.target, session.Credentials{}))
 	}
 	return tea.Batch(cmds...)
 }
@@ -607,8 +607,9 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// connect starts dialing target, tearing down any existing connection first.
-func (m *Model) connect(target session.Target) tea.Cmd {
+// connect starts dialing target as creds, tearing down any existing
+// connection first.
+func (m *Model) connect(target session.Target, creds session.Credentials) tea.Cmd {
 	cmds := []tea.Cmd{}
 	if m.conn != nil {
 		cmds = append(cmds, closeConnCmd(m.conn))
@@ -619,7 +620,7 @@ func (m *Model) connect(target session.Target) tea.Cmd {
 	m.connErr = nil
 	m.setStatus("connecting to " + target.Label())
 	m.logs = append(m.logs, "connect "+target.Address()+" as "+target.User+" (credentials redacted)")
-	return tea.Batch(append(cmds, dialCmd(m.dialer, target))...)
+	return tea.Batch(append(cmds, dialCmd(m.dialer, target, creds))...)
 }
 
 // disconnect ends the current connection at the user's request.
@@ -633,11 +634,11 @@ func (m *Model) disconnect() tea.Cmd {
 	return closeConnCmd(conn)
 }
 
-func dialCmd(dialer session.Dialer, target session.Target) tea.Cmd {
+func dialCmd(dialer session.Dialer, target session.Target, creds session.Credentials) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 		defer cancel()
-		conn, err := dialer.Dial(ctx, target)
+		conn, err := dialer.Dial(ctx, target, creds)
 		if err != nil {
 			return connectFailedMsg{target: target, err: err}
 		}

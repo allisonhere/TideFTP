@@ -19,12 +19,19 @@ const (
 	connectFieldHost
 	connectFieldPort
 	connectFieldUsername
+	connectFieldAuth
+	connectFieldPassword
 	connectFieldPath
 	connectFieldCount
 )
 
 // connectProtocols is the protocol picker's cycle order.
 var connectProtocols = []string{"sftp", "ftp", "ftps"}
+
+// connectAuthChoices is the Auth picker's cycle order. It only applies to
+// SFTP — FTP and FTPS have no other way to authenticate, so they force
+// "password" without showing the field at all; see connectAuthMode.
+var connectAuthChoices = []string{"agent/key", "password"}
 
 // connectFormValue holds the connect form's field values. Protocol is an index
 // into connectProtocols, profile is an index into the model's profile choices
@@ -44,8 +51,50 @@ type connectFormValue struct {
 	host     string
 	port     string
 	username string
+	auth     int
+	password string
 	path     string
 	fresh    [connectFieldCount]bool
+}
+
+// connectAuthMode reports how the form will authenticate: always "password"
+// for FTP/FTPS, since they have no other method, or whichever the Auth field
+// is set to for SFTP.
+func (m Model) connectAuthMode() string {
+	if connectProtocols[m.connectForm.protocol] != "sftp" {
+		return "password"
+	}
+	return connectAuthChoices[m.connectForm.auth]
+}
+
+// connectFieldVisible reports whether field is shown and reachable in the
+// form's current state. Auth only matters for SFTP, the only protocol with
+// more than one way to authenticate; Password only matters when the resolved
+// auth mode actually uses one.
+func (m Model) connectFieldVisible(field connectField) bool {
+	switch field {
+	case connectFieldAuth:
+		return connectProtocols[m.connectForm.protocol] == "sftp"
+	case connectFieldPassword:
+		return m.connectAuthMode() == "password"
+	default:
+		return true
+	}
+}
+
+// credentialsFromForm builds what Dial needs to authenticate. It never
+// touches session.Target — credentials are deliberately not part of what a
+// profile can persist. PasswordOnly is set only for SFTP, where choosing
+// "password" explicitly means skipping the agent and key files rather than
+// merely offering Password as a fallback after them.
+func (m Model) credentialsFromForm() session.Credentials {
+	if m.connectAuthMode() != "password" {
+		return session.Credentials{}
+	}
+	return session.Credentials{
+		Password:     m.connectForm.password,
+		PasswordOnly: connectProtocols[m.connectForm.protocol] == "sftp",
+	}
 }
 
 // connectProfileNew is the label shown when the Profile field points at no
@@ -163,6 +212,10 @@ func connectFieldLabel(field connectField) string {
 		return "Port"
 	case connectFieldUsername:
 		return "Username"
+	case connectFieldAuth:
+		return "Auth"
+	case connectFieldPassword:
+		return "Password"
 	case connectFieldPath:
 		return "Path"
 	}
@@ -187,6 +240,10 @@ func (m Model) connectFieldValue(field connectField) string {
 		return m.connectForm.port
 	case connectFieldUsername:
 		return m.connectForm.username
+	case connectFieldAuth:
+		return connectAuthChoices[m.connectForm.auth]
+	case connectFieldPassword:
+		return m.connectForm.password
 	case connectFieldPath:
 		return m.connectForm.path
 	}
@@ -203,6 +260,8 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 		m.connectForm.port = value
 	case connectFieldUsername:
 		m.connectForm.username = value
+	case connectFieldPassword:
+		m.connectForm.password = value
 	case connectFieldPath:
 		m.connectForm.path = value
 	}
@@ -211,13 +270,17 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 // connectChoiceField reports whether the given field is a cycled picker rather
 // than free text.
 func connectChoiceField(field connectField) bool {
-	return field == connectFieldProfile || field == connectFieldProtocol
+	return field == connectFieldProfile || field == connectFieldProtocol || field == connectFieldAuth
 }
 
 // connectFieldDisplay returns the value shown for field, with a caret inserted
-// when it is the focused free-text field.
+// when it is the focused free-text field. Password is masked either way, since
+// it is shown even while unfocused whenever the auth mode calls for one.
 func (m Model) connectFieldDisplay(field connectField) string {
 	value := m.connectFieldValue(field)
+	if field == connectFieldPassword {
+		value = strings.Repeat("•", len([]rune(value)))
+	}
 	if field == m.connectField && !connectChoiceField(field) {
 		runes := []rune(value)
 		cur := min(max(m.connectCursor, 0), len(runes))
@@ -227,9 +290,18 @@ func (m Model) connectFieldDisplay(field connectField) string {
 	return value
 }
 
+// moveConnectField steps to the next (or previous) visible field, skipping
+// over Auth/Password when the current auth mode hides them.
 func (m *Model) moveConnectField(delta int) {
 	n := int(connectFieldCount)
-	m.connectField = connectField((int(m.connectField) + delta + n) % n)
+	next := m.connectField
+	for i := 0; i < n; i++ {
+		next = connectField((int(next) + delta + n) % n)
+		if m.connectFieldVisible(next) {
+			break
+		}
+	}
+	m.connectField = next
 	m.connectCursor = len([]rune(m.connectFieldValue(m.connectField)))
 }
 
@@ -247,6 +319,9 @@ func (m *Model) cycleConnectChoice(delta int) {
 	case connectFieldProtocol:
 		n := len(connectProtocols)
 		m.connectForm.protocol = (m.connectForm.protocol + delta + n) % n
+	case connectFieldAuth:
+		n := len(connectAuthChoices)
+		m.connectForm.auth = (m.connectForm.auth + delta + n) % n
 	}
 }
 
@@ -328,8 +403,13 @@ func (m *Model) connectFromForm() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	creds := m.credentialsFromForm()
+	if creds.PasswordOnly && creds.Password == "" {
+		m.setError("password is required for password auth")
+		return nil
+	}
 	m.overlay = overlayNone
-	return m.connect(target)
+	return m.connect(target, creds)
 }
 
 // upsertProfile saves target as a profile, replacing an existing one with the

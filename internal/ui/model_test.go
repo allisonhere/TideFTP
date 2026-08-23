@@ -61,11 +61,13 @@ type stubDialer struct {
 	engine transfer.Engine
 	err    error
 	calls  []session.Target
+	creds  []session.Credentials
 	conns  []*stubConn
 }
 
-func (d *stubDialer) Dial(_ context.Context, target session.Target) (session.Conn, error) {
+func (d *stubDialer) Dial(_ context.Context, target session.Target, creds session.Credentials) (session.Conn, error) {
 	d.calls = append(d.calls, target)
+	d.creds = append(d.creds, creds)
 	if d.err != nil {
 		return nil, d.err
 	}
@@ -112,7 +114,7 @@ func connectModel(t *testing.T, local vfs.FS, dialer *stubDialer) (Model, *stubD
 		return model, dialer
 	}
 
-	conn, err := dialer.Dial(context.Background(), testTarget)
+	conn, err := dialer.Dial(context.Background(), testTarget, session.Credentials{})
 	if err != nil {
 		t.Fatalf("stub dial: %v", err)
 	}
@@ -1146,11 +1148,19 @@ func TestConnectFormFieldCursorWraps(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
 
-	for i := 0; i < int(connectFieldCount); i++ {
+	// Password starts hidden (default auth is agent/key), so a full cycle is
+	// fewer than connectFieldCount downs — count only the visible fields.
+	visible := 0
+	for f := connectField(0); f < connectFieldCount; f++ {
+		if model.connectFieldVisible(f) {
+			visible++
+		}
+	}
+	for i := 0; i < visible; i++ {
 		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	}
 	if model.connectField != connectFieldProfile {
-		t.Fatalf("after %d downs, field = %d, want profile (%d)", int(connectFieldCount), model.connectField, connectFieldProfile)
+		t.Fatalf("after %d downs, field = %d, want profile (%d)", visible, model.connectField, connectFieldProfile)
 	}
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
 	if model.connectField != connectFieldPath {
@@ -1387,10 +1397,121 @@ func TestConnectFormRendersFields(t *testing.T) {
 	model = press(t, model, runes("c"))
 
 	plain := ansi.Strip(model.View())
-	for _, want := range []string{"connect", "Profile", "Name", "Protocol", "Host", "Port", "Username", "Path", "sftp"} {
+	for _, want := range []string{"connect", "Profile", "Name", "Protocol", "Host", "Port", "Username", "Auth", "Path", "sftp"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("connect form is missing %q", want)
 		}
+	}
+	// The default auth is agent/key, so Password has nothing to do yet and
+	// should not clutter the form.
+	if strings.Contains(plain, "Password") {
+		t.Errorf("connect form shows Password before password auth is chosen")
+	}
+}
+
+func TestConnectFormPasswordFieldVisibilityFollowsAuthChoice(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+
+	if model.connectFieldVisible(connectFieldPassword) {
+		t.Fatalf("password field visible before choosing password auth")
+	}
+	if !model.connectFieldVisible(connectFieldAuth) {
+		t.Fatalf("auth field should be visible for sftp")
+	}
+
+	model.connectField = connectFieldAuth
+	model = press(t, model, runes("l"))
+
+	if connectAuthChoices[model.connectForm.auth] != "password" {
+		t.Fatalf("auth = %q, want password", connectAuthChoices[model.connectForm.auth])
+	}
+	if !model.connectFieldVisible(connectFieldPassword) {
+		t.Fatalf("password field should be visible once password auth is chosen")
+	}
+	if !strings.Contains(ansi.Strip(model.View()), "Password") {
+		t.Errorf("connect form should show Password once password auth is chosen")
+	}
+}
+
+func TestConnectFormAuthFieldOnlyOfferedForSFTP(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldProtocol
+	model = press(t, model, runes("l")) // sftp -> ftp
+
+	if model.connectFieldVisible(connectFieldAuth) {
+		t.Fatalf("auth field should be hidden for ftp, which has only one auth method")
+	}
+	if model.connectAuthMode() != "password" {
+		t.Fatalf("auth mode = %q, want password for ftp", model.connectAuthMode())
+	}
+	if !model.connectFieldVisible(connectFieldPassword) {
+		t.Fatalf("password field should be visible for ftp")
+	}
+}
+
+func TestConnectFormConnectsWithTypedPasswordAuth(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	model = press(t, model, runes("c"))
+
+	model.connectField = connectFieldAuth
+	model = press(t, model, runes("l")) // agent/key -> password
+	model.connectField = connectFieldPassword
+	model = press(t, model, runes("hunter2"))
+
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = settle(t, updated.(Model), cmd)
+
+	if model.overlay != overlayNone {
+		t.Fatalf("alt+enter did not close the overlay")
+	}
+	if len(dialer.creds) == 0 {
+		t.Fatalf("Dial was never called")
+	}
+	got := dialer.creds[len(dialer.creds)-1]
+	if got.Password != "hunter2" || !got.PasswordOnly {
+		t.Fatalf("credentials = %+v, want password hunter2 with PasswordOnly set", got)
+	}
+}
+
+func TestConnectFormFTPCredentialsAreNotPasswordOnly(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	model = press(t, model, runes("c"))
+
+	model.connectField = connectFieldProtocol
+	model = press(t, model, runes("l")) // sftp -> ftp
+	model.connectField = connectFieldPassword
+	model = press(t, model, runes("s3cret"))
+
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = settle(t, updated.(Model), cmd)
+
+	if model.overlay != overlayNone {
+		t.Fatalf("alt+enter did not close the overlay")
+	}
+	got := dialer.creds[len(dialer.creds)-1]
+	if got.Password != "s3cret" || got.PasswordOnly {
+		t.Fatalf("credentials = %+v, want password s3cret without PasswordOnly (FTP has no agent/key to skip)", got)
+	}
+}
+
+func TestConnectFormRejectsPasswordAuthWithoutAPassword(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldAuth
+	model = press(t, model, runes("l")) // agent/key -> password
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = updated.(Model)
+
+	if model.overlay != overlayConnect {
+		t.Fatalf("password auth with no password should keep the form open, overlay = %v", model.overlay)
+	}
+	if !model.statusErr {
+		t.Fatalf("password auth with no password should set an error")
 	}
 }
 
@@ -1399,7 +1520,7 @@ func TestReconnectingClosesThePreviousConnection(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, dialer)
 	first := model.conn
 
-	model = settle(t, model, model.connect(testTarget))
+	model = settle(t, model, model.connect(testTarget, session.Credentials{}))
 
 	if !dialer.conns[0].closed {
 		t.Fatalf("reconnecting left the previous connection open")
@@ -1435,7 +1556,7 @@ func TestStaleDisconnectDoesNotTearDownTheLiveConnection(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, dialer)
 	old := model.conn
 
-	model = settle(t, model, model.connect(testTarget))
+	model = settle(t, model, model.connect(testTarget, session.Credentials{}))
 	live := model.conn
 	if live == old {
 		t.Fatalf("reconnect did not produce a new connection")

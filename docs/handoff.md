@@ -30,6 +30,10 @@ Implemented:
 - Connect, help, and conflict modals
 - Editable connect form (`c`) over Protocol/Host/Port/Username/Path, styled
   like whatthedock's soft forms (see **Connect form**)
+- SFTP auth choice and a password field: Auth cycles agent/key vs password
+  for SFTP (FTP/FTPS always show Password, since they have nothing else);
+  never persisted, only ever passed to that one connect attempt (see
+  **Connect form**)
 - Keyboard-driven navigation plus initial mouse focus/select behavior
 - Shift-arrow pane resizing
 - Config persistence: XDG paths plus a `config.toml` under `internal/config`,
@@ -262,9 +266,12 @@ First build slice:
 - `internal/faketransfer/faketransfer.go`: simulated engine, implements
   `transfer.Engine`; emits timed progress events and fails every fifth
   transfer so the Failed tab stays reachable
-- `internal/session/session.go`: `Target`, `Conn`, and `Dialer` — the
-  lifecycle the two adapter seams live inside. A `Conn` hands out a `vfs.FS`
-  and a `transfer.Engine` that are valid only while it is
+- `internal/session/session.go`: `Target`, `Conn`, `Dialer`, and
+  `Credentials` — the lifecycle the two adapter seams live inside. A `Conn`
+  hands out a `vfs.FS` and a `transfer.Engine` that are valid only while it
+  is. `Credentials` is `Dial`'s other parameter: unlike `Target` it is never
+  persisted, since it is how a single connect attempt authenticates rather
+  than where to connect and as whom
 - `internal/fakesession/fakesession.go`: simulated dialer, implements
   `session.Dialer`; succeeds only for hosts it was told about, so the
   connect-failure path is reachable, and `Conn.Drop` simulates a server
@@ -276,9 +283,9 @@ First build slice:
   rather than importing it, keeping this package free of that dependency;
   `internal/ui` converts between the two
 - `internal/sftpsession/`: the real SFTP adapter. `sftpsession.go` dials
-  (agent and key-file auth, strict known_hosts), `fs.go` implements
-  `vfs.FS`, `engine.go` implements `transfer.Engine`. All three share one
-  `sftp.Client`, which is safe for concurrent use
+  (agent, key-file, and password auth, strict known_hosts), `fs.go`
+  implements `vfs.FS`, `engine.go` implements `transfer.Engine`. All three
+  share one `sftp.Client`, which is safe for concurrent use
 - `internal/sftpsession/testserver_test.go`: a real SSH server with pkg/sftp's
   server half, on a loopback listener rooted at a temp directory. The adapter
   is tested against genuine protocol traffic, with no external sshd
@@ -289,8 +296,8 @@ First build slice:
   `transfer.Engine`, never on a concrete adapter
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
 - `internal/ui/connect_form.go`: the editable connect form (Profile/Name/
-  Protocol/Host/Port/Username/Path) and its key grammar, styled like
-  whatthedock's soft forms
+  Protocol/Host/Port/Username/Auth/Password/Path) and its key grammar,
+  styled like whatthedock's soft forms
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
@@ -511,6 +518,40 @@ way selecting a form field's text before typing over it would.
 delete, `ctrl+u`) clears the flag, so a field only ever wipes itself on that
 first keystroke, never mid-edit.
 
+Auth and Password are conditionally shown, not always-present rows:
+`connectFieldVisible` decides per field, and `moveConnectField` skips
+whatever it hides rather than tabbing onto a row that is not drawn.
+`connectAuthMode` is what visibility is built on: FTP and FTPS always
+resolve to `"password"`, since they have no other method and so never show
+Auth at all; SFTP resolves to whichever `connectAuthChoices` ("agent/key" /
+"password") the Auth field is cycled to, and only then does Password become
+visible. Password is masked in `connectFieldDisplay` (`•` per rune) whether
+or not it is the focused field, since it is drawn every render pass once
+visible, not only while being edited.
+
+Password is deliberately the one field nothing else in the form treats like
+the others: `openConnectForm` and `loadConnectProfile` never set it — a
+profile has no password to load, by design — and `upsertProfile` never reads
+it, so `ctrl+s` cannot accidentally write a plaintext password into
+`config.toml`. It exists for exactly one `Dial` call. `credentialsFromForm`
+turns the resolved auth mode into a `session.Credentials` — Password, and for
+SFTP a `PasswordOnly` flag — and `connectFromForm` passes it straight to
+`connect`/`dialCmd`/`Dial` without ever touching `session.Target`.
+`PasswordOnly` matters only for SFTP: choosing "password" there means
+skipping the agent and key files entirely, not merely offering Password as a
+fallback after they fail, so `sftpsession.authMethods` branches on it before
+building any other auth method. Choosing "password" with the field left
+blank is caught in the form itself (`creds.PasswordOnly && creds.Password ==
+""`) rather than surfacing as a dial failure, since it can never succeed.
+
+This is also why `session.Dialer.Dial` takes a `session.Credentials`
+parameter now, alongside `Target`: credentials have to reach `Dial` somehow,
+and putting them on `Target` would mean either persisting them (Target is
+what a profile keeps) or awkwardly stripping them back out before saving.
+`fakesession` ignores the parameter — the demo adapter authenticates nothing
+— but every real `Dialer` and every call site had to change in step, which is
+the cost of extending an interface all three adapters implement.
+
 tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins
 (`v0.2.3-0.20260820020614-441c283e776f`) for two things the older release
 lacks: `SoftRow`'s selected-row background highlight and the `ModalShadow`
@@ -546,10 +587,16 @@ path.
    - ~~Profile persistence.~~ Done — a `[[profiles]]` array table in
      `config.toml`, via `config.Profile`; the form's Profile field cycles
      through them and `ctrl+s`/`ctrl+x` save/delete (see **Connect form**)
-   - Still missing: everything credential-related — password mode
-     (prompt/keyring/config), SFTP agent/key file, FTPS certificate
-     verification, SFTP known-host mode. None of it has a field in the form
-     yet, and profiles carry no credentials
+   - ~~SFTP auth choice and a password field.~~ Done — Auth picks agent/key
+     or password for SFTP; FTP/FTPS always show Password, since they have no
+     other method. `session.Credentials` carries it from the form to `Dial`
+     for that one attempt only — password mode is "prompt every time" by
+     design, since profiles and config.toml never see it (see
+     **Connect form**)
+   - Still missing: keyring/config-file password storage (an alternative to
+     prompting every time), FTPS certificate verification as a form setting,
+     SFTP known-host mode as a form setting. `--identity`/`--known-hosts`
+     still only reach a real server via CLI flags, not the form
 
 5. Improve transfer queue behavior.
    - Configurable parallelism — the cap is now `Model.maxParallel`
@@ -607,11 +654,13 @@ path.
 - All three seams (`session.Dialer`, `vfs.FS`, `transfer.Engine`) now have
   both a fake and a real implementation, which is the evidence they are the
   right shape
-- The connect form has no credential fields yet: password, SFTP agent/key
-  file, FTPS certificate, and known-host mode all wait on credential handling
-  (passwords still come from the environment)
-- No credential handling of any kind: nothing prompts, stores, or sends a
-  password, and `fakesession` needs none
+- The connect form has an Auth/Password field (see **Connect form**), but
+  SFTP identity files, agent socket, FTPS certificate verification, and
+  known-host mode are still CLI-flag-only, not form fields
+- No real credential storage: the form's password is typed fresh for every
+  connect attempt and never persisted, matching the documented default of
+  "prompt every time" — there is no keyring or config-file option yet, and
+  `fakesession` needs no credentials at all
 - A connection is never retried automatically after a drop
 - A listing that hangs is bounded only by `listTimeout` (20s) and cannot be
   cancelled from the UI — there is no key to abandon a slow directory
@@ -619,7 +668,6 @@ path.
   `maxParallel`, the pane splits) and saved connection profiles.
   `showHidden` and any use of the state/cache directories are not persisted
   yet
-- No real credential storage yet
 - The connect form is keyboard-only; mouse clicks do not edit its fields
 - Mouse support is basic: focus/select, not full range selection or context
   menus. The click-to-row mapping depends on the chrome above the file panes

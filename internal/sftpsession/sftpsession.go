@@ -2,10 +2,11 @@
 // three adapter seams for it: session.Dialer, and — through the Conn it
 // returns — vfs.FS for browsing and transfer.Engine for moving bytes.
 //
-// Authentication is the SSH agent, key files, and a password read from the
-// environment. None of them need the text input the app does not have yet. A
-// password is deliberately not a command-line flag: that would put it in the
-// process table for every other user on the machine to read.
+// Authentication is the SSH agent, key files, or a password — typed into the
+// connect form's Password field, or read from the environment when the form
+// leaves it blank. A password is deliberately not a command-line flag: that
+// would put it in the process table for every other user on the machine to
+// read.
 //
 // Host keys are checked strictly against a known_hosts file. There is no
 // option here to skip that check: "accept anything for now" is the kind of
@@ -88,11 +89,11 @@ func DefaultConfig() Config {
 	}
 }
 
-func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn, error) {
+func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.Credentials) (session.Conn, error) {
 	if target.User == "" {
 		return nil, errors.New("no username configured for this profile")
 	}
-	auth, err := d.authMethods()
+	auth, err := d.authMethods(creds)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +152,17 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn,
 	return newConn(sshClient, client), nil
 }
 
-func (d *Dialer) authMethods() ([]ssh.AuthMethod, error) {
+// authMethods builds the auth methods to offer, in the order they are tried.
+// creds.PasswordOnly bypasses the agent and key files entirely rather than
+// merely appending Password after them — it is what "password" means as an
+// explicit choice in the connect form, not just another fallback.
+func (d *Dialer) authMethods(creds session.Credentials) ([]ssh.AuthMethod, error) {
+	if creds.PasswordOnly {
+		if creds.Password == "" {
+			return nil, errors.New("password auth was chosen but no password was given")
+		}
+		return []ssh.AuthMethod{ssh.Password(creds.Password)}, nil
+	}
 	var methods []ssh.AuthMethod
 	if d.cfg.UseAgent {
 		if method, err := agentAuth(); err == nil {
@@ -176,7 +187,7 @@ func (d *Dialer) authMethods() ([]ssh.AuthMethod, error) {
 		methods = append(methods, ssh.PublicKeys(signer))
 	}
 	// Password goes last so the key-based methods are tried first.
-	if password := d.password(); password != "" {
+	if password := d.password(creds.Password); password != "" {
 		methods = append(methods, ssh.Password(password))
 	}
 	if len(methods) == 0 {
@@ -185,7 +196,13 @@ func (d *Dialer) authMethods() ([]ssh.AuthMethod, error) {
 	return methods, nil
 }
 
-func (d *Dialer) password() string {
+// password resolves the password to offer: an explicit override from this
+// Dial's Credentials takes priority, then the Dialer's own Config, then the
+// environment.
+func (d *Dialer) password(override string) string {
+	if override != "" {
+		return override
+	}
 	if d.cfg.Password != "" {
 		return d.cfg.Password
 	}

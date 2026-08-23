@@ -93,16 +93,19 @@ type Dialer struct {
 
 func New(cfg Config) *Dialer { return &Dialer{cfg: cfg} }
 
-func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn, error) {
+func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.Credentials) (session.Conn, error) {
 	if target.User == "" {
 		return nil, errors.New("no username configured for this profile")
 	}
-	password := d.cfg.Password
+	password := creds.Password
+	if password == "" {
+		password = d.cfg.Password
+	}
 	if password == "" {
 		password = os.Getenv(PasswordEnv)
 	}
 	if password == "" {
-		return nil, fmt.Errorf("no password: set %s", PasswordEnv)
+		return nil, fmt.Errorf("no password: enter one in the connect form, or set %s", PasswordEnv)
 	}
 
 	timeout := d.cfg.Timeout

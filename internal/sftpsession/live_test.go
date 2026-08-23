@@ -53,7 +53,7 @@ func liveConn(t *testing.T) (session.Conn, string) {
 	conn, err := dialer.Dial(context.Background(), session.Target{
 		Protocol: "sftp", Host: host, Port: port,
 		User: os.Getenv("TIDEFTP_TEST_SFTP_USER"), StartPath: remoteDir,
-	})
+	}, session.Credentials{})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestLiveRejectsAWrongHostKey(t *testing.T) {
 	})
 	if _, err := dialer.Dial(context.Background(), session.Target{
 		Protocol: "sftp", Host: host, Port: port, User: os.Getenv("TIDEFTP_TEST_SFTP_USER"),
-	}); err == nil {
+	}, session.Credentials{}); err == nil {
 		t.Fatalf("connected to a live server whose host key is not in known_hosts")
 	}
 }

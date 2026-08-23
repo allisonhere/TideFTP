@@ -40,7 +40,7 @@ func New(dialLatency, listLatency time.Duration, hosts ...string) *Dialer {
 	return &Dialer{known: known, dialLatency: dialLatency, listLatency: listLatency}
 }
 
-func (d *Dialer) Dial(ctx context.Context, target session.Target) (session.Conn, error) {
+func (d *Dialer) Dial(ctx context.Context, target session.Target, _ session.Credentials) (session.Conn, error) {
 	if d.dialLatency > 0 {
 		select {
 		case <-ctx.Done():

@@ -16,7 +16,7 @@ func targetFor(host string) session.Target {
 }
 
 func TestDialSucceedsForAKnownHost(t *testing.T) {
-	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target)
+	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target, session.Credentials{})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestDialSucceedsForAKnownHost(t *testing.T) {
 }
 
 func TestDialFailsForAnUnknownHost(t *testing.T) {
-	if _, err := New(0, 0, "demo.local").Dial(context.Background(), targetFor("nope.invalid")); err == nil {
+	if _, err := New(0, 0, "demo.local").Dial(context.Background(), targetFor("nope.invalid"), session.Credentials{}); err == nil {
 		t.Fatalf("dialing an unknown host returned no error")
 	}
 }
@@ -39,7 +39,7 @@ func TestDialHonoursContextCancellation(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	if _, err := dialer.Dial(ctx, target); err == nil {
+	if _, err := dialer.Dial(ctx, target, session.Credentials{}); err == nil {
 		t.Fatalf("a cancelled dial returned no error")
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -48,7 +48,7 @@ func TestDialHonoursContextCancellation(t *testing.T) {
 }
 
 func TestCloseReportsNoReasonAndIsRepeatable(t *testing.T) {
-	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target)
+	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target, session.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCloseReportsNoReasonAndIsRepeatable(t *testing.T) {
 }
 
 func TestDropReportsTheReason(t *testing.T) {
-	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target)
+	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target, session.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestDropReportsTheReason(t *testing.T) {
 }
 
 func TestDropClosesTheEngine(t *testing.T) {
-	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target)
+	conn, err := New(0, 0, "demo.local").Dial(context.Background(), target, session.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
