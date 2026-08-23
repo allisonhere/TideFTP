@@ -288,9 +288,9 @@ First build slice:
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
-- `internal/ui/connect_form.go`: the editable connect form (Profile/Protocol/
-  Host/Port/Username/Path) and its key grammar, styled like whatthedock's soft
-  forms
+- `internal/ui/connect_form.go`: the editable connect form (Profile/Name/
+  Protocol/Host/Port/Username/Path) and its key grammar, styled like
+  whatthedock's soft forms
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
@@ -488,18 +488,19 @@ live connection, `ctrl+u` clears a field. `alt+enter` is the reliable confirm
 names both but the handler keys on `alt+enter`.
 
 Profile is the first field, a picker like Protocol: `(new)` plus the label of
-each saved profile. Cycling to a saved profile loads its Protocol/Host/Port/
-Username/Path into the rest of the form; cycling to `(new)` leaves them alone,
-so it means "not tied to a saved profile" rather than "blank". `ctrl+s` saves
-the form's current values, upserting rather than always appending: profiles
-are keyed by protocol+host+port+user (`targetKey`/`profileKey`), so editing
-the path or re-saving the same account updates that profile in place instead
-of piling up duplicates, and the key deliberately excludes the name, which is
-always derived from `Target.Label()` — there is no name field to type into.
-`ctrl+x` deletes the profile the Profile field currently points at; both are
-no-ops on `(new)`, and both persist immediately through the same `save`
-seam as every other setting (see **Config persistence**). Profiles carry no
-credentials, matching `session.Target`'s doc comment that credentials
+each saved profile. Cycling to a saved profile loads its Name/Protocol/Host/
+Port/Username/Path into the rest of the form; cycling to `(new)` leaves them
+alone, so it means "not tied to a saved profile" rather than "blank". Name is
+free text, right below Profile; leaving it blank falls back to
+`Target.Label()` (`user@host (protocol)`) rather than saving nothing. `ctrl+s`
+saves the form's current values, upserting rather than always appending:
+profiles are keyed by protocol+host+port+user (`targetKey`/`profileKey`), not
+by name, so editing the path or renaming and re-saving the same account
+updates that profile in place instead of piling up duplicates. `ctrl+x`
+deletes the profile the Profile field currently points at; both are no-ops on
+`(new)`, and both persist immediately through the same `save` seam as every
+other setting (see **Config persistence**). Profiles carry no credentials,
+matching `session.Target`'s doc comment that credentials
 deliberately live elsewhere.
 
 tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins

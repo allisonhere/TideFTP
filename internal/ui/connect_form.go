@@ -14,6 +14,7 @@ type connectField int
 
 const (
 	connectFieldProfile connectField = iota
+	connectFieldName
 	connectFieldProtocol
 	connectFieldHost
 	connectFieldPort
@@ -27,10 +28,11 @@ var connectProtocols = []string{"sftp", "ftp", "ftps"}
 
 // connectFormValue holds the connect form's field values. Protocol is an index
 // into connectProtocols, profile is an index into the model's profile choices
-// (0 is "new", the rest are saved profiles); the remaining fields are free
-// text.
+// (0 is "new", the rest are saved profiles); the remaining fields, including
+// name, are free text.
 type connectFormValue struct {
 	profile  int
+	name     string
 	protocol int
 	host     string
 	port     string
@@ -86,6 +88,7 @@ func (m *Model) loadConnectProfile() {
 		return
 	}
 	p := m.profiles[m.connectForm.profile-1]
+	m.connectForm.name = p.Name
 	m.connectForm.protocol = protocolIndex(p.Protocol)
 	m.connectForm.host = p.Host
 	m.connectForm.port = ""
@@ -114,6 +117,7 @@ func (m *Model) openConnectForm() {
 	}
 	m.connectForm = connectFormValue{
 		profile:  m.profileIndexFor(src),
+		name:     src.Name,
 		protocol: protocolIndex(src.Protocol),
 		host:     src.Host,
 		username: src.User,
@@ -131,6 +135,8 @@ func connectFieldLabel(field connectField) string {
 	switch field {
 	case connectFieldProfile:
 		return "Profile"
+	case connectFieldName:
+		return "Name"
 	case connectFieldProtocol:
 		return "Protocol"
 	case connectFieldHost:
@@ -153,6 +159,8 @@ func (m Model) connectFieldValue(field connectField) string {
 			return choices[m.connectForm.profile]
 		}
 		return connectProfileNew
+	case connectFieldName:
+		return m.connectForm.name
 	case connectFieldProtocol:
 		return connectProtocols[m.connectForm.protocol]
 	case connectFieldHost:
@@ -169,6 +177,8 @@ func (m Model) connectFieldValue(field connectField) string {
 
 func (m *Model) setConnectFieldValue(field connectField, value string) {
 	switch field {
+	case connectFieldName:
+		m.connectForm.name = value
 	case connectFieldHost:
 		m.connectForm.host = value
 	case connectFieldPort:
@@ -277,6 +287,7 @@ func (m *Model) targetFromForm() (session.Target, bool) {
 		port = n
 	}
 	return session.Target{
+		Name:      strings.TrimSpace(m.connectForm.name),
 		Protocol:  connectProtocols[m.connectForm.protocol],
 		Host:      host,
 		Port:      port,
@@ -298,9 +309,13 @@ func (m *Model) connectFromForm() tea.Cmd {
 
 // upsertProfile saves target as a profile, replacing an existing one with the
 // same targetKey (same protocol/host/port/user) or appending a new one. It
-// returns the profile's index.
+// returns the profile's index. A blank target.Name is filled in with the
+// auto-generated label, so a profile always has something to display even
+// when the user never typed into the Name field.
 func (m *Model) upsertProfile(target session.Target) int {
-	target.Name = target.Label()
+	if target.Name == "" {
+		target.Name = target.Label()
+	}
 	key := targetKey(target)
 	for i, p := range m.profiles {
 		if targetKey(p) == key {

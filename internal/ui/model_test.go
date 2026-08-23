@@ -1163,7 +1163,8 @@ func TestConnectFormConnectsFromFields(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, dialer)
 	model = press(t, model, runes("c"))
 
-	// Down past Profile to Host, clear it, type a new host.
+	// Down past Profile and Name to Host, clear it, type a new host.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -1236,8 +1237,34 @@ func TestConnectFormCyclingProfileLoadsItsFields(t *testing.T) {
 	if model.connectForm.host != other.Host || model.connectForm.username != other.User || model.connectForm.path != other.StartPath {
 		t.Fatalf("cycling to a saved profile did not load its fields: form = %+v", model.connectForm)
 	}
+	if model.connectForm.name != other.Name {
+		t.Fatalf("name = %q, want %q", model.connectForm.name, other.Name)
+	}
 	if connectProtocols[model.connectForm.protocol] != other.Protocol {
 		t.Fatalf("protocol = %q, want %q", connectProtocols[model.connectForm.protocol], other.Protocol)
+	}
+}
+
+func TestConnectFormTypedNameIsSavedVerbatim(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
+	model.width, model.height = 120, 36
+
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+	model = press(t, model, runes("Home NAS"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlS})
+
+	if len(model.profiles) != 1 {
+		t.Fatalf("profiles = %d, want 1", len(model.profiles))
+	}
+	if got := model.profiles[0].Name; got != "Home NAS" {
+		t.Fatalf("saved profile name = %q, want the typed name", got)
+	}
+	choices := model.connectProfileChoices()
+	if len(choices) != 2 || choices[1] != "Home NAS" {
+		t.Fatalf("profile choices = %v, want the typed name to be offered", choices)
 	}
 }
 
@@ -1292,6 +1319,7 @@ func TestNewModelLoadsProfilesFromConfig(t *testing.T) {
 func TestConnectFieldDisplayInsertsCaret(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host
 	if got := model.connectFieldDisplay(connectFieldHost); got != "test.local|" {
@@ -1302,6 +1330,7 @@ func TestConnectFieldDisplayInsertsCaret(t *testing.T) {
 func TestConnectFormRejectsEmptyHost(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -1321,7 +1350,7 @@ func TestConnectFormRendersFields(t *testing.T) {
 	model = press(t, model, runes("c"))
 
 	plain := ansi.Strip(model.View())
-	for _, want := range []string{"connect", "Profile", "Protocol", "Host", "Port", "Username", "Path", "sftp"} {
+	for _, want := range []string{"connect", "Profile", "Name", "Protocol", "Host", "Port", "Username", "Path", "sftp"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("connect form is missing %q", want)
 		}
