@@ -64,21 +64,35 @@ func (m *Model) moveSettingsCursor(delta int) {
 	m.settingsCursor = ((m.settingsCursor+delta)%n + n) % n
 }
 
-// cycleSettingsField changes the value of the row under the cursor.
+// themeIndex finds name's position among themes, defaulting to 0 (an
+// unknown name should not happen — m.theme.Name always comes from
+// appThemes() itself — but cycling has to land somewhere rather than
+// panic if it ever did).
+func themeIndex(name string, themes []tideui.Theme) int {
+	for i, theme := range themes {
+		if theme.Name == name {
+			return i
+		}
+	}
+	return 0
+}
+
+// cycleSettingsField changes the value of the row under the cursor and
+// applies it live, without leaving the settings overlay. Theme steps to
+// the next/previous entry in appThemes(), wrapping — the same live-preview
+// feel the full picker (opened via enter, or `t` outside Settings) gives
+// while browsing, just one theme at a time instead of a scrollable list.
 // Density/Shadow/Icons are two-valued, so direction only matters for
 // picking which of the two to land on when it's a real toggle (Shadow,
 // Icons just flip); Max Parallel is the one row where direction actually
-// counts, reusing adjustMaxParallel's own clamp and persistence. Theme
-// does not cycle in place — there can be many themes, so this opens the
-// same dedicated picker `t` does, landing back at overlayNone (not this
-// overlay) once it closes, exactly like pressing `t` directly would.
+// counts, reusing adjustMaxParallel's own clamp and persistence.
 func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 	field := settingsField(m.settingsCursor)
 	switch field {
 	case settingsFieldTheme:
-		m.overlay = overlayTheme
-		m.themePicker.Open(m.theme.Name)
-		return nil
+		themes := appThemes()
+		next := ((themeIndex(m.theme.Name, themes)+direction)%len(themes) + len(themes)) % len(themes)
+		m.theme = themes[next]
 	case settingsFieldDensity:
 		if m.density == tideui.Compact {
 			m.density = tideui.Comfortable
@@ -96,11 +110,25 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 	return m.persist()
 }
 
+// activateSettingsField is what enter does on the row under the cursor.
+// Every row but Theme just cycles forward, the same as l/right; Theme
+// instead opens the full picker to browse/search/preview, since h/l
+// already cover quick live cycling one at a time without leaving Settings.
+func (m *Model) activateSettingsField() tea.Cmd {
+	if settingsField(m.settingsCursor) == settingsFieldTheme {
+		m.overlay = overlayTheme
+		m.themePicker.Open(m.theme.Name)
+		return nil
+	}
+	return m.cycleSettingsField(1)
+}
+
 // handleSettingsKey routes keys while the settings overlay is open:
-// up/down move the row cursor, h/l/left/right/enter change the row under
-// it — the same shape handleConnectKey uses for the connect form's picker
-// fields, scaled down since every settings row is a fixed, always-visible
-// cycle rather than a mix of free text and conditionally shown fields.
+// up/down move the row cursor, h/left and l/right cycle the row under it
+// live, enter activates it (see activateSettingsField) — the same shape
+// handleConnectKey uses for the connect form's picker fields, scaled down
+// since every settings row is a fixed, always-visible cycle rather than a
+// mix of free text and conditionally shown fields.
 func (m *Model) handleSettingsKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "q", ",":
@@ -111,8 +139,10 @@ func (m *Model) handleSettingsKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveSettingsCursor(1)
 	case "h", "left":
 		return m.cycleSettingsField(-1)
-	case "l", "right", "enter":
+	case "l", "right":
 		return m.cycleSettingsField(1)
+	case "enter":
+		return m.activateSettingsField()
 	}
 	return nil
 }

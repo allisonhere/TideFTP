@@ -53,9 +53,10 @@ Implemented:
 - Settings overlay on `,` (`internal/ui/settings.go`): Theme/Density/Shadow/
   Icons/Max Parallel in one flat, cursor-driven list, styled like
   whatthedock's own settings screen — each row applies and persists live on
-  `h`/`l`/`enter`, the same as pressing that setting's existing standalone
-  key (`i`, `+`/`-`) already did; Theme opens the same picker `t` does
-  rather than cycling in place
+  `h`/`l`, the same as pressing that setting's existing standalone key
+  (`i`, `+`/`-`) already did. Theme cycles live too, one at a time,
+  without leaving the overlay; `enter` on it opens the same picker `t`
+  does for the full browse/search/preview experience
 - Basic UI tests for layout, theme registration, and resizing
 
 Git repository state:

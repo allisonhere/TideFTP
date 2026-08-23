@@ -116,6 +116,42 @@ func TestSettingsMaxParallelRespectsDirectionAndClamps(t *testing.T) {
 	}
 }
 
+func TestSettingsThemeCyclesLiveWithoutLeavingSettings(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	themes := appThemes()
+	if len(themes) < 2 {
+		t.Fatalf("need at least 2 themes to test cycling, got %d", len(themes))
+	}
+	model = press(t, model, runes(","))
+	if model.settingsCursor != int(settingsFieldTheme) {
+		t.Fatalf("expected to start on the Theme row")
+	}
+	start := model.theme.Name
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRight})
+
+	if model.overlay != overlaySettings {
+		t.Fatalf("overlay after cycling the theme = %v, want to stay in overlaySettings", model.overlay)
+	}
+	if model.theme.Name == start {
+		t.Fatalf("theme did not change after cycling right")
+	}
+	if model.theme.Name != themes[1].Name {
+		t.Fatalf("theme after one right = %q, want %q (the next entry in appThemes)", model.theme.Name, themes[1].Name)
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyLeft})
+	if model.theme.Name != start {
+		t.Fatalf("theme after cycling back left = %q, want the original %q", model.theme.Name, start)
+	}
+
+	// Cycling left from the first theme wraps to the last.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyLeft})
+	if model.theme.Name != themes[len(themes)-1].Name {
+		t.Fatalf("theme after wrapping left = %q, want the last entry %q", model.theme.Name, themes[len(themes)-1].Name)
+	}
+}
+
 func TestSettingsThemeRowOpensThePicker(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model = press(t, model, runes(","))
