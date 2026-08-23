@@ -445,6 +445,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			renderer.Styles.DetailMeta.Render("View"),
 			keyRow("c", "connect / disconnect"),
 			keyRow("t", "theme picker"),
+			keyRow(",", "settings"),
 			keyRow("i", "toggle icons"),
 			keyRow("shift+left/right", "resize file panes"),
 			keyRow("shift+up/down", "resize transfer pane"),
@@ -526,6 +527,24 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			renderer.RenderSoftHints(64, tideui.SoftHint{Key: "enter", Label: "queue"}, tideui.SoftHint{Key: "esc", Label: "cancel"}),
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "queue folder", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlaySettings:
+		width := min(60, max(36, m.width-8))
+		contentWidth := width - 4
+		rows := make([]string, 0, int(settingsFieldCount)+2)
+		for field := settingsField(0); field < settingsFieldCount; field++ {
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
+				Text:     settingsFieldLabel(field),
+				Suffix:   m.settingsFieldValue(field),
+				Selected: int(field) == m.settingsCursor,
+			}, contentWidth))
+		}
+		rows = append(rows, "", renderer.RenderSoftHints(contentWidth,
+			tideui.SoftHint{Key: "up/down", Label: "select"},
+			tideui.SoftHint{Key: "h/l", Label: "change"},
+			tideui.SoftHint{Key: "esc", Label: "close"},
+		))
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "settings", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	default:
 		return nil

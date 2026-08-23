@@ -45,6 +45,7 @@ const (
 	overlayConflict
 	overlayTheme
 	overlayPreflight
+	overlaySettings
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -221,6 +222,10 @@ type Model struct {
 	density     tideui.Density
 	shadow      bool
 	showIcons   bool
+	// settingsCursor selects one row in the settings overlay (see
+	// settings.go), the same way connectField selects a row in the connect
+	// form.
+	settingsCursor int
 
 	fileSplit   tideui.PaneRatio
 	bottomSplit tideui.PaneRatio
@@ -531,6 +536,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayConnect {
 		return m, m.handleConnectKey(msg)
 	}
+	if m.overlay == overlaySettings {
+		return m, m.handleSettingsKey(msg)
+	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
@@ -617,6 +625,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "t":
 		m.overlay = overlayTheme
 		m.themePicker.Open(m.theme.Name)
+	case ",":
+		m.overlay = overlaySettings
+		m.settingsCursor = 0
 	case "?":
 		m.overlay = overlayHelp
 	case "shift+left":

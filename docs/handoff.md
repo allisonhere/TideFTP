@@ -50,6 +50,12 @@ Implemented:
   the OS keyring (`internal/credstore`) — a saved profile's password is
   remembered only if Remember was "yes" when it was saved with `ctrl+s`
   (see **Connect form**)
+- Settings overlay on `,` (`internal/ui/settings.go`): Theme/Density/Shadow/
+  Icons/Max Parallel in one flat, cursor-driven list, styled like
+  whatthedock's own settings screen — each row applies and persists live on
+  `h`/`l`/`enter`, the same as pressing that setting's existing standalone
+  key (`i`, `+`/`-`) already did; Theme opens the same picker `t` does
+  rather than cycling in place
 - Basic UI tests for layout, theme registration, and resizing
 
 Git repository state:
@@ -328,6 +334,10 @@ First build slice:
 - `internal/ui/connect_form.go`: the editable connect form (Profile/Name/
   Protocol/Host/Port/Username/Auth/Password/Identity/Known Hosts/Verify/CA
   File/Path) and its key grammar, styled like whatthedock's soft forms
+- `internal/ui/settings.go`: the settings overlay (Theme/Density/Shadow/
+  Icons/Max Parallel), a flat cursor-driven row list — the same
+  field-enum-plus-label/value-functions shape `connect_form.go` uses,
+  scaled down since every row is a fixed, always-visible cycle
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
