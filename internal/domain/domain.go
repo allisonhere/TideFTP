@@ -35,6 +35,7 @@ const (
 	Active
 	Failed
 	Done
+	Canceled
 )
 
 type Transfer struct {

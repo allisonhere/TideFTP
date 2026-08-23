@@ -360,12 +360,23 @@ func profilesToConfig(targets []session.Target) []config.Profile {
 	return profiles
 }
 
-// persist saves the current settings if a saver was configured. Failures are
-// swallowed on purpose: persistence is best-effort, and a full disk or a
-// read-only home directory must never interrupt the UI.
-func (m Model) persist() {
-	if m.save != nil {
-		_ = m.save(m.snapshotConfig())
+// persist returns a command that saves the current settings, if a saver was
+// configured. The save itself runs off the Update goroutine and its failure
+// is swallowed on purpose: persistence is best-effort, and a full disk or a
+// read-only home directory must never interrupt the UI or stall a keypress
+// waiting on disk I/O — config.Save's mkdir, marshal, temp file, and rename
+// are exactly the kind of blocking work a tea.Cmd exists to move off Update.
+// snapshotConfig runs synchronously here, before the command is returned, so
+// the command captures the settings as they were at the moment of the
+// change, not whatever they happen to be by the time the command runs.
+func (m Model) persist() tea.Cmd {
+	if m.save == nil {
+		return nil
+	}
+	save, cfg := m.save, m.snapshotConfig()
+	return func() tea.Msg {
+		_ = save(cfg)
+		return nil
 	}
 }
 
@@ -457,7 +468,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			m.overlay = overlayNone
 			m.theme = m.themePicker.ConfirmedTheme()
 			m.setStatus("theme set to " + m.theme.Name)
-			m.persist()
+			return m, m.persist()
 		case tideui.ThemePickerCancel:
 			m.overlay = overlayNone
 			m.theme = m.themePicker.ConfirmedTheme()
@@ -526,7 +537,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		} else {
 			m.setStatus("icons off")
 		}
-		m.persist()
+		cmd = m.persist()
 	case "u":
 		m.queueUpload()
 	case "d":
@@ -547,24 +558,24 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "shift+left":
 		m.fileSplit.Shrink()
 		m.setStatus("local pane narrower")
-		m.persist()
+		cmd = m.persist()
 	case "shift+right":
 		m.fileSplit.Grow()
 		m.setStatus("local pane wider")
-		m.persist()
+		cmd = m.persist()
 	case "shift+up":
 		m.bottomSplit.Grow()
 		m.setStatus("transfer pane taller")
-		m.persist()
+		cmd = m.persist()
 	case "shift+down":
 		m.bottomSplit.Shrink()
 		m.setStatus("transfer pane shorter")
-		m.persist()
+		cmd = m.persist()
 	case "ctrl+0":
 		m.fileSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.5, Min: 0.25, Max: 0.75, Step: 0.03})
 		m.bottomSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03})
 		m.setStatus("layout reset")
-		m.persist()
+		cmd = m.persist()
 	case "1":
 		tabSwitch = true
 		m.setBottomTab(tabQueue)
@@ -613,7 +624,7 @@ func (m *Model) connect(target session.Target, creds session.Credentials) tea.Cm
 	cmds := []tea.Cmd{}
 	if m.conn != nil {
 		cmds = append(cmds, closeConnCmd(m.conn))
-		m.clearConnection()
+		m.clearConnection("reconnecting")
 	}
 	m.target = target
 	m.state = connConnecting
@@ -699,21 +710,15 @@ func (m *Model) applyConnectFailed(msg connectFailedMsg) {
 // failed: the bytes stopped moving whether or not the user asked them to.
 func (m *Model) applyDisconnected(msg disconnectedMsg) {
 	if msg.conn != m.conn {
-		// A previous connection finishing after we moved on.
+		// A previous connection finishing after we moved on. Whatever it was
+		// carrying was already failed when we moved on — see connect.
 		return
 	}
 	reason := "disconnected"
 	if msg.err != nil {
 		reason = msg.err.Error()
 	}
-	for i := range m.transfers {
-		if m.transfers[i].Status == domain.Queued || m.transfers[i].Status == domain.Active {
-			m.transfers[i].Status = domain.Failed
-			m.transfers[i].FinishedAt = time.Now()
-			m.transfers[i].Message = reason
-		}
-	}
-	m.clearConnection()
+	m.clearConnection(reason)
 	if msg.err != nil {
 		m.state = connFailed
 		m.connErr = msg.err
@@ -725,9 +730,24 @@ func (m *Model) applyDisconnected(msg disconnectedMsg) {
 	m.logs = append(m.logs, "connection ended: "+reason)
 }
 
-// clearConnection drops every reference to the live connection so a stale
-// adapter can never be used after the connection has ended.
-func (m *Model) clearConnection() {
+// clearConnection drops every reference to the live connection, so a stale
+// adapter can never be used after the connection has ended, and fails any
+// transfer that was still relying on it — Queued or Active — with reason.
+//
+// It has to do the failing itself rather than leaving it to the disconnect
+// message that will eventually arrive: connect calls this synchronously to
+// tear down the previous connection before dialing the next one, and by the
+// time that old connection's own disconnectedMsg lands, m.conn already names
+// the new connection, so applyDisconnected's staleness check would discard
+// it — and the transfers it was carrying would stay Active forever.
+func (m *Model) clearConnection(reason string) {
+	for i := range m.transfers {
+		if m.transfers[i].Status == domain.Queued || m.transfers[i].Status == domain.Active {
+			m.transfers[i].Status = domain.Failed
+			m.transfers[i].FinishedAt = time.Now()
+			m.transfers[i].Message = reason
+		}
+	}
 	m.conn = nil
 	m.remoteFS = nil
 	m.engine = nil
@@ -1045,13 +1065,24 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 		return
 	}
 	row := &m.transfers[index]
-	row.BytesDone = min(event.BytesDone, row.BytesTotal)
+	// Only clamp against a total worth trusting. A listing can report a size
+	// of 0 for a file that turns out not to be empty (an FTP LIST parser
+	// that could not tell, say); clamping BytesDone to that 0 would freeze
+	// the row's progress at 0 for the whole transfer instead of tracking
+	// what is actually moving.
+	if row.BytesTotal > 0 {
+		row.BytesDone = min(event.BytesDone, row.BytesTotal)
+	} else {
+		row.BytesDone = event.BytesDone
+	}
 	switch event.Kind {
 	case transfer.Progress:
 		row.Status = domain.Active
 		row.Message = "transferring"
 	case transfer.Completed:
-		row.BytesDone = row.BytesTotal
+		if row.BytesTotal > 0 {
+			row.BytesDone = row.BytesTotal
+		}
 		row.Status = domain.Done
 		row.FinishedAt = time.Now()
 		row.Message = "complete"
@@ -1061,9 +1092,10 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 		row.Message = failureMessage(event.Err)
 		m.setError(fmt.Sprintf("transfer %d failed: %s", row.ID, row.Message))
 	case transfer.Canceled:
-		// domain has no Canceled status yet, so a canceled transfer lands in
-		// the Failed tab, which is also where the retry flow will live.
-		row.Status = domain.Failed
+		// Canceled transfers share the Failed tab — there is no tab of their
+		// own — but keep their own status so a future retry flow can tell a
+		// cancellation apart from a real failure.
+		row.Status = domain.Canceled
 		row.FinishedAt = time.Now()
 		row.Message = "canceled"
 		m.logs = append(m.logs, fmt.Sprintf("transfer %d canceled", row.ID))

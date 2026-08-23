@@ -72,10 +72,11 @@ func TestEntryRowColoursAreReadable(t *testing.T) {
 // where status colour carries meaning and so must stay legible.
 func TestTransferRowColoursAreReadable(t *testing.T) {
 	statuses := map[string]domain.TransferStatus{
-		"queued": domain.Queued,
-		"active": domain.Active,
-		"failed": domain.Failed,
-		"done":   domain.Done,
+		"queued":   domain.Queued,
+		"active":   domain.Active,
+		"failed":   domain.Failed,
+		"canceled": domain.Canceled,
+		"done":     domain.Done,
 	}
 
 	for _, theme := range allThemes() {

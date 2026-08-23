@@ -193,7 +193,9 @@ func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) str
 	case tabActive:
 		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool { return t.Status == domain.Active })...)
 	case tabFailed:
-		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool { return t.Status == domain.Failed })...)
+		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool {
+			return t.Status == domain.Failed || t.Status == domain.Canceled
+		})...)
 	case tabHistory:
 		rows = append(rows, m.renderTransferRows(renderer, width, height-1, func(t domain.Transfer) bool { return t.Status == domain.Done })...)
 	case tabLog:
@@ -357,7 +359,7 @@ func transferPalette(renderer tideui.Renderer, status domain.TransferStatus) (bg
 		accent = readableOn(renderer.Styles.Theme.BorderFocus, bg, textMinContrast)
 	case domain.Done:
 		accent = readableOn(renderer.Styles.Theme.Unread, bg, dimMinContrast)
-	case domain.Failed:
+	case domain.Failed, domain.Canceled:
 		accent = readableOn(renderer.Styles.Theme.Error, bg, textMinContrast)
 	case domain.Queued:
 		accent = readableOn(renderer.Styles.Theme.Dimmed, bg, dimMinContrast)
@@ -374,6 +376,8 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 		statusIcon = m.glyph(renderer, "✓", "+")
 	case domain.Failed:
 		statusIcon = m.glyph(renderer, "✗", "x")
+	case domain.Canceled:
+		statusIcon = m.glyph(renderer, "⊘", "-")
 	}
 
 	dir := m.glyph(renderer, "↑", "^")
@@ -555,7 +559,7 @@ func (m Model) bottomRowCount() int {
 	case tabActive:
 		return countStatus(m.transfers, domain.Active)
 	case tabFailed:
-		return countStatus(m.transfers, domain.Failed)
+		return countStatus(m.transfers, domain.Failed) + countStatus(m.transfers, domain.Canceled)
 	case tabHistory:
 		return countStatus(m.transfers, domain.Done)
 	case tabLog:
@@ -591,6 +595,8 @@ func transferStatus(status domain.TransferStatus) string {
 		return "active"
 	case domain.Failed:
 		return "failed"
+	case domain.Canceled:
+		return "canceled"
 	case domain.Done:
 		return "done"
 	default:

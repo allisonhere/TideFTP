@@ -434,29 +434,29 @@ func (m *Model) upsertProfile(target session.Target) int {
 
 // saveConnectProfile validates the form and saves it as a profile, updating
 // the Profile field to point at it. Validation failures behave like connect's.
-func (m *Model) saveConnectProfile() {
+func (m *Model) saveConnectProfile() tea.Cmd {
 	target, ok := m.targetFromForm()
 	if !ok {
-		return
+		return nil
 	}
 	idx := m.upsertProfile(target)
 	m.connectForm.profile = idx + 1
 	m.setStatus("saved profile " + target.Label())
-	m.persist()
+	return m.persist()
 }
 
 // deleteConnectProfile removes the profile the Profile field currently points
 // at. It is a no-op when the selection is "(new)".
-func (m *Model) deleteConnectProfile() {
+func (m *Model) deleteConnectProfile() tea.Cmd {
 	if m.connectForm.profile == 0 {
-		return
+		return nil
 	}
 	idx := m.connectForm.profile - 1
 	name := m.profiles[idx].Label()
 	m.profiles = append(m.profiles[:idx], m.profiles[idx+1:]...)
 	m.connectForm.profile = 0
 	m.setStatus("deleted profile " + name)
-	m.persist()
+	return m.persist()
 }
 
 // handleConnectKey routes keys while the connect overlay is open, mirroring
@@ -518,9 +518,9 @@ func (m *Model) handleConnectKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+enter", "alt+enter":
 		return m.connectFromForm()
 	case "ctrl+s":
-		m.saveConnectProfile()
+		return m.saveConnectProfile()
 	case "ctrl+x":
-		m.deleteConnectProfile()
+		return m.deleteConnectProfile()
 	case "ctrl+d":
 		if m.conn != nil {
 			m.overlay = overlayNone

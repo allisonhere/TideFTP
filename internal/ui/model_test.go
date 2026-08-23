@@ -280,8 +280,10 @@ func TestPersistWritesOnChange(t *testing.T) {
 	model := NewModel(localfs.New(), dialer, nil, config.Default(), save)
 	model.width, model.height = 120, 36
 
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	model = updated.(Model)
+	// persist runs its save through a tea.Cmd rather than inline, so the key
+	// press alone is not enough to observe it — press settles whatever
+	// command comes back, the same as a real run of the program would.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	if len(saved) != 1 {
 		t.Fatalf("icon toggle saved %d times, want 1", len(saved))
 	}
@@ -290,8 +292,7 @@ func TestPersistWritesOnChange(t *testing.T) {
 	}
 
 	before := model.fileSplit.Value()
-	updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyShiftRight})
-	model = updated.(Model)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyShiftRight})
 	if len(saved) != 2 {
 		t.Fatalf("resize saved %d times, want 2", len(saved))
 	}
@@ -697,6 +698,25 @@ func TestEngineEventsDriveTransferState(t *testing.T) {
 	}
 }
 
+func TestProgressWithAnUnknownTotalStillTracksBytesDone(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	// BytesTotal 0 stands in for a listing that could not report a real
+	// size (an FTP LIST parser that gave up, say).
+	model.transfers = []domain.Transfer{{ID: 1, BytesTotal: 0, Status: domain.Queued}}
+
+	next, _ := model.Update(transfer.Event{ID: 1, Kind: transfer.Progress, BytesDone: 500})
+	model = next.(Model)
+	if got := model.transfers[0].BytesDone; got != 500 {
+		t.Fatalf("BytesDone = %d after progress with an unknown total, want 500 (not clamped to the 0 total)", got)
+	}
+
+	next, _ = model.Update(transfer.Event{ID: 1, Kind: transfer.Completed, BytesDone: 1500})
+	model = next.(Model)
+	if got := model.transfers[0].BytesDone; got != 1500 {
+		t.Fatalf("BytesDone = %d after completion with an unknown total, want the engine's real count of 1500", got)
+	}
+}
+
 func TestFinishedTransferFreesASlotForTheNextOne(t *testing.T) {
 	engine := newScriptedEngine()
 	model := loadedModel(t, engine)
@@ -742,8 +762,13 @@ func TestCancelStopsActiveTransfers(t *testing.T) {
 	}
 	next, _ := model.Update(transfer.Event{ID: 1, Kind: transfer.Canceled, BytesDone: 400})
 	model = next.(Model)
-	if got := model.transfers[0]; got.Status != domain.Failed || got.Message != "canceled" {
-		t.Fatalf("after the cancel event: status=%v message=%q, want Failed/canceled", got.Status, got.Message)
+	if got := model.transfers[0]; got.Status != domain.Canceled || got.Message != "canceled" {
+		t.Fatalf("after the cancel event: status=%v message=%q, want Canceled/canceled", got.Status, got.Message)
+	}
+	// Canceled shares the Failed tab — there is no tab of its own.
+	model.bottomTab = tabFailed
+	if got := model.bottomRowCount(); got != 1 {
+		t.Fatalf("failed tab row count = %d, want the canceled transfer counted in it", got)
 	}
 }
 
@@ -1530,6 +1555,42 @@ func TestReconnectingClosesThePreviousConnection(t *testing.T) {
 	}
 	if !model.connected() {
 		t.Fatalf("state = %v after reconnecting, want connected", model.state)
+	}
+}
+
+func TestReconnectingFailsInFlightTransfersFromThePreviousConnection(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	model.transfers = []domain.Transfer{
+		{ID: 1, BytesTotal: 1000, Status: domain.Active},
+		{ID: 2, BytesTotal: 1000, Status: domain.Queued},
+		{ID: 3, BytesTotal: 1000, BytesDone: 1000, Status: domain.Done},
+	}
+
+	// Reconnecting tears down the old connection synchronously; its
+	// transfers must be failed right away rather than waiting on a
+	// disconnectedMsg that applyDisconnected's staleness check would drop
+	// once m.conn already names the new connection.
+	model = settle(t, model, model.connect(testTarget, session.Credentials{}))
+
+	for _, id := range []int{1, 2} {
+		row := model.transfers[id-1]
+		if row.Status != domain.Failed {
+			t.Fatalf("transfer %d status = %v after reconnecting, want Failed", id, row.Status)
+		}
+		if row.Message != "reconnecting" {
+			t.Fatalf("transfer %d message = %q, want reconnecting", id, row.Message)
+		}
+	}
+	if model.transfers[2].Status != domain.Done {
+		t.Fatalf("the already-finished transfer changed status: %v", model.transfers[2].Status)
+	}
+
+	// The old connection's own disconnectedMsg, arriving after we already
+	// moved on, must not double-report or otherwise disturb the new one.
+	model = settle(t, model, func() tea.Msg { return disconnectedMsg{conn: dialer.conns[0], err: nil} })
+	if !model.connected() {
+		t.Fatalf("a stale disconnect from the old connection broke the new one: state=%v", model.state)
 	}
 }
 
