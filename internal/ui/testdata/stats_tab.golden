@@ -9,22 +9,22 @@
 │                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
-│             ╭─ tideftp · queue folder ─────────────────────────────────────────────╮             │
-│             │                                                                      │             │
-│             │  download 8 file(s) across 3 folder(s), 4.2 MB total                 │             │
-│             │                                                                      │             │
-│             │    enter queue   esc cancel                                          │             │
-│             │                                                                      │             │
-│             ╰──────────────────────────────────────────────────────────────────────╯             │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│Transfers                                                                                    queue│
-│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │
-│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main…        50% transferring│
-│↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
-│                                                                                                  │
+│Transfers                                                                                    stats│
+│ 1 Queue (2x)   2 Active   3 Failed   4 History   5 Log    6 Stats                                │
+│Active 1 · Queued 1 · ↕ 4.1 MB/s                                                                  │
+│Transferred 149.0 KB · Done 2 · Failed 1                                                          │
+│Avg speed 9.8 KB/s · Avg size 73.2 KB                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr… 

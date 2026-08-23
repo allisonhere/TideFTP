@@ -53,6 +53,37 @@ func TestViewSurvivesTinyTerminals(t *testing.T) {
 	}
 }
 
+// TestViewSurvivesTinyTerminalsAcrossBottomTabs sweeps every bottomTab
+// value (not just overlays) across the same tiny-size sweep — tabStats in
+// particular, since renderThroughputGraph has its own degrade-gracefully
+// logic below a usable-graph floor that the overlay sweep above never
+// exercises.
+func TestViewSurvivesTinyTerminalsAcrossBottomTabs(t *testing.T) {
+	sizes := [][2]int{{0, 0}, {1, 1}, {2, 2}, {5, 3}, {10, 5}, {20, 8}, {1, 30}, {100, 1}}
+	tabs := []bottomTab{tabQueue, tabActive, tabFailed, tabHistory, tabLog, tabStats}
+
+	for _, size := range sizes {
+		for _, tab := range tabs {
+			model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+			model.width, model.height = size[0], size[1]
+			model.bottomTab = tab
+			if tab == tabStats {
+				model.stats = model.computeStats()
+				model.statsHistory = []int64{0, 100, 500, 200, 0}
+			}
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("View panicked at %dx%d tab=%v: %v", size[0], size[1], tab, r)
+					}
+				}()
+				model.View()
+			}()
+		}
+	}
+}
+
 // TestViewShrinksAndGrowsWithoutPanicking drives a WindowSizeMsg sequence
 // down to nothing and back up, the way a real terminal resize would.
 func TestViewShrinksAndGrowsWithoutPanicking(t *testing.T) {

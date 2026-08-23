@@ -153,6 +153,25 @@ func TestTabCyclesThroughAllThreePanesBothWays(t *testing.T) {
 	}
 }
 
+// TestSixOpensTheStatsTab confirms the number key alongside 1-5 reaches the
+// Stats tab and its cursor/scroll are inert, the same treatment tabLog gets.
+func TestSixOpensTheStatsTab(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+
+	model = press(t, model, runes("6"))
+
+	if model.bottomTab != tabStats {
+		t.Fatalf("bottomTab = %v after 6, want tabStats", model.bottomTab)
+	}
+	before := model.bottomCursor
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	if model.bottomCursor != before {
+		t.Fatalf("down on the Stats tab moved bottomCursor to %d, want it to stay inert like tabLog", model.bottomCursor)
+	}
+}
+
 // TestOverlayOpenBlocksQuit confirms q closes an open overlay rather than
 // falling through to the top-level quit binding: if it fell through, the
 // overlay would still be open (only the overlay-close branch clears it).

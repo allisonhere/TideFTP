@@ -165,6 +165,7 @@ func (m *Model) commitScan(scan preflightScan) {
 			ResumeFrom:  resumeFrom,
 			Status:      domain.Queued,
 			Message:     "queued",
+			Protocol:    m.target.Protocol,
 		})
 		m.nextTransferID++
 		queued++

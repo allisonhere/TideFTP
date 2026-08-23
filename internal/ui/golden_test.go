@@ -126,6 +126,43 @@ func TestGoldenHostKeyOverlay(t *testing.T) {
 	assertGolden(t, "host_key_overlay", ansi.Strip(model.View()))
 }
 
+func TestGoldenStatsTab(t *testing.T) {
+	model := goldenModel(t)
+	model.bottomTab = tabStats
+	fixed := time.Date(2026, 1, 15, 9, 30, 0, 0, time.UTC)
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, BytesDone: 2048, BytesTotal: 4096, Protocol: "sftp"},
+		{ID: 2, Status: domain.Queued, BytesTotal: 8192, Protocol: "sftp"},
+		{ID: 3, Status: domain.Done, BytesDone: 100000, BytesTotal: 100000, StartedAt: fixed, FinishedAt: fixed.Add(10 * time.Second), Protocol: "sftp"},
+		{ID: 4, Status: domain.Done, BytesDone: 50000, BytesTotal: 50000, StartedAt: fixed, FinishedAt: fixed.Add(5 * time.Second), Protocol: "ftp"},
+		{ID: 5, Status: domain.Failed, BytesDone: 512, BytesTotal: 20000, Protocol: "ftp"},
+	}
+	model.stats = model.computeStats()
+	model.stats.currentThroughput = 4300000
+	model.statsHistory = []int64{0, 100000, 500000, 2000000, 4300000, 3800000, 2100000, 900000, 200000, 0}
+	assertGolden(t, "stats_tab", ansi.Strip(model.View()))
+}
+
+// TestGoldenStatsTabWithGraph covers the tab at a bottom-pane size tall
+// enough to actually show renderThroughputGraph's output, not just the
+// no-room-for-it fallback TestGoldenStatsTab exercises at the default
+// split.
+func TestGoldenStatsTabWithGraph(t *testing.T) {
+	model := goldenModel(t)
+	model.bottomTab = tabStats
+	model.height = 46
+	fixed := time.Date(2026, 1, 15, 9, 30, 0, 0, time.UTC)
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, BytesDone: 2048, BytesTotal: 4096, Protocol: "sftp"},
+		{ID: 2, Status: domain.Done, BytesDone: 100000, BytesTotal: 100000, StartedAt: fixed, FinishedAt: fixed.Add(10 * time.Second), Protocol: "sftp"},
+		{ID: 3, Status: domain.Failed, BytesDone: 512, BytesTotal: 20000, Protocol: "ftp"},
+	}
+	model.stats = model.computeStats()
+	model.stats.currentThroughput = 4300000
+	model.statsHistory = []int64{0, 100000, 500000, 2000000, 4300000, 3800000, 2100000, 900000, 200000, 0}
+	assertGolden(t, "stats_tab_with_graph", ansi.Strip(model.View()))
+}
+
 func TestGoldenPreflightOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlayPreflight

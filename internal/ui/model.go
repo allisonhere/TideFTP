@@ -35,6 +35,7 @@ const (
 	tabFailed
 	tabHistory
 	tabLog
+	tabStats
 )
 
 type overlayMode int
@@ -228,7 +229,16 @@ type Model struct {
 	// the user whether to trust it, and what target/creds to resume
 	// connecting with if they do. Nil the rest of the time.
 	hostKeyPrompt *hostKeyPrompt
-	logs          []string
+
+	// stats, statsHistory, statsLastBytes, and statsLastSampleAt back the
+	// Stats tab (see internal/ui/stats.go). In-memory only, like
+	// sessionConflictPolicy: they reset on restart, and also on leaving and
+	// re-entering the tab, since sampling only runs while it's open.
+	stats             statsSnapshot
+	statsHistory      []int64
+	statsLastBytes    int64
+	statsLastSampleAt time.Time
+	logs              []string
 
 	theme       tideui.Theme
 	themePicker tideui.ThemePicker
@@ -496,6 +506,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForTransferEvent(m.engine.Events())
 	case transferStreamClosed:
 		return m, nil
+	case statsTickMsg:
+		return m, m.applyStatsTick()
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
@@ -675,19 +687,22 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.persist()
 	case "1":
 		tabSwitch = true
-		m.setBottomTab(tabQueue)
+		cmd = m.setBottomTab(tabQueue)
 	case "2":
 		tabSwitch = true
-		m.setBottomTab(tabActive)
+		cmd = m.setBottomTab(tabActive)
 	case "3":
 		tabSwitch = true
-		m.setBottomTab(tabFailed)
+		cmd = m.setBottomTab(tabFailed)
 	case "4":
 		tabSwitch = true
-		m.setBottomTab(tabHistory)
+		cmd = m.setBottomTab(tabHistory)
 	case "5":
 		tabSwitch = true
-		m.setBottomTab(tabLog)
+		cmd = m.setBottomTab(tabLog)
+	case "6":
+		tabSwitch = true
+		cmd = m.setBottomTab(tabStats)
 	}
 	m.clampCursors()
 	return m, cmd
@@ -998,12 +1013,16 @@ func (m *Model) moveCursor(delta int) {
 	case focusRemote:
 		m.remote.cursor += delta
 	case focusQueue:
-		if m.bottomTab == tabLog {
+		switch m.bottomTab {
+		case tabLog:
 			// The log has lines to scroll through, not rows to select.
 			m.bottomOffset = max(0, m.bottomOffset+delta)
-			return
+		case tabStats:
+			// A fixed live view of recent history, not a document — nothing
+			// to scroll or select.
+		default:
+			m.bottomCursor += delta
 		}
-		m.bottomCursor += delta
 	}
 }
 
@@ -1508,6 +1527,14 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 	}
 }
 
+// bottomTabHasRows reports whether the current bottom tab shows selectable
+// domain.Transfer rows — false for tabLog (scrolls raw text) and tabStats
+// (renders a fixed graph), both of which own their own scroll/cursor
+// handling instead of the shared row cursor.
+func (m Model) bottomTabHasRows() bool {
+	return m.bottomTab != tabLog && m.bottomTab != tabStats
+}
+
 // bottomTabFilter reports whether a transfer belongs in the currently
 // selected bottom-pane tab. tabQueue deliberately excludes Done: a transfer
 // that finishes simply stops matching Queue's filter on its very next
@@ -1554,7 +1581,7 @@ func (m *Model) cancelActiveTransfers() {
 		m.setError("not connected")
 		return
 	}
-	if m.focus == focusQueue && m.bottomTab != tabLog {
+	if m.focus == focusQueue && m.bottomTabHasRows() {
 		m.cancelTransferAt(m.bottomCursor)
 		return
 	}
@@ -1611,7 +1638,7 @@ func (m *Model) retrySelectedTransfer() tea.Cmd {
 		m.setError("not connected")
 		return nil
 	}
-	if m.focus != focusQueue || m.bottomTab == tabLog {
+	if m.focus != focusQueue || !m.bottomTabHasRows() {
 		m.setError("select a failed transfer to retry")
 		return nil
 	}
@@ -1633,6 +1660,7 @@ func (m *Model) retrySelectedTransfer() tea.Cmd {
 		BytesTotal:  target.BytesTotal,
 		Status:      domain.Queued,
 		Message:     "queued",
+		Protocol:    m.target.Protocol,
 	})
 	m.nextTransferID++
 	m.setStatus(fmt.Sprintf("retrying transfer %d as %d", target.ID, m.nextTransferID-1))
@@ -1686,7 +1714,7 @@ func (m *Model) clampCursors() {
 // (settleBottomOffset/clampBottomOffset, driven by bottomRowCount), so this
 // leaves it alone entirely.
 func (m *Model) clampBottomCursor() {
-	if m.bottomTab == tabLog {
+	if !m.bottomTabHasRows() {
 		return
 	}
 	rows := len(m.bottomTabTransfers())
@@ -1705,7 +1733,10 @@ func (m *Model) clampBottomCursor() {
 // setBottomTab switches the focused bottom-pane tab and resets its scroll
 // position and row cursor. The log tab opens scrolled to the latest
 // entries, matching a tail view; the transfer tabs open scrolled to the top.
-func (m *Model) setBottomTab(tab bottomTab) {
+// Opening tabStats (re)starts its sampling from scratch — see
+// resetStatsSampling — and returns the tea.Cmd that kicks off ticking;
+// every other tab returns nil.
+func (m *Model) setBottomTab(tab bottomTab) tea.Cmd {
 	m.bottomTab = tab
 	m.bottomCursor = 0
 	if tab == tabLog {
@@ -1713,6 +1744,10 @@ func (m *Model) setBottomTab(tab bottomTab) {
 	} else {
 		m.bottomOffset = 0
 	}
+	if tab == tabStats {
+		return m.resetStatsSampling()
+	}
+	return nil
 }
 
 func (m *Model) clampBottomOffset() {

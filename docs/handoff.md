@@ -79,6 +79,12 @@ Implemented:
   batches (**this session**). Resume is real: both `internal/sftpsession`
   and `internal/ftpsession` now move bytes starting from an offset instead
   of always truncating the destination
+- A Stats tab (`6`, see **Stats tab**) alongside Queue/Active/Failed/
+  History/Log: a live snapshot line, a multi-row realtime throughput graph
+  (bottom-aligned Unicode eighth-block bars, most recent sample on the
+  right), session totals, averages over completed transfers, and a
+  per-protocol breakdown. Sampling runs on a 1-second tick — the first
+  periodic ticker anywhere in `internal/ui` — only while the tab is open
 
 Git repository state:
 
@@ -360,6 +366,14 @@ First build slice:
   Icons/Max Parallel), a flat cursor-driven row list — the same
   field-enum-plus-label/value-functions shape `connect_form.go` uses,
   scaled down since every row is a fixed, always-visible cycle
+- `internal/ui/conflict.go`: the conflict overlay's policy enum/labels, key
+  handling (`handleConflictKey`), and `commitScan` — the one place a
+  resolved `preflightScan` becomes queued transfers (see **Conflict
+  resolution**)
+- `internal/ui/stats.go`: the Stats tab's data model (`statsSnapshot`),
+  1-second ticking (`applyStatsTick`), aggregation (`computeStats`), and
+  the throughput graph renderer (`renderThroughputGraph`) — see **Stats
+  tab**
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
@@ -994,6 +1008,72 @@ and `sftp.Client.OpenFile` already supports opening without `O_TRUNC`, and
 `github.com/jlaffaye/ftp`'s `ServerConn` already has native
 `RetrFrom(path, offset)`/`StorFrom(path, r, offset)` built for exactly
 this.
+
+### Stats tab
+
+`domain.Transfer` gained a `Protocol string` field, set from
+`m.target.Protocol` at both places a `Transfer` gets built
+(`commitScan` in `internal/ui/conflict.go`, `retrySelectedTransfer` in
+`internal/ui/model.go`). `Model.target` itself wasn't usable for a
+per-protocol breakdown: it's one value for the whole connection, and it
+changes on reconnect, so a transfer already sitting in history could end
+up misreported under whatever protocol the user most recently connected
+with rather than the one it actually ran over. Capturing it per-transfer,
+once, at queue time, is what keeps a session-long breakdown honest across
+a reconnect.
+
+Adding `tabStats` to the `bottomTab` enum wasn't a single extension point.
+Before this, `tabLog` was the only tab with no selectable
+`domain.Transfer` rows, and the codebase expressed that with ad-hoc
+`== tabLog`/`!= tabLog` comparisons scattered across five different
+functions (`clampBottomCursor`, `cancelActiveTransfers`,
+`retrySelectedTransfer`, `bottomRowCount`, `moveCursor`'s queue-focus
+branch). `tabStats` is a second rowless tab, so rather than scatter a
+second comparison at each of those five spots, `bottomTabHasRows()`
+(`internal/ui/model.go`) replaced every one of them: `false` for `tabLog`
+*or* `tabStats`, `true` for the four real transfer-row tabs. `bottomRowCount`
+and `moveCursor` still need their own per-tab behavior beyond the
+boolean — `tabLog` scrolls raw text via `bottomOffset`, `tabStats` doesn't
+scroll at all — so those two kept their own `switch`/case-by-case handling
+rather than collapsing into the helper.
+
+Sampling is gated to run only while the Stats tab is actually open —
+`applyStatsTick` (`internal/ui/stats.go`) checks `m.bottomTab != tabStats`
+on every tick and simply doesn't re-arm itself if it's no longer true, a
+self-terminating chain rather than something that needs cancelling from
+outside. `setBottomTab` restarts sampling from scratch every time
+`tabStats` is entered, including switching back after looking away. The
+trade-off, deliberately: the graph shows a gap across a tab switch rather
+than continuous background history. Keeping the ticker running unconditionally
+in the background would give a gap-free graph, at the cost of a timer that
+never stops for the rest of the process — this is the first periodic
+ticker anywhere in `internal/ui` (`tea.Tick`), and everything else in the
+package redraws only in response to something that already happened (a
+key, a transfer event, a listing reply, a resize), so "always on" would
+have been a new category of cost, not just a bigger one.
+
+`computeStats` (`internal/ui/stats.go`) is a single pass over
+`m.transfers` — the existing queue/history list is already the complete
+record of what happened this session, so there is no separate running
+accumulator to keep in sync with it. The one number that can't be
+recovered from a single pass over current state is throughput, since a
+rate is a derivative: `applyStatsTick` keeps exactly two pieces of
+carried state (`statsLastBytes`, `statsLastSampleAt`) to diff the total
+bytes moved against the previous tick.
+
+`renderThroughputGraph` draws with the "lower N eighths" Unicode block
+glyphs (▁▂▃▄▅▆▇█), which are already bottom-aligned — exactly a bar
+chart's convention — stacked across multiple rows for resolution beyond
+what one row of blocks could show. It was picked over a true braille
+dot-line plot (the other option offered) as equivalent visual ambition for
+meaningfully less rendering risk: a bar's fill height per column is a pure
+function of one value, whereas a connected braille line has to reason
+about slope between adjacent columns to look continuous rather than
+speckled. `renderStatsTab` degrades what it shows as the bottom pane
+shrinks — first dropping the graph and any per-protocol lines that don't
+fit, keeping the live-snapshot line longest — the same instinct
+`renderBottomPane`'s existing `"no rows yet"` fallback already has for an
+empty tab.
 
 ## Suggested Next Steps
 

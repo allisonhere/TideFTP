@@ -53,6 +53,12 @@ type Transfer struct {
 	Message    string
 	StartedAt  time.Time
 	FinishedAt time.Time
+	// Protocol is the connection protocol ("sftp", "ftp", "ftps") this
+	// transfer ran over, captured at queue time. The connection's own
+	// protocol can change on reconnect, after which it would no longer
+	// describe transfers already sitting in the queue — this field is what
+	// lets a per-protocol breakdown stay correct across a reconnect.
+	Protocol string
 }
 
 func (t Transfer) Progress() float64 {

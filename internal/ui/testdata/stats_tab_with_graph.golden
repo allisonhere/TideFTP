@@ -1,4 +1,4 @@
-   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50  
+   TideFTP    test  test.local:22                                0 queued  tide-night  split 50/50  
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
 │Local                       /home/allie/projects││Remote                              /public_html│
 │mode        size        modified        name    ││mode        size        modified        name    │
@@ -19,12 +19,28 @@
 │                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
+│                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│Transfers                                                                                    queue│
-│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │
-│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main…        50% transferring│
-│↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
-│                                                                                                  │
+│Transfers                                                                                    stats│
+│ 1 Queue (2x)   2 Active   3 Failed   4 History   5 Log    6 Stats                                │
+│Active 1 · Queued 0 · ↕ 4.1 MB/s                                                                  │
+│                                                                                            █▅    │
+│                                                                                           ▃██▄   │
+│                                                                                         ▁▃████▅▁ │
+│Transferred 100.2 KB · Done 1 · Failed 1                                                          │
+│Avg speed 9.8 KB/s · Avg size 97.7 KB                                                             │
+│sftp: 1 done, 0 failed, 99.7 KB                                                                   │
+│ftp: 0 done, 1 failed, 512 B                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr… 

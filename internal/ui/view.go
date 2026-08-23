@@ -185,14 +185,17 @@ func (m Model) renderRemotePane(renderer tideui.Renderer, width, height int) str
 func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) string {
 	width, height = max(1, width), max(1, height)
 	rows := []string{m.renderBottomTabs(renderer, width)}
-	if m.bottomTab == tabLog {
+	switch m.bottomTab {
+	case tabLog:
 		visible := height - 1
 		start := min(m.bottomOffset, max(0, len(m.logs)-visible))
 		end := min(len(m.logs), start+visible)
 		for i := start; i < end; i++ {
 			rows = append(rows, fitRow(renderer.Styles.DetailBody, width, m.logs[i]))
 		}
-	} else {
+	case tabStats:
+		rows = append(rows, m.renderStatsTab(renderer, width, height-1)...)
+	default:
 		rows = append(rows, m.renderTransferRows(renderer, width, height-1)...)
 	}
 	if len(rows) == 1 {
@@ -401,7 +404,7 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 }
 
 func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
-	labels := []string{fmt.Sprintf("1 Queue (%dx)", m.maxParallel), "2 Active", "3 Failed", "4 History", "5 Log"}
+	labels := []string{fmt.Sprintf("1 Queue (%dx)", m.maxParallel), "2 Active", "3 Failed", "4 History", "5 Log", "6 Stats"}
 	parts := make([]string, 0, len(labels))
 	for index, label := range labels {
 		style := renderer.Styles.DetailMeta
@@ -614,14 +617,18 @@ func (m Model) bottomVisibleRows() int {
 // bottomRowCount returns how many rows exist for the currently selected
 // bottom-pane tab, regardless of how many are actually visible.
 func (m Model) bottomRowCount() int {
-	if m.bottomTab == tabLog {
+	switch m.bottomTab {
+	case tabLog:
 		return len(m.logs)
+	case tabStats:
+		return 0 // a fixed live view, nothing to scroll
+	default:
+		return len(m.bottomTabTransfers())
 	}
-	return len(m.bottomTabTransfers())
 }
 
 func (m Model) bottomTabLabel() string {
-	labels := []string{"queue", "active", "failed", "history", "log"}
+	labels := []string{"queue", "active", "failed", "history", "log", "stats"}
 	return labels[int(m.bottomTab)]
 }
 

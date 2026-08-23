@@ -22,7 +22,7 @@
 ╰───────────╰──────────────────────────────────────────────────────────────────────────╯───────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
-│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log                                         │
+│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │
 │↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main…        50% transferring│
 │↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
 │                                                                                                  │
