@@ -221,6 +221,29 @@ func TestRenderThroughputLineFlatZeroDrawsABaseline(t *testing.T) {
 	}
 }
 
+// TestRenderThroughputLinePeakIsScopedToTheWholeHistoryNotJustTheWindow
+// pins the fix for already-drawn parts of the graph visibly rescaling
+// every tick: the scale must anchor to the whole session history, not
+// just whatever's currently in the visible window. Here the true peak
+// (5000) is old enough to have scrolled out of the window (width*2 = 8
+// sub-columns; only the trailing flat 100s are ever drawn) — it must
+// still set the scale. If the scale were recomputed from only what's
+// visible, the flat 100s would each be their own local peak and pin the
+// line at the very top instead of low, near the baseline.
+func TestRenderThroughputLinePeakIsScopedToTheWholeHistoryNotJustTheWindow(t *testing.T) {
+	samples := append([]int64{5000}, make([]int64, 20)...)
+	for i := 1; i < len(samples); i++ {
+		samples[i] = 100
+	}
+	rows := renderThroughputLine(samples, 4, 3)
+	top := ansi.Strip(rows[0])
+	for _, r := range []rune(top) {
+		if r != 0x2800 {
+			t.Fatalf("top row = %q, want entirely blank — a flat low value must not be pinned at the top just because it's the tallest thing currently in the window", top)
+		}
+	}
+}
+
 // TestRenderThroughputLineProducesRealANSIColor forces a color profile (go
 // test's stdout isn't a terminal, so lipgloss otherwise auto-detects "no
 // color" and segment would silently render plain text) to prove

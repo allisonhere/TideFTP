@@ -1085,6 +1085,22 @@ nothing (`TestRenderThroughputLineFlatZeroDrawsABaseline` pins this): a
 connected line at zero is a real reading, not the absence of one, the way
 an ECG's flat baseline is still a trace.
 
+Height and color both scale against `peak`, and `peak` is deliberately
+measured across the *whole* history passed in (`samples`), not just the
+sub-columns currently visible in the window. The first version measured it
+from only the visible window, which meant every tick the window slid
+forward — a new sample appended, the oldest one dropped — could change
+which value was the window's local max, rescaling everything still on
+screen taller/hotter (or shorter/cooler) relative to a ceiling that had
+nothing to do with any new data actually arriving. Anchoring `peak` to the
+whole session history instead means it only moves on a genuine new record,
+which is a real, meaningful event worth reflecting — not a side effect of
+old data quietly scrolling out of view.
+`TestRenderThroughputLinePeakIsScopedToTheWholeHistoryNotJustTheWindow`
+pins this: a real peak parked outside the visible window still has to set
+the scale, or a flat run of small values would wrongly pin itself at full
+height just for being the tallest thing currently on screen.
+
 `renderStatsTab` packs everything but the graph into exactly two lines —
 a live snapshot on top, totals/averages/per-protocol breakdown combined
 into one line on the bottom — specifically so the graph gets as much of

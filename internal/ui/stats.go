@@ -281,8 +281,15 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 	copy(window[subWidth-len(visible):], visible)
 	smoothed := smoothSamples(window)
 
+	// peak scales both height and color, and is deliberately measured
+	// across the whole session history (samples), not just what's visible
+	// right now — otherwise the instant an old high value scrolls out of
+	// the window, everything still on screen would rescale taller/hotter
+	// relative to a new, lower ceiling, every tick. Anchoring it to the
+	// full history means it only moves on a genuine new record, not as a
+	// side effect of the window sliding.
 	peak := int64(1)
-	for _, v := range smoothed {
+	for _, v := range samples {
 		if v > peak {
 			peak = v
 		}
