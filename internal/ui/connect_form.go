@@ -30,6 +30,13 @@ var connectProtocols = []string{"sftp", "ftp", "ftps"}
 // into connectProtocols, profile is an index into the model's profile choices
 // (0 is "new", the rest are saved profiles); the remaining fields, including
 // name, are free text.
+//
+// fresh marks a free-text field as still showing what it was prefilled with —
+// from the current target or a loaded profile — rather than something the
+// user typed. The first character typed into a fresh field replaces its
+// value instead of being inserted into it, the way selecting a form field's
+// whole text before typing over it would; any other edit (backspace, delete,
+// ctrl+u) marks it not fresh, so typing again only ever inserts.
 type connectFormValue struct {
 	profile  int
 	name     string
@@ -38,6 +45,7 @@ type connectFormValue struct {
 	port     string
 	username string
 	path     string
+	fresh    [connectFieldCount]bool
 }
 
 // connectProfileNew is the label shown when the Profile field points at no
@@ -97,6 +105,15 @@ func (m *Model) loadConnectProfile() {
 	}
 	m.connectForm.username = p.User
 	m.connectForm.path = p.StartPath
+	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
+}
+
+// markConnectFieldsFresh flags the given fields as showing a prefilled value
+// rather than something the user typed — see connectFormValue.fresh.
+func (m *Model) markConnectFieldsFresh(fields ...connectField) {
+	for _, f := range fields {
+		m.connectForm.fresh[f] = true
+	}
 }
 
 func protocolIndex(protocol string) int {
@@ -126,6 +143,7 @@ func (m *Model) openConnectForm() {
 	if src.Port != 0 {
 		m.connectForm.port = strconv.Itoa(src.Port)
 	}
+	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
 	m.connectField = connectFieldProfile
 	m.connectCursor = 0
 	m.overlay = overlayConnect
@@ -233,6 +251,11 @@ func (m *Model) cycleConnectChoice(delta int) {
 }
 
 func (m *Model) editConnectField(s string) {
+	if m.connectForm.fresh[m.connectField] {
+		m.setConnectFieldValue(m.connectField, "")
+		m.connectCursor = 0
+	}
+	m.connectForm.fresh[m.connectField] = false
 	runes := []rune(m.connectFieldValue(m.connectField))
 	cur := min(max(m.connectCursor, 0), len(runes))
 	inserted := []rune(s)
@@ -245,6 +268,7 @@ func (m *Model) editConnectFieldBackspace() {
 	if connectChoiceField(m.connectField) {
 		return
 	}
+	m.connectForm.fresh[m.connectField] = false
 	runes := []rune(m.connectFieldValue(m.connectField))
 	cur := min(max(m.connectCursor, 0), len(runes))
 	if cur == 0 {
@@ -259,6 +283,7 @@ func (m *Model) editConnectFieldDelete() {
 	if connectChoiceField(m.connectField) {
 		return
 	}
+	m.connectForm.fresh[m.connectField] = false
 	runes := []rune(m.connectFieldValue(m.connectField))
 	cur := min(max(m.connectCursor, 0), len(runes))
 	if cur >= len(runes) {
@@ -433,6 +458,7 @@ func (m *Model) handleConnectKey(msg tea.KeyMsg) tea.Cmd {
 		if !connectChoiceField(m.connectField) {
 			m.setConnectFieldValue(m.connectField, "")
 			m.connectCursor = 0
+			m.connectForm.fresh[m.connectField] = false
 		}
 	default:
 		if len(msg.Runes) > 0 && !connectChoiceField(m.connectField) {

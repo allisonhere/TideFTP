@@ -1316,6 +1316,43 @@ func TestNewModelLoadsProfilesFromConfig(t *testing.T) {
 	}
 }
 
+func TestConnectFormFirstKeystrokeReplacesPrefilledText(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host, prefilled "test.local"
+
+	// No ctrl+u: the first character typed should replace the prefilled
+	// value, not land at the cursor inside it.
+	model = press(t, model, runes("x"))
+	if model.connectForm.host != "x" {
+		t.Fatalf("host after first keystroke = %q, want %q", model.connectForm.host, "x")
+	}
+
+	// A second keystroke inserts normally, since the field is no longer fresh.
+	model = press(t, model, runes("y"))
+	if model.connectForm.host != "xy" {
+		t.Fatalf("host after second keystroke = %q, want %q", model.connectForm.host, "xy")
+	}
+}
+
+func TestConnectFormBackspaceOnPrefilledTextDoesNotArmReplace(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host, prefilled "test.local"
+
+	// Editing via backspace, rather than typing, must not leave the field
+	// armed to wipe itself on the next keystroke.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyBackspace})
+	model = press(t, model, runes("x"))
+	if model.connectForm.host != "test.locax" {
+		t.Fatalf("host = %q, want backspace-then-type to edit in place", model.connectForm.host)
+	}
+}
+
 func TestConnectFieldDisplayInsertsCaret(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))

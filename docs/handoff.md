@@ -503,6 +503,14 @@ other setting (see **Config persistence**). Profiles carry no credentials,
 matching `session.Target`'s doc comment that credentials
 deliberately live elsewhere.
 
+Every free-text field starts "fresh" when prefilled — from the current
+target on open, or from a profile on cycling into it — and the first
+character typed replaces its value rather than landing at the end of it, the
+way selecting a form field's text before typing over it would.
+`connectFormValue.fresh` tracks this per field; any other edit (backspace,
+delete, `ctrl+u`) clears the flag, so a field only ever wipes itself on that
+first keystroke, never mid-edit.
+
 tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins
 (`v0.2.3-0.20260820020614-441c283e776f`) for two things the older release
 lacks: `SoftRow`'s selected-row background highlight and the `ModalShadow`
