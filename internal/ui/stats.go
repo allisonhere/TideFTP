@@ -26,18 +26,21 @@ var (
 	statsMeta       = lipgloss.Color("#1F9D4A")
 )
 
-// statsGradient is a low-to-high intensity ramp, all in the green family,
-// used to color the throughput graph's columns by how close each one is to
-// the visible window's peak — brighter means more throughput, not just a
-// taller bar.
+// statsGradient is a low-to-high intensity ramp used to color the
+// throughput graph's columns by how close each one is to the visible
+// window's peak — blue at the quiet end, through violet and magenta, up to
+// hot pink at the busiest — brighter/hotter means more throughput, not
+// just a taller point on the line.
 var statsGradient = []lipgloss.Color{
-	"#0B3D0B",
-	"#146616",
-	"#1E8A21",
-	"#2BAF2E",
-	"#3FD43F",
-	"#66FF66",
-	"#AFFF8C",
+	"#1E2A78",
+	"#33267F",
+	"#4C2394",
+	"#6B21A8",
+	"#8B21B3",
+	"#B21FAE",
+	"#D91FA0",
+	"#F23FA6",
+	"#FF69B4",
 }
 
 // statsLine renders one full-width row of Stats content on the tab's fixed
@@ -182,7 +185,7 @@ func formatRate(bytesPerSecond int64) string {
 // statsHighlight marks the single highest point in the visible window —
 // distinct from statsGradient's own brightest step, so the peak still pops
 // even when several nearby columns are already near-saturated.
-var statsHighlight = lipgloss.Color("#F2FFE0")
+var statsHighlight = lipgloss.Color("#FFF3FA")
 
 // smoothWindow is smoothSamples' trailing-average width: enough to take
 // the jitter off a noisy 1-second reading without smearing a genuine spike

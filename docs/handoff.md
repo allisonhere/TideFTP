@@ -1106,12 +1106,12 @@ usually commits to one look rather than adapting to its surroundings.
 `renderTransferRow`'s progress bar already used) rather than
 `renderer.Styles`, so nothing here can accidentally inherit the theme's
 colors. The graph is additionally tinted per terminal column along
-`statsGradient`, a low-to-high ramp within the green family, using
-whichever of that column's two sub-columns sits higher — a column near
-the window's peak is brighter, not just taller, so the color is another
-encoding of the data rather than decoration on top of it. The single
-column containing the window's highest point instead gets
-`statsHighlight`, a near-white green distinct from the gradient's own
+`statsGradient`, a low-to-high ramp from blue through violet and magenta
+to hot pink, using whichever of that column's two sub-columns sits higher
+— a column near the window's peak is hotter, not just taller, so the
+color is another encoding of the data rather than decoration on top of
+it. The single column containing the window's highest point instead gets
+`statsHighlight`, a near-white pink distinct from the gradient's own
 brightest step, so the peak still pops even when several neighboring
 columns are already near-saturated. `lipgloss`'s color-profile detection
 falls back to plain text when stdout isn't a real terminal (true of every
