@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"tideftp/internal/config"
 	"tideftp/internal/credstore"
@@ -43,6 +45,20 @@ func main() {
 	if *showVersion {
 		fmt.Println("tideftp " + version)
 		return
+	}
+
+	// internal/ui and tideui both render through lipgloss's shared global
+	// renderer, which by default auto-detects the color profile from TERM/
+	// COLORTERM — a common source of false negatives (tmux, some SSH
+	// sessions, terminals that support truecolor but never set COLORTERM)
+	// that would otherwise quietly clip the app's 24-bit gradient colors
+	// (the Stats tab's throughput line, tideui's modal shadow blending) down
+	// to the nearest ANSI256 entry. Forcing it here trusts that the
+	// deployment target actually is truecolor-capable rather than whatever
+	// termenv's heuristics conclude; NO_COLOR is still honored for anyone
+	// who explicitly asks for no color at all.
+	if os.Getenv("NO_COLOR") == "" {
+		lipgloss.SetColorProfile(termenv.TrueColor)
 	}
 
 	dialer, targets, err := buildSession(sessionOptions{

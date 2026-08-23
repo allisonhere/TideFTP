@@ -1121,6 +1121,21 @@ escape codes it's asserting on — everything else here is verified through
 `ansi.Strip`ped goldens, which were never going to catch a missing color
 in the first place.
 
+The same auto-detection is a real, general risk for the running app, not
+just a testing inconvenience: `internal/ui` and `tideui` both render
+through lipgloss's shared global renderer (`tideui.NewRenderer`'s `Styles`
+are built from plain `lipgloss.NewStyle()` calls, no renderer of its own —
+confirmed by `tideui`'s own `activeColorProfile()`, which reads that same
+global profile to truecolor-aware-blend the modal shadow), and termenv's
+`TERM`/`COLORTERM`-based heuristics are known to under-detect in tmux, some
+SSH sessions, and terminals that are truecolor-capable but never set
+`COLORTERM`. Under-detection would quietly clip the Stats tab's 24-bit
+gradient down to the nearest ANSI256 entry rather than fail loudly.
+`cmd/tideftp/main.go` now calls `lipgloss.SetColorProfile(termenv.TrueColor)`
+at startup — trusting that the deployment target really is truecolor,
+rather than whatever termenv's heuristics conclude — unless `NO_COLOR` is
+set, which is still honored.
+
 ## Suggested Next Steps
 
 1. ~~Initialize or fix Git repository state.~~ Done — real repo on `main`,
