@@ -176,9 +176,16 @@ type Model struct {
 	// Everything below is valid only while state is connConnected. remoteFS
 	// and engine come from conn and are cleared with it, so that a dropped
 	// connection cannot leave a stale adapter wired into the UI.
-	dialer      session.Dialer
-	targets     []session.Target
-	target      session.Target
+	dialer  session.Dialer
+	targets []session.Target
+	target  session.Target
+
+	// profiles are the user's saved connection targets, loaded from config on
+	// startup and offered by the connect form's Profile field. They are
+	// distinct from targets: targets is what to auto-connect to at startup
+	// (from --host or the demo adapter), profiles is what the user chose to
+	// keep for later.
+	profiles []session.Target
 
 	// Connect form state, editable while the connect overlay is open.
 	connectForm   connectFormValue
@@ -186,10 +193,10 @@ type Model struct {
 	connectCursor int
 
 	conn     session.Conn
-	remoteFS    vfs.FS
-	engine      transfer.Engine
-	state       connState
-	connErr     error
+	remoteFS vfs.FS
+	engine   transfer.Engine
+	state    connState
+	connErr  error
 
 	transfers      []domain.Transfer
 	nextTransferID int
@@ -275,6 +282,7 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		localFS:        local,
 		dialer:         dialer,
 		targets:        targets,
+		profiles:       profilesFromConfig(cfg.Profiles),
 		state:          connDisconnected,
 		nextTransferID: 1,
 		maxParallel:    maxParallel,
@@ -316,7 +324,40 @@ func (m Model) snapshotConfig() config.Config {
 			FileSplit:   m.fileSplit.Value(),
 			BottomSplit: m.bottomSplit.Value(),
 		},
+		Profiles: profilesToConfig(m.profiles),
 	}
+}
+
+// profilesFromConfig converts persisted profiles into the session.Target shape
+// the connect form and dialer use.
+func profilesFromConfig(profiles []config.Profile) []session.Target {
+	if len(profiles) == 0 {
+		return nil
+	}
+	targets := make([]session.Target, len(profiles))
+	for i, p := range profiles {
+		targets[i] = session.Target{
+			Name: p.Name, Protocol: p.Protocol, Host: p.Host,
+			Port: p.Port, User: p.User, StartPath: p.StartPath,
+		}
+	}
+	return targets
+}
+
+// profilesToConfig converts saved connection targets into the config schema
+// for persistence.
+func profilesToConfig(targets []session.Target) []config.Profile {
+	if len(targets) == 0 {
+		return nil
+	}
+	profiles := make([]config.Profile, len(targets))
+	for i, t := range targets {
+		profiles[i] = config.Profile{
+			Name: t.Name, Protocol: t.Protocol, Host: t.Host,
+			Port: t.Port, User: t.User, StartPath: t.StartPath,
+		}
+	}
+	return profiles
 }
 
 // persist saves the current settings if a saver was configured. Failures are

@@ -34,6 +34,9 @@ Implemented:
 - Shift-arrow pane resizing
 - Config persistence: XDG paths plus a `config.toml` under `internal/config`,
   loaded on startup and saved on change (see **Config persistence**)
+- Saved connection profiles: a `Profile` field in the connect form cycles
+  through profiles persisted in `config.toml`, `ctrl+s`/`ctrl+x` save and
+  delete them (see **Connect form**)
 - Basic UI tests for layout, theme registration, and resizing
 
 Git repository state:
@@ -269,7 +272,9 @@ First build slice:
 - `internal/config/`: XDG path resolution and the `config.toml` schema.
   `Default`/`Load`/`Save` (atomic write) plus a `SaveFunc` seam the UI calls
   so it never touches the filesystem. The state and cache roots are resolved
-  but unused
+  but unused. `Profile` mirrors `session.Target`'s shape (minus credentials)
+  rather than importing it, keeping this package free of that dependency;
+  `internal/ui` converts between the two
 - `internal/sftpsession/`: the real SFTP adapter. `sftpsession.go` dials
   (agent and key-file auth, strict known_hosts), `fs.go` implements
   `vfs.FS`, `engine.go` implements `transfer.Engine`. All three share one
@@ -283,8 +288,9 @@ First build slice:
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
-- `internal/ui/connect_form.go`: the editable connect form (Protocol/Host/Port/
-  Username/Path) and its key grammar, styled like whatthedock's soft forms
+- `internal/ui/connect_form.go`: the editable connect form (Profile/Protocol/
+  Host/Port/Username/Path) and its key grammar, styled like whatthedock's soft
+  forms
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
@@ -465,8 +471,9 @@ Three scope calls to remember:
   cross-reference in comments.
 - The file is written on the first change, not on first launch: a run that
   changes nothing leaves no config file behind.
-- `showHidden` is per-pane and deliberately not persisted here; the
-  `[profiles]` table is item 4 and the schema is shaped to take it.
+- `showHidden` is per-pane and deliberately not persisted here. Saved
+  connection profiles live in their own `[[profiles]]` array table via
+  `config.Profile`, not in this struct — see **Connect form**.
 
 ### Connect form
 
@@ -474,11 +481,26 @@ Three scope calls to remember:
 form that dials a `session.Target`. It is styled like whatthedock's soft forms
 — `SoftPanel` + `RenderSoftRow` (label left, value right, the selected row
 highlighted) + `RenderSoftHints` — with the same inline `|` caret and key
-grammar: `tab`/`up`/`down` move fields, `h`/`l`/`left`/`right` cycle the
-Protocol picker or move the caret, `ctrl/alt+enter` connects, `ctrl+d`
-disconnects a live connection, `ctrl+u` clears a field. `alt+enter` is the
-reliable confirm — a terminal cannot distinguish `ctrl+enter` from plain
-`enter` — so the hint names both but the handler keys on `alt+enter`.
+grammar: `tab`/`up`/`down` move fields, `h`/`l`/`left`/`right` cycle a picker
+field or move the caret, `ctrl/alt+enter` connects, `ctrl+d` disconnects a
+live connection, `ctrl+u` clears a field. `alt+enter` is the reliable confirm
+— a terminal cannot distinguish `ctrl+enter` from plain `enter` — so the hint
+names both but the handler keys on `alt+enter`.
+
+Profile is the first field, a picker like Protocol: `(new)` plus the label of
+each saved profile. Cycling to a saved profile loads its Protocol/Host/Port/
+Username/Path into the rest of the form; cycling to `(new)` leaves them alone,
+so it means "not tied to a saved profile" rather than "blank". `ctrl+s` saves
+the form's current values, upserting rather than always appending: profiles
+are keyed by protocol+host+port+user (`targetKey`/`profileKey`), so editing
+the path or re-saving the same account updates that profile in place instead
+of piling up duplicates, and the key deliberately excludes the name, which is
+always derived from `Target.Label()` — there is no name field to type into.
+`ctrl+x` deletes the profile the Profile field currently points at; both are
+no-ops on `(new)`, and both persist immediately through the same `save`
+seam as every other setting (see **Config persistence**). Profiles carry no
+credentials, matching `session.Target`'s doc comment that credentials
+deliberately live elsewhere.
 
 tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins
 (`v0.2.3-0.20260820020614-441c283e776f`) for two things the older release
@@ -512,9 +534,13 @@ path.
      target menu.
    - `--host/--user/--port/--path/--identity/--known-hosts` still reach a real
      server; the form is the interactive path into the same dialers
-   - Still missing: profile persistence (a `[profiles]` table in config.toml),
-     and everything credential-related — password mode (prompt/keyring/config),
-     SFTP agent/key file, FTPS certificate verification, SFTP known-host mode
+   - ~~Profile persistence.~~ Done — a `[[profiles]]` array table in
+     `config.toml`, via `config.Profile`; the form's Profile field cycles
+     through them and `ctrl+s`/`ctrl+x` save/delete (see **Connect form**)
+   - Still missing: everything credential-related — password mode
+     (prompt/keyring/config), SFTP agent/key file, FTPS certificate
+     verification, SFTP known-host mode. None of it has a field in the form
+     yet, and profiles carry no credentials
 
 5. Improve transfer queue behavior.
    - Configurable parallelism — the cap is now `Model.maxParallel`
@@ -580,10 +606,10 @@ path.
 - A connection is never retried automatically after a drop
 - A listing that hangs is bounded only by `listTimeout` (20s) and cannot be
   cancelled from the UI — there is no key to abandon a slow directory
-- Config persistence covers only global prefs (theme, density, shadow, icons,
-  `maxParallel`, and the pane splits). Profiles, `showHidden`, and any use of
-  the state/cache directories are not persisted yet
-- No saved profiles yet
+- Config persistence covers global prefs (theme, density, shadow, icons,
+  `maxParallel`, the pane splits) and saved connection profiles.
+  `showHidden` and any use of the state/cache directories are not persisted
+  yet
 - No real credential storage yet
 - The connect form is keyboard-only; mouse clicks do not edit its fields
 - Mouse support is basic: focus/select, not full range selection or context

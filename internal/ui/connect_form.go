@@ -13,7 +13,8 @@ import (
 type connectField int
 
 const (
-	connectFieldProtocol connectField = iota
+	connectFieldProfile connectField = iota
+	connectFieldProtocol
 	connectFieldHost
 	connectFieldPort
 	connectFieldUsername
@@ -25,13 +26,74 @@ const (
 var connectProtocols = []string{"sftp", "ftp", "ftps"}
 
 // connectFormValue holds the connect form's field values. Protocol is an index
-// into connectProtocols; the rest are free text.
+// into connectProtocols, profile is an index into the model's profile choices
+// (0 is "new", the rest are saved profiles); the remaining fields are free
+// text.
 type connectFormValue struct {
+	profile  int
 	protocol int
 	host     string
 	port     string
 	username string
 	path     string
+}
+
+// connectProfileNew is the label shown when the Profile field points at no
+// saved profile — the form's values are not tied to one.
+const connectProfileNew = "(new)"
+
+// connectProfileChoices lists the Profile field's cycle order: "(new)" first,
+// then each saved profile by its label.
+func (m Model) connectProfileChoices() []string {
+	choices := make([]string, 0, len(m.profiles)+1)
+	choices = append(choices, connectProfileNew)
+	for _, p := range m.profiles {
+		choices = append(choices, p.Label())
+	}
+	return choices
+}
+
+// profileKey identifies which saved profile a target belongs to: protocol,
+// host, port, and user together name an account on a server. StartPath and
+// Name can change without it becoming a different profile.
+type profileKey struct {
+	protocol, host string
+	port           int
+	user           string
+}
+
+func targetKey(t session.Target) profileKey {
+	return profileKey{protocol: t.Protocol, host: t.Host, port: t.Port, user: t.User}
+}
+
+// profileIndexFor returns the Profile field index (1-based; 0 is "new") of
+// the saved profile matching target's key, or 0 if there is none.
+func (m Model) profileIndexFor(target session.Target) int {
+	key := targetKey(target)
+	for i, p := range m.profiles {
+		if targetKey(p) == key {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// loadConnectProfile fills the form's Protocol/Host/Port/Username/Path from
+// the saved profile at the Profile field's current selection. It is a no-op
+// when the selection is "(new)".
+func (m *Model) loadConnectProfile() {
+	if m.connectForm.profile == 0 {
+		return
+	}
+	p := m.profiles[m.connectForm.profile-1]
+	m.connectForm.protocol = protocolIndex(p.Protocol)
+	m.connectForm.host = p.Host
+	m.connectForm.port = ""
+	if p.Port != 0 {
+		m.connectForm.port = strconv.Itoa(p.Port)
+	}
+	m.connectForm.username = p.User
+	m.connectForm.path = p.StartPath
 }
 
 func protocolIndex(protocol string) int {
@@ -51,6 +113,7 @@ func (m *Model) openConnectForm() {
 		src = m.targets[0]
 	}
 	m.connectForm = connectFormValue{
+		profile:  m.profileIndexFor(src),
 		protocol: protocolIndex(src.Protocol),
 		host:     src.Host,
 		username: src.User,
@@ -59,13 +122,15 @@ func (m *Model) openConnectForm() {
 	if src.Port != 0 {
 		m.connectForm.port = strconv.Itoa(src.Port)
 	}
-	m.connectField = connectFieldProtocol
+	m.connectField = connectFieldProfile
 	m.connectCursor = 0
 	m.overlay = overlayConnect
 }
 
 func connectFieldLabel(field connectField) string {
 	switch field {
+	case connectFieldProfile:
+		return "Profile"
 	case connectFieldProtocol:
 		return "Protocol"
 	case connectFieldHost:
@@ -82,6 +147,12 @@ func connectFieldLabel(field connectField) string {
 
 func (m Model) connectFieldValue(field connectField) string {
 	switch field {
+	case connectFieldProfile:
+		choices := m.connectProfileChoices()
+		if m.connectForm.profile < len(choices) {
+			return choices[m.connectForm.profile]
+		}
+		return connectProfileNew
 	case connectFieldProtocol:
 		return connectProtocols[m.connectForm.protocol]
 	case connectFieldHost:
@@ -112,7 +183,7 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 // connectChoiceField reports whether the given field is a cycled picker rather
 // than free text.
 func connectChoiceField(field connectField) bool {
-	return field == connectFieldProtocol
+	return field == connectFieldProfile || field == connectFieldProtocol
 }
 
 // connectFieldDisplay returns the value shown for field, with a caret inserted
@@ -140,8 +211,15 @@ func (m *Model) moveConnectCursor(delta int) {
 }
 
 func (m *Model) cycleConnectChoice(delta int) {
-	n := len(connectProtocols)
-	m.connectForm.protocol = (m.connectForm.protocol + delta + n) % n
+	switch m.connectField {
+	case connectFieldProfile:
+		n := len(m.profiles) + 1
+		m.connectForm.profile = (m.connectForm.profile + delta + n) % n
+		m.loadConnectProfile()
+	case connectFieldProtocol:
+		n := len(connectProtocols)
+		m.connectForm.protocol = (m.connectForm.protocol + delta + n) % n
+	}
 }
 
 func (m *Model) editConnectField(s string) {
@@ -180,32 +258,85 @@ func (m *Model) editConnectFieldDelete() {
 	m.setConnectFieldValue(m.connectField, string(runes))
 }
 
-// connectFromForm validates the form and dials it. Validation failures leave
-// the overlay open and show the reason; success closes it and connects.
-func (m *Model) connectFromForm() tea.Cmd {
+// targetFromForm validates the form's Protocol/Host/Port/Username/Path fields
+// and builds the target they describe. On a validation failure it sets the
+// form's error and returns ok=false.
+func (m *Model) targetFromForm() (session.Target, bool) {
 	host := strings.TrimSpace(m.connectForm.host)
 	if host == "" {
 		m.setError("host is required")
-		return nil
+		return session.Target{}, false
 	}
 	port := 0
 	if p := strings.TrimSpace(m.connectForm.port); p != "" {
 		n, err := strconv.Atoi(p)
 		if err != nil || n <= 0 || n > 65535 {
 			m.setError("port must be a number 1-65535")
-			return nil
+			return session.Target{}, false
 		}
 		port = n
 	}
-	target := session.Target{
+	return session.Target{
 		Protocol:  connectProtocols[m.connectForm.protocol],
 		Host:      host,
 		Port:      port,
 		User:      strings.TrimSpace(m.connectForm.username),
 		StartPath: strings.TrimSpace(m.connectForm.path),
+	}, true
+}
+
+// connectFromForm validates the form and dials it. Validation failures leave
+// the overlay open and show the reason; success closes it and connects.
+func (m *Model) connectFromForm() tea.Cmd {
+	target, ok := m.targetFromForm()
+	if !ok {
+		return nil
 	}
 	m.overlay = overlayNone
 	return m.connect(target)
+}
+
+// upsertProfile saves target as a profile, replacing an existing one with the
+// same targetKey (same protocol/host/port/user) or appending a new one. It
+// returns the profile's index.
+func (m *Model) upsertProfile(target session.Target) int {
+	target.Name = target.Label()
+	key := targetKey(target)
+	for i, p := range m.profiles {
+		if targetKey(p) == key {
+			m.profiles[i] = target
+			return i
+		}
+	}
+	m.profiles = append(m.profiles, target)
+	return len(m.profiles) - 1
+}
+
+// saveConnectProfile validates the form and saves it as a profile, updating
+// the Profile field to point at it. Validation failures behave like connect's.
+func (m *Model) saveConnectProfile() {
+	target, ok := m.targetFromForm()
+	if !ok {
+		return
+	}
+	idx := m.upsertProfile(target)
+	m.connectForm.profile = idx + 1
+	m.setStatus("saved profile " + target.Label())
+	m.persist()
+}
+
+// deleteConnectProfile removes the profile the Profile field currently points
+// at. It is a no-op when the selection is "(new)".
+func (m *Model) deleteConnectProfile() {
+	if m.connectForm.profile == 0 {
+		return
+	}
+	idx := m.connectForm.profile - 1
+	name := m.profiles[idx].Label()
+	m.profiles = append(m.profiles[:idx], m.profiles[idx+1:]...)
+	m.connectForm.profile = 0
+	m.setStatus("deleted profile " + name)
+	m.persist()
 }
 
 // handleConnectKey routes keys while the connect overlay is open, mirroring
@@ -266,6 +397,10 @@ func (m *Model) handleConnectKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveConnectField(1)
 	case "ctrl+enter", "alt+enter":
 		return m.connectFromForm()
+	case "ctrl+s":
+		m.saveConnectProfile()
+	case "ctrl+x":
+		m.deleteConnectProfile()
 	case "ctrl+d":
 		if m.conn != nil {
 			m.overlay = overlayNone

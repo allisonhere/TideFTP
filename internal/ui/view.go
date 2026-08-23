@@ -462,7 +462,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		rows := make([]string, 0, 10)
 		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("Status  "+m.connectionSummary()))
 		rows = append(rows, "")
-		for field := connectFieldProtocol; field < connectFieldCount; field++ {
+		for field := connectFieldProfile; field < connectFieldCount; field++ {
 			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
 				Text:     connectFieldLabel(field),
 				Suffix:   m.connectFieldDisplay(field),
@@ -481,6 +481,9 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 				tideui.SoftHint{Key: "ctrl/alt+enter", Label: "connect"},
 				tideui.SoftHint{Key: "ctrl+u", Label: "clear"},
 				tideui.SoftHint{Key: "esc", Label: "cancel"}),
+			renderer.RenderSoftHints(contentWidth,
+				tideui.SoftHint{Key: "ctrl+s", Label: "save profile"},
+				tideui.SoftHint{Key: "ctrl+x", Label: "delete profile"}),
 		)
 		if m.conn != nil {
 			rows = append(rows, renderer.RenderSoftHints(contentWidth, tideui.SoftHint{Key: "ctrl+d", Label: "disconnect"}))

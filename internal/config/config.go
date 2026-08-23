@@ -2,9 +2,9 @@
 // per-user directories the app keeps its files under.
 //
 // It is a leaf package: it knows nothing about the UI or the protocol
-// adapters, only the TOML file it reads and writes. Profiles (session.Target)
-// are deliberately absent from Config — they land with the connect form, and
-// the schema below is the global settings that precede it.
+// adapters, only the TOML file it reads and writes. Profile mirrors
+// session.Target's shape rather than importing it, so this package stays free
+// of that dependency; internal/ui converts between the two.
 package config
 
 import (
@@ -18,12 +18,13 @@ import (
 // Default, and Load layers a TOML file over those defaults, so a partial or
 // hand-edited file is fine.
 type Config struct {
-	Theme       string  `toml:"theme"`
-	Density     string  `toml:"density"`
-	Shadow      bool    `toml:"shadow"`
-	ShowIcons   bool    `toml:"show_icons"`
-	MaxParallel int     `toml:"max_parallel"`
-	Layout      Layout  `toml:"layout"`
+	Theme       string    `toml:"theme"`
+	Density     string    `toml:"density"`
+	Shadow      bool      `toml:"shadow"`
+	ShowIcons   bool      `toml:"show_icons"`
+	MaxParallel int       `toml:"max_parallel"`
+	Layout      Layout    `toml:"layout"`
+	Profiles    []Profile `toml:"profiles"`
 }
 
 // Layout records the pane split ratios as fractions of the terminal. The UI
@@ -32,6 +33,17 @@ type Config struct {
 type Layout struct {
 	FileSplit   float64 `toml:"file_split"`
 	BottomSplit float64 `toml:"bottom_split"`
+}
+
+// Profile is a saved connection target: where to connect and as whom.
+// Credentials are deliberately absent — see Known Gaps in docs/handoff.md.
+type Profile struct {
+	Name      string `toml:"name"`
+	Protocol  string `toml:"protocol"`
+	Host      string `toml:"host"`
+	Port      int    `toml:"port"`
+	User      string `toml:"user"`
+	StartPath string `toml:"start_path"`
 }
 
 // SaveFunc persists a Config. It is a seam so callers — the UI — never have

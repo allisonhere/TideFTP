@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load on missing file: %v", err)
 	}
-	if cfg != Default() {
+	if !reflect.DeepEqual(cfg, Default()) {
 		t.Fatalf("Load on missing file = %+v, want defaults %+v", cfg, Default())
 	}
 }
@@ -44,7 +45,7 @@ func TestLoadCorruptFileReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load on corrupt file should not error, got %v", err)
 	}
-	if cfg != Default() {
+	if !reflect.DeepEqual(cfg, Default()) {
 		t.Fatalf("Load on corrupt file = %+v, want defaults %+v", cfg, Default())
 	}
 }
@@ -58,6 +59,9 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 		ShowIcons:   false,
 		MaxParallel: 4,
 		Layout:      Layout{FileSplit: 0.63, BottomSplit: 0.21},
+		Profiles: []Profile{
+			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob"},
+		},
 	}
 	if err := Save(path, want); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -66,7 +70,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip = %+v, want %+v", got, want)
 	}
 }
