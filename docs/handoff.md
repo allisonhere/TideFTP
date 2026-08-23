@@ -597,8 +597,38 @@ now just tracks the engine's own count of bytes moved instead.
 
 `domain.TransferStatus` has a `Canceled` value distinct from `Failed`, so a
 transfer the user canceled can be told apart from one that genuinely broke —
-useful groundwork for a retry flow that should treat the two differently.
-It still shares the Failed tab, though; there is no tab of its own.
+`retrySelectedTransfer` and the row's own message both depend on it. It
+still shares the Failed tab, though; there is no tab of its own.
+
+### Recursive folders
+
+Queuing a folder used to just refuse — `transfer.Engine` has no
+folder-copy primitive, and no adapter can read a directory as a file. It
+still can't, and never will: the fix is that the UI never asks it to.
+`beginPreflightScan` walks every folder in the selection with `vfs.FS.List`
+(the same blocking-by-contract call `listCmd` already wraps for one
+directory, just looped depth-first over a stack instead) and flattens what
+it finds into `preflightFile`s — plain `domain.Transfer`-shaped facts, one
+per file, with nested source/destination paths built by chaining
+`fs.Child` (pure path math, safe to call repeatedly). `transfer.Engine`
+never sees a folder; by the time anything is queued, there is only ever a
+flat list of individual file transfers, exactly like queuing files
+directly always worked.
+
+A plain-files-only selection is untouched — instant queue, no overlay,
+same as before folders were supported at all. The moment the selection
+contains any folder, though, the *whole* batch (including any plain files
+alongside it) waits on one scan and one `overlayPreflight` confirm, rather
+than queuing the files immediately and the folder's contents later: one
+predictable path beats a partial one. `EntrySymlink` is queued as a leaf
+during the walk, matching `entry.IsDir()`'s existing meaning elsewhere —
+never followed, so a symlink cannot turn the walk into a cycle. A hard cap
+(`preflightScanCap`, 5000 files) stops an enormous or pathological tree
+from hanging the UI or ballooning memory; `preflightScan.truncated` marks
+the result as a lower bound when it fires. If the scan finds nothing to
+queue — every selected folder was empty and the selection had no plain
+files — there's nothing to confirm, so it skips the overlay and reports
+directly instead.
 
 ### Config persistence
 
@@ -835,18 +865,28 @@ contrast-aware shadow whatthedock gets from `Render` directly.
      `--identity`/`--known-hosts`/`--ftps-ca`/`--ftps-insecure` configure at
      startup can also be set per attempt from the form
 
-5. Improve transfer queue behavior.
-   - Configurable parallelism — the cap is now `Model.maxParallel`
-     (default `defaultParallelTransfers` = 2); it still needs a config
-     source and a UI to change it
-   - Completed-transfer aging into History
-   - Retry failed transfers
-   - ~~Cancel active transfers.~~ Done — `x` cancels everything in flight
-     through `transfer.Engine.Cancel`. Per-row cancel still needs a cursor
-     in the transfers pane (it scrolls but has no selected row), and
-     `domain` has no Canceled status yet, so canceled transfers land in the
-     Failed tab
-   - Recursive folder preflight summary
+5. ~~Improve transfer queue behavior.~~ Done — all five items below.
+   - ~~Configurable parallelism.~~ Done — `+`/`-` adjust `Model.maxParallel`
+     at runtime (clamped to `[1, maxParallelCap]`), persisted, shown as
+     `(Nx)` in the Queue tab label
+   - ~~Completed-transfer aging into History.~~ Done — `bottomTabFilter`
+     excludes `Done` from the Queue tab, so a transfer that finishes simply
+     stops appearing there on its next render; `tabHistory` is its
+     permanent home from then on. No timer involved
+   - ~~Retry failed transfers.~~ Done — `R`, with the queue pane focused on
+     a `Failed`/`Canceled` row, queues a brand-new `Transfer` with the same
+     source/destination rather than mutating the original, which stays put
+     as a record of what happened
+   - ~~Cancel active transfers.~~ Done, and now per-row too — `x` cancels
+     (or, for a `Queued` row that never reached the engine, just drops)
+     only the row under `Model.bottomCursor` when the queue pane is focused
+     on a transfer tab; everywhere else it's still "cancel everything in
+     flight" through `transfer.Engine.Cancel`. `bottomTabFilter`/
+     `bottomTabTransfers` are the one place both rendering and row
+     targeting agree on what row N in the current tab actually is
+   - ~~Recursive folder preflight summary.~~ Done — see the design note
+     below. Selecting a folder now scans it with `vfs.FS.List` and queues
+     every file it finds after a confirm overlay, rather than refusing it
 
 6. Add protocol adapters.
    - ~~SFTP.~~ Done — `internal/sftpsession`. Parallel transfers share one
@@ -881,8 +921,10 @@ contrast-aware shadow whatthedock gets from `Render` directly.
   known_hosts fails the connection closed, which is deliberate
 - Transfers overwrite the destination. Resume and the rest of the conflict
   policy are not wired to the UI, so nothing can ask for anything else
-- Folders are skipped when queuing, with a message, since recursive
-  transfers do not exist and a real adapter cannot read a directory as a file
+- Folders now queue recursively — a preflight scan flattens them into
+  individual file transfers before confirming (see **Recursive folders**);
+  no adapter changes needed, since `transfer.Engine` still only ever sees
+  files
 - Cancelling a transfer closes its file handles to interrupt a parked read.
   A listing parked on a dead connection is only abandoned, not interrupted:
   pkg/sftp has no context-aware API, so the request occupies the connection

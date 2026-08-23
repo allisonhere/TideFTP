@@ -507,6 +507,26 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 	case overlayTheme:
 		overlay := m.themePicker.SoftModal(renderer, 42, m.height, "tideftp")
 		return &overlay
+	case overlayPreflight:
+		if m.preflight == nil {
+			return nil
+		}
+		scan := m.preflight
+		dir := "upload"
+		if scan.direction == domain.Download {
+			dir = "download"
+		}
+		summary := fmt.Sprintf("%s %d file(s) across %d folder(s), %s total", dir, len(scan.files), scan.folders, formatSize(scan.totalBytes))
+		if scan.truncated {
+			summary += " (stopped early — more than that were found)"
+		}
+		rows := []string{
+			renderer.Styles.DetailBody.Width(64).Render(summary),
+			"",
+			renderer.RenderSoftHints(64, tideui.SoftHint{Key: "enter", Label: "queue"}, tideui.SoftHint{Key: "esc", Label: "cancel"}),
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "queue folder", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
 	default:
 		return nil
 	}

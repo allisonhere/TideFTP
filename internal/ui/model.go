@@ -44,6 +44,7 @@ const (
 	overlayConnect
 	overlayConflict
 	overlayTheme
+	overlayPreflight
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -209,7 +210,11 @@ type Model struct {
 	// no meaning on tabLog, which is plain scrolling text with no rows to
 	// select.
 	bottomCursor int
-	logs         []string
+	// preflight holds the result of walking a folder queued for transfer,
+	// while overlayPreflight is asking the user to confirm it. Nil the rest
+	// of the time.
+	preflight *preflightScan
+	logs      []string
 
 	theme       tideui.Theme
 	themePicker tideui.ThemePicker
@@ -455,6 +460,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setError(fmt.Sprintf("password not saved: %v", msg.err))
 		}
 		return m, nil
+	case preflightScanMsg:
+		wasAtBottom := m.isAtBottomPane()
+		m.applyPreflightScan(msg)
+		m.settleBottomOffset(wasAtBottom)
+		return m, nil
 	case transfer.Event:
 		// Applying an event can finish a transfer, which frees a slot for the
 		// next queued one, which is why startQueuedTransfers runs here too.
@@ -524,13 +534,19 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
+			if m.overlay == overlayPreflight {
+				m.preflight = nil
+			}
 			m.overlay = overlayNone
 			m.setStatus("cancelled")
 		case "enter", "y":
 			switch m.overlay {
 			case overlayConflict:
 				m.overlay = overlayNone
-				m.queueFocusedTransfer()
+				return m, m.queueFocusedTransfer()
+			case overlayPreflight:
+				m.overlay = overlayNone
+				return m, m.confirmPreflightQueue()
 			case overlayHelp:
 				m.overlay = overlayNone
 			}
@@ -581,9 +597,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		}
 		cmd = m.persist()
 	case "u":
-		m.queueUpload()
+		cmd = m.queueUpload()
 	case "d":
-		m.queueDownload()
+		cmd = m.queueDownload()
 	case "o":
 		m.overlay = overlayConflict
 	case "x":
@@ -997,64 +1013,76 @@ func (m *Model) toggleHidden() tea.Cmd {
 	return m.requestListing(pane, target.path, listingRefresh)
 }
 
-func (m *Model) queueUpload() {
+func (m *Model) queueUpload() tea.Cmd {
 	if !m.connected() {
 		m.setError("not connected")
-		return
+		return nil
 	}
 	if len(m.local.actionEntries()) == 0 {
 		m.setError("nothing selected or highlighted locally")
-		return
+		return nil
 	}
-	m.queueTransfer(domain.Upload)
+	return m.queueTransfer(domain.Upload)
 }
 
-func (m *Model) queueDownload() {
+func (m *Model) queueDownload() tea.Cmd {
 	if !m.connected() {
 		m.setError("not connected")
-		return
+		return nil
 	}
 	if len(m.remote.actionEntries()) == 0 {
 		m.setError("nothing selected or highlighted remotely")
-		return
+		return nil
 	}
-	m.queueTransfer(domain.Download)
+	return m.queueTransfer(domain.Download)
 }
 
-func (m *Model) queueFocusedTransfer() {
+func (m *Model) queueFocusedTransfer() tea.Cmd {
 	if m.focus == focusRemote {
-		m.queueTransfer(domain.Download)
-	} else {
-		m.queueTransfer(domain.Upload)
+		return m.queueTransfer(domain.Download)
 	}
+	return m.queueTransfer(domain.Upload)
 }
 
-func (m *Model) queueTransfer(direction domain.TransferDirection) {
+// queueTransfer queues the focused pane's selection. Plain files queue
+// instantly, unchanged from before. Any folder in the selection instead
+// starts a preflight scan (beginPreflightScan) covering the whole
+// selection — plain files included — so there is one predictable path
+// rather than some files queuing immediately while the rest wait on a
+// scan.
+func (m *Model) queueTransfer(direction domain.TransferDirection) tea.Cmd {
 	var entries []domain.Entry
 	var srcBase, dstBase string
 	var srcFS, dstFS vfs.FS
+	var showHidden bool
 	if direction == domain.Download {
 		entries = m.remote.actionEntries()
 		srcBase, srcFS = m.remote.path, m.remoteFS
 		dstBase, dstFS = m.local.path, m.localFS
+		showHidden = m.remote.showHidden
 	} else {
 		entries = m.local.actionEntries()
 		srcBase, srcFS = m.local.path, m.localFS
 		dstBase, dstFS = m.remote.path, m.remoteFS
+		showHidden = m.local.showHidden
 	}
 	if len(entries) == 0 {
-		return
+		return nil
 	}
-	// Recursive transfers do not exist yet, and a real adapter cannot read a
-	// directory as a file. Refusing here says so plainly instead of letting
-	// each one fail later with an unhelpful read error.
-	skipped := 0
-	queued := 0
+
+	hasFolder := false
 	for _, entry := range entries {
 		if entry.IsDir() {
-			skipped++
-			continue
+			hasFolder = true
+			break
 		}
+	}
+	if hasFolder {
+		return m.beginPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden)
+	}
+
+	queued := 0
+	for _, entry := range entries {
 		m.transfers = append(m.transfers, domain.Transfer{
 			ID:          m.nextTransferID,
 			Direction:   direction,
@@ -1067,17 +1095,154 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) {
 		m.nextTransferID++
 		queued++
 	}
-	if queued == 0 {
-		m.setError(fmt.Sprintf("skipped %d folder(s): recursive transfers are not supported yet", skipped))
-		return
-	}
-	if skipped > 0 {
-		m.setStatus(fmt.Sprintf("queued %d transfer(s), skipped %d folder(s)", queued, skipped))
-		m.startQueuedTransfers()
-		return
-	}
 	m.setStatus(fmt.Sprintf("queued %d transfer(s)", queued))
 	m.startQueuedTransfers()
+	return nil
+}
+
+// preflightScanCap bounds how many files one preflight scan will discover
+// before giving up and reporting a lower bound instead (scan.truncated),
+// so a pathological or enormous tree cannot make queuing a folder hang the
+// UI or balloon memory.
+const preflightScanCap = 5000
+
+// preflightScanTimeout bounds the whole walk, across every directory it
+// has to List, not just one call the way listTimeout bounds a single
+// listing.
+const preflightScanTimeout = 60 * time.Second
+
+// preflightFile is one file discovered while walking a folder queued for
+// transfer — everything queueTransfer needs to turn it into a
+// domain.Transfer once the scan is confirmed.
+type preflightFile struct {
+	src, dst string
+	size     int64
+}
+
+// preflightScan is the result of walking every folder in a queueTransfer
+// selection, held in Model.preflight and shown as overlayPreflight before
+// any of it is actually queued.
+type preflightScan struct {
+	direction  domain.TransferDirection
+	files      []preflightFile
+	folders    int
+	totalBytes int64
+	truncated  bool // hit preflightScanCap; files/totalBytes are a lower bound
+}
+
+// preflightScanMsg reports beginPreflightScan's result.
+type preflightScanMsg struct {
+	scan preflightScan
+	err  error
+}
+
+// beginPreflightScan walks every directory in entries with srcFS.List
+// (plain files need no walk — their size is already known from the
+// listing) and delivers the result as preflightScanMsg. It is the only
+// path a folder is ever queued through: transfer.Engine has no
+// folder-copy primitive, so every file it ever moves for a folder queue
+// action is flattened into an ordinary domain.Transfer here first, in the
+// UI, which is where the queue has always lived (see Design Notes).
+// EntrySymlink is queued as a leaf, matching entry.IsDir()'s existing
+// semantics elsewhere — never followed, so a symlink cannot turn the walk
+// into a cycle.
+func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
+	m.setStatus("scanning…")
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), preflightScanTimeout)
+		defer cancel()
+
+		scan := preflightScan{direction: direction}
+		type walkItem struct{ srcPath, dstPath string }
+		var stack []walkItem
+		for _, entry := range entries {
+			srcPath, dstPath := srcFS.Child(srcBase, entry.Name), dstFS.Child(dstBase, entry.Name)
+			if entry.IsDir() {
+				scan.folders++
+				stack = append(stack, walkItem{srcPath, dstPath})
+				continue
+			}
+			scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, size: entry.Size})
+			scan.totalBytes += entry.Size
+		}
+
+		for len(stack) > 0 {
+			if len(scan.files) >= preflightScanCap {
+				scan.truncated = true
+				break
+			}
+			item := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			children, err := srcFS.List(ctx, item.srcPath, showHidden)
+			if err != nil {
+				return preflightScanMsg{err: fmt.Errorf("scan %s: %w", item.srcPath, err)}
+			}
+			for _, child := range children {
+				childSrc, childDst := srcFS.Child(item.srcPath, child.Name), dstFS.Child(item.dstPath, child.Name)
+				if child.IsDir() {
+					scan.folders++
+					stack = append(stack, walkItem{childSrc, childDst})
+					continue
+				}
+				if len(scan.files) >= preflightScanCap {
+					scan.truncated = true
+					break
+				}
+				scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, size: child.Size})
+				scan.totalBytes += child.Size
+			}
+		}
+		if len(stack) > 0 {
+			scan.truncated = true
+		}
+		return preflightScanMsg{scan: scan}
+	}
+}
+
+// applyPreflightScan folds a completed scan into the model: an error is
+// reported directly, an empty result (every selected folder was empty, and
+// the selection had no plain files) needs no confirmation and is reported
+// directly too, and anything else opens overlayPreflight so the user
+// confirms before it is actually queued.
+func (m *Model) applyPreflightScan(msg preflightScanMsg) {
+	if msg.err != nil {
+		m.setError(fmt.Sprintf("scan: %v", msg.err))
+		return
+	}
+	if len(msg.scan.files) == 0 {
+		m.setStatus(fmt.Sprintf("%d empty folder(s), nothing to queue", msg.scan.folders))
+		return
+	}
+	scan := msg.scan
+	m.preflight = &scan
+	m.overlay = overlayPreflight
+}
+
+// confirmPreflightQueue queues every file the last preflight scan found and
+// clears it. Only reachable from the overlayPreflight confirm key, so
+// m.preflight is never nil in practice, but the check keeps it safe
+// regardless.
+func (m *Model) confirmPreflightQueue() tea.Cmd {
+	if m.preflight == nil {
+		return nil
+	}
+	scan := m.preflight
+	m.preflight = nil
+	for _, file := range scan.files {
+		m.transfers = append(m.transfers, domain.Transfer{
+			ID:          m.nextTransferID,
+			Direction:   scan.direction,
+			Source:      file.src,
+			Destination: file.dst,
+			BytesTotal:  file.size,
+			Status:      domain.Queued,
+			Message:     "queued",
+		})
+		m.nextTransferID++
+	}
+	m.setStatus(fmt.Sprintf("queued %d transfer(s) from %d folder(s)", len(scan.files), scan.folders))
+	m.startQueuedTransfers()
+	return nil
 }
 
 // adjustMaxParallel changes how many transfers run at once, clamped to

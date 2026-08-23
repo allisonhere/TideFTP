@@ -1768,44 +1768,124 @@ func TestStaleDisconnectDoesNotTearDownTheLiveConnection(t *testing.T) {
 	}
 }
 
-func TestQueuingSkipsDirectories(t *testing.T) {
+// TestQueuingOnlyFilesStillQueuesInstantly pins the common case: a
+// selection with no folders in it queues immediately, exactly as before
+// recursive folders existed -- no scan, no overlay.
+func TestQueuingOnlyFilesStillQueuesInstantly(t *testing.T) {
 	engine := newScriptedEngine()
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: engine})
 	model.focus = focusLocal
 	model.local.path = "/tmp"
-	model.local.entries = []domain.Entry{
-		{Name: "folder", Kind: domain.EntryDir},
-		{Name: "file.txt", Kind: domain.EntryFile, Size: 1234},
-	}
-	model.local.selected = map[string]bool{"folder": true, "file.txt": true}
+	model.local.entries = []domain.Entry{{Name: "file.txt", Kind: domain.EntryFile, Size: 1234}}
+	model.local.selected = map[string]bool{"file.txt": true}
 
 	model = press(t, model, runes("u"))
 
-	if len(model.transfers) != 1 {
-		t.Fatalf("queued %d transfers, want only the file", len(model.transfers))
+	if model.overlay != overlayNone {
+		t.Fatalf("a file-only selection should not open the preflight overlay")
 	}
-	if model.transfers[0].BytesTotal != 1234 {
-		t.Fatalf("BytesTotal = %d, want the file's real size", model.transfers[0].BytesTotal)
-	}
-	if !strings.Contains(model.status, "skipped 1 folder") {
-		t.Fatalf("status = %q, want it to mention the skipped folder", model.status)
+	if len(model.transfers) != 1 || model.transfers[0].BytesTotal != 1234 {
+		t.Fatalf("transfers = %+v, want just the file queued with its real size", model.transfers)
 	}
 }
 
-func TestQueuingOnlyDirectoriesReportsAnError(t *testing.T) {
-	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
-	model.focus = focusLocal
-	model.local.entries = []domain.Entry{{Name: "folder", Kind: domain.EntryDir}}
-	model.local.cursor = 0
-	model.local.selected = map[string]bool{}
+// TestQueuingAFolderOpensAPreflightSummaryAndConfirmingQueuesEveryFile
+// exercises the recursive path end to end against fakefs's nested tree:
+// /public_html (48212+18420+87 bytes across 3 files) plus its two
+// subfolders assets (3 files) and uploads (2 files) -- 8 files, 3 folders.
+func TestQueuingAFolderOpensAPreflightSummaryAndConfirmingQueuesEveryFile(t *testing.T) {
+	engine := newScriptedEngine()
+	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
+	model.focus = focusRemote
+	model.local.path = "/dest"
+	model = settle(t, model, model.navigateTo(paneRemote, "/"))
+	model.remote.selected = map[string]bool{"public_html": true}
 
-	model = press(t, model, runes("u"))
-
-	if len(model.transfers) != 0 {
-		t.Fatalf("queued %d transfers for a folder, want none", len(model.transfers))
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("queuing a folder did not start a scan")
 	}
-	if !model.statusErr || !strings.Contains(model.status, "recursive transfers are not supported") {
-		t.Fatalf("status = %q (err=%v), want a clear explanation", model.status, model.statusErr)
+	model = settle(t, model, cmd)
+
+	if model.overlay != overlayPreflight || model.preflight == nil {
+		t.Fatalf("expected the preflight overlay to open after the scan settled: overlay=%v preflight=%v", model.overlay, model.preflight)
+	}
+	if len(model.preflight.files) != 8 {
+		t.Fatalf("scanned %d files, want 8", len(model.preflight.files))
+	}
+	if model.preflight.folders != 3 {
+		t.Fatalf("scanned %d folders, want 3 (public_html, assets, uploads)", model.preflight.folders)
+	}
+	if len(model.transfers) != 0 {
+		t.Fatalf("nothing should be queued before confirming: %d transfers", len(model.transfers))
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayNone || model.preflight != nil {
+		t.Fatalf("confirming should close the overlay and clear the scan: overlay=%v preflight=%v", model.overlay, model.preflight)
+	}
+	if len(model.transfers) != 8 {
+		t.Fatalf("queued %d transfers, want 8", len(model.transfers))
+	}
+	var found bool
+	for _, tr := range model.transfers {
+		if tr.Source != "/public_html/assets/logo.png" {
+			continue
+		}
+		found = true
+		if tr.Destination != "/dest/public_html/assets/logo.png" {
+			t.Fatalf("destination = %q, want the same nested path under /dest", tr.Destination)
+		}
+		if tr.BytesTotal != 348801 {
+			t.Fatalf("BytesTotal = %d, want 348801", tr.BytesTotal)
+		}
+	}
+	if !found {
+		t.Fatalf("expected the nested file logo.png among the queued transfers: %+v", model.transfers)
+	}
+}
+
+func TestCancelingAPreflightQueuesNothing(t *testing.T) {
+	engine := newScriptedEngine()
+	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/"))
+	model.remote.selected = map[string]bool{"public_html": true}
+
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	model = updated.(Model)
+	model = settle(t, model, cmd)
+	if model.overlay != overlayPreflight {
+		t.Fatalf("expected the preflight overlay to be open")
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if model.overlay != overlayNone || model.preflight != nil {
+		t.Fatalf("canceling should close the overlay and clear the scan: overlay=%v preflight=%v", model.overlay, model.preflight)
+	}
+	if len(model.transfers) != 0 {
+		t.Fatalf("canceling the preflight queued %d transfers, want none", len(model.transfers))
+	}
+}
+
+// TestQueuingAnEmptyFolderNeedsNoConfirmation covers a scan result with no
+// files (every selected folder was empty): no overlay, just a direct
+// status. fakefs's fixture has no empty directory to select through the
+// real key-press path, so this drives applyPreflightScan directly with the
+// result such a scan would produce.
+func TestQueuingAnEmptyFolderNeedsNoConfirmation(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+
+	model.applyPreflightScan(preflightScanMsg{scan: preflightScan{direction: domain.Download, folders: 1}})
+
+	if model.overlay != overlayNone || model.preflight != nil {
+		t.Fatalf("an empty scan result should not open the preflight overlay: overlay=%v preflight=%v", model.overlay, model.preflight)
+	}
+	if !strings.Contains(model.status, "empty folder") {
+		t.Fatalf("status = %q, want it to mention the empty folder(s)", model.status)
 	}
 }
 
