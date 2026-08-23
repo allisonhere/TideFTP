@@ -528,6 +528,22 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "queue folder", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
 		return &overlay
+	case overlayHostKey:
+		if m.hostKeyPrompt == nil {
+			return nil
+		}
+		prompt := m.hostKeyPrompt
+		rows := []string{
+			renderer.Styles.DetailBody.Width(64).Render("Unknown host key for " + prompt.target.Address()),
+			renderer.Styles.DetailMeta.Width(64).Render(prompt.err.Algorithm + " " + prompt.err.Fingerprint),
+			"",
+			renderer.RenderSoftHints(64,
+				tideui.SoftHint{Key: "y", Label: "trust once"},
+				tideui.SoftHint{Key: "r", Label: "trust & remember"},
+				tideui.SoftHint{Key: "n", Label: "cancel"}),
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "unknown host key", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
 	case overlaySettings:
 		width := min(60, max(36, m.width-8))
 		contentWidth := width - 4

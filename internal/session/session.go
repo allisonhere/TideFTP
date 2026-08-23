@@ -104,6 +104,37 @@ type Credentials struct {
 	// it, so this cannot silently make a Dialer already configured insecure
 	// look verified.
 	FTPSInsecure bool
+
+	// TrustedHostKey is SFTP-specific: the exact marshaled bytes of a host
+	// key the user has just agreed to trust, after Dial returned an
+	// UntrustedHostKeyError naming it. Only a key matching these bytes
+	// exactly is accepted — this can never widen trust beyond the one key
+	// that was actually shown and approved, and never overrides a real
+	// mismatch against an already-known host. Empty means nothing has been
+	// pre-approved for this attempt.
+	TrustedHostKey []byte
+	// RememberHostKey persists TrustedHostKey to the known_hosts file once
+	// the connection succeeds, so future attempts see it as an ordinary
+	// known host instead of asking again. Ignored when TrustedHostKey is
+	// empty.
+	RememberHostKey bool
+}
+
+// UntrustedHostKeyError is returned by Dial when a server's identity is not
+// yet trusted but could be, once the user confirms it — an unknown SSH host
+// key. It never fires for a host whose key does not match what's already
+// pinned (that's a straight failure, always). SFTP is the only Dialer that
+// raises this today; it lives here, not in internal/sftpsession, because the
+// UI branches on it and must never import a protocol-specific adapter.
+type UntrustedHostKeyError struct {
+	Address     string // host:port that was dialed
+	Algorithm   string // e.g. "ssh-ed25519"
+	Fingerprint string // e.g. "SHA256:...", ready to show the user
+	Key         []byte // ssh.PublicKey.Marshal() of the offered key, opaque here
+}
+
+func (e *UntrustedHostKeyError) Error() string {
+	return fmt.Sprintf("unknown host key for %s: %s %s", e.Address, e.Algorithm, e.Fingerprint)
 }
 
 // Conn is a live connection. Its FS and Engine are valid only until the

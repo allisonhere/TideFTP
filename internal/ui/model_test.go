@@ -1061,6 +1061,119 @@ func TestConnectFailureLeavesTheAppUsable(t *testing.T) {
 	}
 }
 
+func TestConnectFailureWithAnUnknownHostKeyOpensThePrompt(t *testing.T) {
+	hostKeyErr := &session.UntrustedHostKeyError{
+		Address:     "test.local:22",
+		Algorithm:   "ssh-ed25519",
+		Fingerprint: "SHA256:deadbeef",
+		Key:         []byte("fake-key-bytes"),
+	}
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: hostKeyErr}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model.width, model.height = 120, 36
+
+	model = settle(t, model, model.Init())
+
+	if model.state != connFailed {
+		t.Fatalf("state = %v after a failed dial, want failed", model.state)
+	}
+	if model.overlay != overlayHostKey {
+		t.Fatalf("overlay = %v, want overlayHostKey for an unknown host key", model.overlay)
+	}
+	if model.hostKeyPrompt == nil || model.hostKeyPrompt.err != hostKeyErr {
+		t.Fatalf("hostKeyPrompt = %+v, want it to carry the UntrustedHostKeyError", model.hostKeyPrompt)
+	}
+	if model.hostKeyPrompt.target != testTarget {
+		t.Fatalf("hostKeyPrompt.target = %v, want %v", model.hostKeyPrompt.target, testTarget)
+	}
+	if model.statusErr {
+		t.Fatalf("an unknown host key should offer a prompt, not the generic error path")
+	}
+}
+
+// hostKeyRetryDialer fails the first Dial with err — an unknown host key,
+// say — and succeeds on every call after that, modeling the real
+// accept-once flow where a retry with a trusted key actually connects
+// rather than hitting the exact same failure again.
+type hostKeyRetryDialer struct {
+	fs     vfs.FS
+	engine transfer.Engine
+	err    error
+	calls  int
+	creds  []session.Credentials
+}
+
+func (d *hostKeyRetryDialer) Dial(_ context.Context, _ session.Target, creds session.Credentials) (session.Conn, error) {
+	d.calls++
+	d.creds = append(d.creds, creds)
+	if d.calls == 1 {
+		return nil, d.err
+	}
+	return &stubConn{fs: d.fs, engine: d.engine, done: make(chan error, 1)}, nil
+}
+
+func TestHostKeyPromptAcceptOnceRedialsWithTheTrustedKey(t *testing.T) {
+	hostKeyErr := &session.UntrustedHostKeyError{Address: "test.local:22", Key: []byte("fake-key-bytes")}
+	dialer := &hostKeyRetryDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: hostKeyErr}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model.width, model.height = 120, 36
+	model = settle(t, model, model.Init())
+
+	model = press(t, model, runes("y"))
+
+	if model.overlay != overlayNone || model.hostKeyPrompt != nil {
+		t.Fatalf("overlay/hostKeyPrompt did not clear on accept: overlay=%v prompt=%+v", model.overlay, model.hostKeyPrompt)
+	}
+	if !model.connected() {
+		t.Fatalf("state = %v after accepting a host key the retry dial then honoured, want connected", model.state)
+	}
+	if len(dialer.creds) != 2 {
+		t.Fatalf("dial calls = %d, want 2 (the original failure plus the retry)", len(dialer.creds))
+	}
+	retry := dialer.creds[1]
+	if string(retry.TrustedHostKey) != "fake-key-bytes" || retry.RememberHostKey {
+		t.Fatalf("retry creds = %+v, want TrustedHostKey set and RememberHostKey false", retry)
+	}
+}
+
+func TestHostKeyPromptRememberRedialsWithRememberSet(t *testing.T) {
+	hostKeyErr := &session.UntrustedHostKeyError{Address: "test.local:22", Key: []byte("fake-key-bytes")}
+	dialer := &hostKeyRetryDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: hostKeyErr}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model.width, model.height = 120, 36
+	model = settle(t, model, model.Init())
+
+	model = press(t, model, runes("r"))
+
+	if len(dialer.creds) != 2 {
+		t.Fatalf("dial calls = %d, want 2 (the original failure plus the retry)", len(dialer.creds))
+	}
+	retry := dialer.creds[1]
+	if string(retry.TrustedHostKey) != "fake-key-bytes" || !retry.RememberHostKey {
+		t.Fatalf("retry creds = %+v, want TrustedHostKey set and RememberHostKey true", retry)
+	}
+}
+
+func TestHostKeyPromptCancelDropsItWithoutRedialing(t *testing.T) {
+	hostKeyErr := &session.UntrustedHostKeyError{Address: "test.local:22", Key: []byte("fake-key-bytes")}
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: hostKeyErr}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model.width, model.height = 120, 36
+	model = settle(t, model, model.Init())
+
+	model = press(t, model, runes("n"))
+
+	if model.overlay != overlayNone || model.hostKeyPrompt != nil {
+		t.Fatalf("overlay/hostKeyPrompt did not clear on cancel: overlay=%v prompt=%+v", model.overlay, model.hostKeyPrompt)
+	}
+	if len(dialer.creds) != 1 {
+		t.Fatalf("dial calls = %d, want 1 (no redial on cancel)", len(dialer.creds))
+	}
+	if model.state != connFailed {
+		t.Fatalf("state = %v after cancelling the prompt, want it to stay failed", model.state)
+	}
+}
+
 func TestTransfersRefuseToStartWhileDisconnected(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = settle(t, model, model.disconnect())

@@ -58,7 +58,7 @@ func TestDialWithAKeyFile(t *testing.T) {
 	}
 }
 
-func TestDialRejectsAnUnknownHostKey(t *testing.T) {
+func TestDialRejectsAMismatchedHostKey(t *testing.T) {
 	server := startTestServer(t)
 	dialer := New(Config{
 		KnownHostsPath: server.wrongKnownHostsFile(t),
@@ -72,6 +72,134 @@ func TestDialRejectsAnUnknownHostKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "knownhosts") && !strings.Contains(err.Error(), "host key") {
 		t.Fatalf("error = %v, want it to name the host key mismatch", err)
+	}
+	var hostKeyErr *session.UntrustedHostKeyError
+	if errors.As(err, &hostKeyErr) {
+		t.Fatalf("a real mismatch must never surface as UntrustedHostKeyError — that type means 'ask the user', not 'this is wrong'")
+	}
+}
+
+func TestDialTrustedHostKeyNeverOverridesAKnownMismatch(t *testing.T) {
+	server := startTestServer(t)
+	dialer := New(Config{
+		KnownHostsPath: server.wrongKnownHostsFile(t),
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+
+	// TrustedHostKey names the server's real key — the one an honest dial
+	// would actually receive — not the wrong one known_hosts already pins.
+	// If accept-once could override a mismatch, this would be a downgrade
+	// attack; it must still fail exactly as TestDialRejectsAMismatchedHostKey
+	// does.
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{
+		TrustedHostKey: server.hostKey.Marshal(),
+	})
+	if err == nil {
+		t.Fatalf("a TrustedHostKey override must never accept a host whose known_hosts entry says it changed")
+	}
+}
+
+func TestDialReturnsUntrustedHostKeyErrorForAnUnknownHost(t *testing.T) {
+	server := startTestServer(t)
+	dialer := New(Config{
+		KnownHostsPath: server.emptyKnownHostsFile(t),
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	var hostKeyErr *session.UntrustedHostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("Dial against a host with no known_hosts entry = %v, want an UntrustedHostKeyError", err)
+	}
+	if hostKeyErr.Algorithm == "" || hostKeyErr.Fingerprint == "" || hostKeyErr.Address == "" {
+		t.Fatalf("UntrustedHostKeyError = %+v, want Algorithm/Fingerprint/Address all populated", hostKeyErr)
+	}
+	if !bytes.Equal(hostKeyErr.Key, server.hostKey.Marshal()) {
+		t.Fatalf("UntrustedHostKeyError.Key does not match the server's actual host key")
+	}
+}
+
+func TestDialAcceptsATrustedHostKeyForOneAttemptOnly(t *testing.T) {
+	server := startTestServer(t)
+	path := server.emptyKnownHostsFile(t)
+	dialer := New(Config{
+		KnownHostsPath: path,
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	var hostKeyErr *session.UntrustedHostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("first dial = %v, want an UntrustedHostKeyError to set up the accept-once retry", err)
+	}
+
+	conn, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{
+		TrustedHostKey: hostKeyErr.Key,
+	})
+	if err != nil {
+		t.Fatalf("dial with a matching TrustedHostKey: %v", err)
+	}
+	conn.Close()
+
+	// Nothing was remembered, so a plain retry against the same file must be
+	// asked again rather than silently trusting the host from now on.
+	_, err = dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("a follow-up dial without TrustedHostKey = %v, want it to be asked again (accept-once must not persist)", err)
+	}
+}
+
+func TestDialRemembersATrustedHostKeyWhenRequested(t *testing.T) {
+	server := startTestServer(t)
+	path := server.emptyKnownHostsFile(t)
+	dialer := New(Config{
+		KnownHostsPath: path,
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	var hostKeyErr *session.UntrustedHostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("first dial = %v, want an UntrustedHostKeyError", err)
+	}
+
+	conn, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{
+		TrustedHostKey:  hostKeyErr.Key,
+		RememberHostKey: true,
+	})
+	if err != nil {
+		t.Fatalf("dial with TrustedHostKey and RememberHostKey: %v", err)
+	}
+	conn.Close()
+
+	// Remembered, so a plain retry against the same file must now succeed
+	// without being asked again.
+	conn, err = dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	if err != nil {
+		t.Fatalf("dial after remembering the host key: %v", err)
+	}
+	conn.Close()
+}
+
+func TestDialIgnoresATrustedHostKeyThatDoesNotMatchTheServer(t *testing.T) {
+	server := startTestServer(t)
+	_, otherPub := newSigner(t)
+	dialer := New(Config{
+		KnownHostsPath: server.emptyKnownHostsFile(t),
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{
+		TrustedHostKey: otherPub.Marshal(),
+	})
+	var hostKeyErr *session.UntrustedHostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("a TrustedHostKey that does not match what the server actually presents must still be asked about, got %v", err)
 	}
 }
 
@@ -148,17 +276,27 @@ func TestDialRejectsPasswordOnlyWithNoPassword(t *testing.T) {
 	}
 }
 
-func TestDialFailsWithoutAKnownHostsFile(t *testing.T) {
+func TestDialWithNoKnownHostsFileTreatsTheHostAsUnknown(t *testing.T) {
 	server := startTestServer(t)
+	path := filepath.Join(t.TempDir(), "nested", "known_hosts")
 	dialer := New(Config{
-		KnownHostsPath: filepath.Join(t.TempDir(), "missing"),
+		KnownHostsPath: path,
 		IdentityFiles:  []string{server.clientPK},
 	})
 
-	// A missing known_hosts must fail closed, never fall back to accepting
-	// whatever key the server offers.
-	if _, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{}); err == nil {
-		t.Fatalf("dialing with no known_hosts file succeeded")
+	// A missing known_hosts file must never fall back to silently accepting
+	// whatever key the server offers — but it also must not be a dead end on
+	// a fresh machine: it's created empty, and the host reports as unknown
+	// through the same ask/accept-once flow an existing-but-empty file would.
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	var hostKeyErr *session.UntrustedHostKeyError
+	if !errors.As(err, &hostKeyErr) {
+		t.Fatalf("dial with no known_hosts file = %v, want an UntrustedHostKeyError rather than a silent accept or a bare file error", err)
+	}
+	if info, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("expected an empty known_hosts file to be created at %s: %v", path, statErr)
+	} else if info.Size() != 0 {
+		t.Fatalf("expected the auto-created known_hosts file to start empty, got %d bytes", info.Size())
 	}
 }
 

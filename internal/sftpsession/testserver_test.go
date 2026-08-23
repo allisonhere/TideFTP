@@ -197,6 +197,18 @@ func (s *testServer) wrongKnownHostsFile(t *testing.T) string {
 	return path
 }
 
+// emptyKnownHostsFile is a known_hosts file that exists but has no entry for
+// this server's address at all — the "genuinely unknown host" case, distinct
+// from wrongKnownHostsFile's mismatch and from a missing file entirely.
+func (s *testServer) emptyKnownHostsFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write known_hosts: %v", err)
+	}
+	return path
+}
+
 func (s *testServer) writeFile(t *testing.T, name string, body []byte) string {
 	t.Helper()
 	full := filepath.Join(s.root, name)

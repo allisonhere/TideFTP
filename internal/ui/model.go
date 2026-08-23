@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -46,6 +47,7 @@ const (
 	overlayTheme
 	overlayPreflight
 	overlaySettings
+	overlayHostKey
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -108,6 +110,7 @@ type connectedMsg struct {
 // connectFailedMsg reports a connect attempt that never opened.
 type connectFailedMsg struct {
 	target session.Target
+	creds  session.Credentials
 	err    error
 }
 
@@ -215,7 +218,11 @@ type Model struct {
 	// while overlayPreflight is asking the user to confirm it. Nil the rest
 	// of the time.
 	preflight *preflightScan
-	logs      []string
+	// hostKeyPrompt holds an unknown SFTP host key while overlayHostKey asks
+	// the user whether to trust it, and what target/creds to resume
+	// connecting with if they do. Nil the rest of the time.
+	hostKeyPrompt *hostKeyPrompt
+	logs          []string
 
 	theme       tideui.Theme
 	themePicker tideui.ThemePicker
@@ -545,6 +552,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			if m.overlay == overlayPreflight {
 				m.preflight = nil
 			}
+			if m.overlay == overlayHostKey {
+				m.hostKeyPrompt = nil
+			}
 			m.overlay = overlayNone
 			m.setStatus("cancelled")
 		case "enter", "y":
@@ -557,6 +567,14 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 				return m, m.confirmPreflightQueue()
 			case overlayHelp:
 				m.overlay = overlayNone
+			case overlayHostKey:
+				m.overlay = overlayNone
+				return m, m.trustHostKey(false)
+			}
+		case "r":
+			if m.overlay == overlayHostKey {
+				m.overlay = overlayNone
+				return m, m.trustHostKey(true)
 			}
 		}
 		return m, nil
@@ -693,6 +711,31 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// hostKeyPrompt holds an unknown SFTP host key while overlayHostKey asks the
+// user whether to trust it, and what target/creds to resume connecting with
+// if they do.
+type hostKeyPrompt struct {
+	target session.Target
+	creds  session.Credentials // creds used for the attempt that hit this
+	err    *session.UntrustedHostKeyError
+}
+
+// trustHostKey resumes the connect attempt m.hostKeyPrompt is waiting on,
+// telling the Dialer to accept the exact key it already showed the user.
+// remember additionally persists it to known_hosts so future attempts never
+// ask again for this host.
+func (m *Model) trustHostKey(remember bool) tea.Cmd {
+	prompt := m.hostKeyPrompt
+	m.hostKeyPrompt = nil
+	if prompt == nil {
+		return nil
+	}
+	creds := prompt.creds
+	creds.TrustedHostKey = prompt.err.Key
+	creds.RememberHostKey = remember
+	return m.connect(prompt.target, creds)
+}
+
 // connect starts dialing target as creds, tearing down any existing
 // connection first.
 func (m *Model) connect(target session.Target, creds session.Credentials) tea.Cmd {
@@ -726,7 +769,7 @@ func dialCmd(dialer session.Dialer, target session.Target, creds session.Credent
 		defer cancel()
 		conn, err := dialer.Dial(ctx, target, creds)
 		if err != nil {
-			return connectFailedMsg{target: target, err: err}
+			return connectFailedMsg{target: target, creds: creds, err: err}
 		}
 		return connectedMsg{target: target, conn: conn}
 	}
@@ -778,6 +821,13 @@ func (m *Model) applyConnectFailed(msg connectFailedMsg) {
 	}
 	m.state = connFailed
 	m.connErr = msg.err
+	var hostKeyErr *session.UntrustedHostKeyError
+	if errors.As(msg.err, &hostKeyErr) {
+		m.hostKeyPrompt = &hostKeyPrompt{target: msg.target, creds: msg.creds, err: hostKeyErr}
+		m.overlay = overlayHostKey
+		m.setStatus("unknown host key for " + msg.target.Address())
+		return
+	}
 	m.setError(fmt.Sprintf("connect %s: %v", msg.target.Label(), msg.err))
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
+	"tideftp/internal/session"
 )
 
 // updateGolden regenerates every golden file instead of comparing against
@@ -103,6 +104,20 @@ func TestGoldenConflictOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlayConflict
 	assertGolden(t, "conflict_overlay", ansi.Strip(model.View()))
+}
+
+func TestGoldenHostKeyOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.overlay = overlayHostKey
+	model.hostKeyPrompt = &hostKeyPrompt{
+		target: testTarget,
+		err: &session.UntrustedHostKeyError{
+			Address:     testTarget.Address(),
+			Algorithm:   "ssh-ed25519",
+			Fingerprint: "SHA256:AAAAC3NzaC1lZDI1NTE5AAAAIExampleFingerprintOnly",
+		},
+	}
+	assertGolden(t, "host_key_overlay", ansi.Strip(model.View()))
 }
 
 func TestGoldenPreflightOverlay(t *testing.T) {

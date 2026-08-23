@@ -7,6 +7,7 @@ import (
 
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
+	"tideftp/internal/session"
 )
 
 // TestViewSurvivesTinyTerminals renders every overlay (and none) across a
@@ -16,7 +17,7 @@ import (
 // smoke test for sizes no realistic layout math was written against.
 func TestViewSurvivesTinyTerminals(t *testing.T) {
 	sizes := [][2]int{{0, 0}, {1, 1}, {2, 2}, {5, 3}, {10, 5}, {20, 8}, {1, 30}, {100, 1}}
-	overlays := []overlayMode{overlayNone, overlayHelp, overlayConnect, overlayConflict, overlayTheme, overlayPreflight, overlaySettings}
+	overlays := []overlayMode{overlayNone, overlayHelp, overlayConnect, overlayConflict, overlayTheme, overlayPreflight, overlaySettings, overlayHostKey}
 
 	for _, size := range sizes {
 		for _, overlay := range overlays {
@@ -28,6 +29,12 @@ func TestViewSurvivesTinyTerminals(t *testing.T) {
 			}
 			if overlay == overlayPreflight {
 				model.preflight = &preflightScan{direction: domain.Download, files: make([]preflightFile, 3), folders: 1, totalBytes: 4096}
+			}
+			if overlay == overlayHostKey {
+				model.hostKeyPrompt = &hostKeyPrompt{
+					target: testTarget,
+					err:    &session.UntrustedHostKeyError{Address: testTarget.Address(), Algorithm: "ssh-ed25519", Fingerprint: "SHA256:Example"},
+				}
 			}
 
 			func() {

@@ -58,6 +58,15 @@ Implemented:
   without leaving the overlay; `enter` on it opens the same picker `t`
   does for the full browse/search/preview experience
 - Basic UI tests for layout, theme registration, and resizing
+- SFTP host-key ask/accept-once flow: an SSH host key with no known_hosts
+  entry — including a missing known_hosts file, now auto-created empty
+  rather than a hard failure — surfaces as an `overlayHostKey` confirm
+  overlay (fingerprint plus algorithm) instead of failing the connect
+  outright. `y` trusts it for this one connection, `r` trusts and remembers
+  it (appends to known_hosts), `n`/`esc` cancels. A key that mismatches an
+  *already-known* host still always fails closed, unconditionally — this
+  flow only ever applies to a host with no entry at all (see **Host key
+  trust**)
 
 Git repository state:
 
@@ -836,6 +845,53 @@ own `overlayOnBase`/`addShadow`/`replaceAt` are gone; `View` now sets
 `renderer.OverlayModal(view, overlay.Content, m.width, m.height)`, the same
 contrast-aware shadow whatthedock gets from `Render` directly.
 
+### Host key trust
+
+`session.UntrustedHostKeyError` and `Credentials.TrustedHostKey`/
+`RememberHostKey` live in `internal/session`, not `internal/sftpsession`,
+even though SFTP is the only Dialer that produces or consumes them today.
+That's not an accident: `internal/ui` must never import a concrete adapter
+package (see the note under **Config persistence** and the design ethos
+running through this whole document), and `applyConnectFailed` has to branch
+on this error type to decide whether to open `overlayHostKey`. Putting it in
+`internal/session` — the neutral seam both sides already import — keeps that
+branch possible without breaking the rule. It's the same reasoning that
+already put `IdentityFile`/`KnownHostsPath` on `Credentials` as plain data
+rather than `ssh` types.
+
+`internal/sftpsession/sftpsession.go`'s `trustingCallback` wraps the real
+`knownhosts` callback. On a real mismatch — a host whose already-known key
+changed — it always fails closed, full stop, ignoring `TrustedHostKey`
+entirely; that's the case a downgrade attack would try to exploit, so
+nothing about the accept-once flow is allowed to touch it. Only when the
+host has *no* known_hosts entry at all does `TrustedHostKey` get a say, and
+only if its bytes match **exactly** what the server actually just presented
+— never an arbitrary blob the caller hands in. That exact-match check is
+what makes "accept once" safe to wire up: the key being trusted is
+necessarily the same one the user was just shown in the overlay, because it
+came from the `UntrustedHostKeyError` that overlay displayed.
+
+A missing known_hosts file used to be `TestDialFailsWithoutAKnownHostsFile`'s
+hard-failure case — deliberately, so "no known_hosts" could never silently
+mean "accept anything." That test still exists
+(`TestDialWithNoKnownHostsFileTreatsTheHostAsUnknown` now) and still proves
+the dial doesn't quietly succeed, but the failure it proves changed shape:
+`ensureKnownHostsFile` now creates an empty file (and its parent directory)
+on first use rather than erroring, so a completely fresh machine reaches the
+exact same "unknown host" prompt an existing-but-empty file would, instead
+of a dead end demanding the user go create one by hand first. This mirrors
+what OpenSSH itself does on a first connection.
+
+`RememberHostKey` writes are deliberately best-effort: `Dial` has already
+succeeded by the time `rememberHostKey` runs, so a write failure there (a
+permissions problem, say) does not fail the connection — it just means the
+same prompt reappears next time, which is safe, if a little repetitive.
+
+Not covered by this: the per-profile strict/ask/off *mode* from Product
+Decisions above. There's no config-level way to say "never prompt, just
+fail" or "never prompt, just accept" for a given profile or globally —
+every unknown host reaches `overlayHostKey` today, with no override.
+
 ## Suggested Next Steps
 
 1. ~~Initialize or fix Git repository state.~~ Done — real repo on `main`,
@@ -956,9 +1012,15 @@ contrast-aware shadow whatthedock gets from `Render` directly.
 - Passwords come from the connect form's Password field or the environment
   (`TIDEFTP_FTP_PASSWORD`, `TIDEFTP_SFTP_PASSWORD`), never a flag. A
   passphrase-protected SSH key is reported rather than prompted for
-- Host keys are verified strictly against known_hosts, with no ask or
-  accept-once flow: both need a prompt that does not exist yet. A missing
-  known_hosts fails the connection closed, which is deliberate
+- Host keys now have an ask/accept-once flow (see **Host key trust**) for the
+  one case that matters most — a host with no known_hosts entry at all,
+  including a missing known_hosts file. A real mismatch against an
+  already-known host still always fails closed with no prompt, which is
+  deliberate. What's still missing is the broader per-profile
+  strict/ask/off *mode* from Product Decisions above: there is no way to
+  force pure-strict (never prompt, fail on anything unknown) or
+  pure-accept-anything (no known_hosts check at all) globally or per
+  profile — every unknown host always prompts today
 - Transfers overwrite the destination. Resume and the rest of the conflict
   policy are not wired to the UI, so nothing can ask for anything else
 - Folders now queue recursively — a preflight scan flattens them into

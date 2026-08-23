@@ -8,13 +8,21 @@
 // would put it in the process table for every other user on the machine to
 // read.
 //
-// Host keys are checked strictly against a known_hosts file. There is no
-// option here to skip that check: "accept anything for now" is the kind of
-// placeholder that survives to release, and the ask/accept-once flow belongs
-// with the connect form that can actually ask.
+// Host keys are checked against a known_hosts file. A key that does not
+// match an already-known host always fails closed, unconditionally — that
+// case is never negotiable. A key for a host known_hosts has no entry for at
+// all is different: Dial reports it as a *session.UntrustedHostKeyError
+// rather than failing outright, and a caller that shows it to the user and
+// gets a yes can retry with Credentials.TrustedHostKey set to accept exactly
+// that key, optionally remembering it via Credentials.RememberHostKey. A
+// missing known_hosts file is treated the same as an existing empty one —
+// created on demand — rather than a hard failure, so a first-ever connection
+// on a fresh machine reaches the same ask/accept-once flow instead of a dead
+// end.
 package sftpsession
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -97,10 +105,11 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	if err != nil {
 		return nil, err
 	}
-	hostKeys, err := d.hostKeyCallback(creds.KnownHostsPath)
+	hostKeys, hostKeysPath, err := d.hostKeyCallback(creds.KnownHostsPath)
 	if err != nil {
 		return nil, err
 	}
+	trustedCallback := trustingCallback(hostKeys, creds.TrustedHostKey)
 
 	timeout := d.cfg.Timeout
 	if timeout <= 0 {
@@ -126,7 +135,7 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	clientConfig := &ssh.ClientConfig{
 		User:            target.User,
 		Auth:            auth,
-		HostKeyCallback: hostKeys,
+		HostKeyCallback: trustedCallback,
 		Timeout:         timeout,
 	}
 	// Restrict negotiation to the host key types actually pinned for this
@@ -149,6 +158,13 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 		sshClient.Close()
 		return nil, fmt.Errorf("sftp %s: %w", address, err)
 	}
+
+	if creds.RememberHostKey && len(creds.TrustedHostKey) > 0 {
+		if key, err := ssh.ParsePublicKey(creds.TrustedHostKey); err == nil {
+			_ = rememberHostKey(hostKeysPath, address, key)
+		}
+	}
+
 	return newConn(sshClient, client), nil
 }
 
@@ -234,8 +250,9 @@ func agentAuth() (ssh.AuthMethod, error) {
 
 // hostKeyCallback resolves the known_hosts file to verify against: override
 // (from this Dial's Credentials) first, then the Dialer's own Config, then
-// the user's default.
-func (d *Dialer) hostKeyCallback(override string) (ssh.HostKeyCallback, error) {
+// the user's default. It also returns the resolved path, so a caller that
+// ends up trusting a new key knows where to remember it.
+func (d *Dialer) hostKeyCallback(override string) (ssh.HostKeyCallback, string, error) {
 	path := override
 	if path == "" {
 		path = d.cfg.KnownHostsPath
@@ -243,15 +260,88 @@ func (d *Dialer) hostKeyCallback(override string) (ssh.HostKeyCallback, error) {
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, fmt.Errorf("locate known_hosts: %w", err)
+			return nil, "", fmt.Errorf("locate known_hosts: %w", err)
 		}
 		path = filepath.Join(home, ".ssh", "known_hosts")
 	}
+	if err := ensureKnownHostsFile(path); err != nil {
+		return nil, "", fmt.Errorf("prepare %s: %w", path, err)
+	}
 	callback, err := knownhosts.New(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, "", fmt.Errorf("read %s: %w", path, err)
 	}
-	return callback, nil
+	return callback, path, nil
+}
+
+// ensureKnownHostsFile creates an empty known_hosts file at path if nothing
+// is there yet, so a first-ever connection on a fresh machine reports the
+// host key as unknown — reachable through the ask/accept-once flow — rather
+// than failing before any check runs. An existing file, of any content, is
+// left untouched.
+func ensureKnownHostsFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil // raced with something else creating it first
+		}
+		return err
+	}
+	return f.Close()
+}
+
+// trustingCallback wraps inner so that, when it reports an address's host
+// key as entirely unknown (a *knownhosts.KeyError with no Want entries) —
+// never for a mismatch, which always fails closed regardless of trusted — it
+// also accepts a key that exactly matches trusted: the bytes of a key the
+// user has already been shown and approved for this one address. Any other
+// unknown key still fails, as a *session.UntrustedHostKeyError for the
+// caller to act on.
+func trustingCallback(inner ssh.HostKeyCallback, trusted []byte) ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := inner(hostname, remote, key)
+		if err == nil {
+			return nil
+		}
+		var keyErr *knownhosts.KeyError
+		if !errors.As(err, &keyErr) || len(keyErr.Want) > 0 {
+			return err // a mismatch, or some other failure: always fails closed
+		}
+		if len(trusted) > 0 && bytes.Equal(key.Marshal(), trusted) {
+			return nil // pre-approved by the user for this exact key
+		}
+		return &session.UntrustedHostKeyError{
+			Address:     hostname,
+			Algorithm:   key.Type(),
+			Fingerprint: ssh.FingerprintSHA256(key),
+			Key:         key.Marshal(),
+		}
+	}
+}
+
+// rememberHostKey appends a known_hosts line for address/key to path. The
+// connection has already succeeded by the time this runs, so a write
+// failure here does not fail Dial — it only means the ask/accept-once flow
+// repeats on the next connect, which is safe.
+func rememberHostKey(path, address string, key ssh.PublicKey) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	line := knownhosts.Line([]string{knownhosts.Normalize(address)}, key)
+	_, err = f.WriteString(line + "\n")
+	return err
 }
 
 // pinnedHostKeyAlgorithms reports which host key types known_hosts holds for
