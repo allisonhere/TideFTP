@@ -182,11 +182,6 @@ func formatRate(bytesPerSecond int64) string {
 	return formatSize(max(0, bytesPerSecond)) + "/s"
 }
 
-// statsHighlight marks the single highest point in the visible window —
-// distinct from statsGradient's own brightest step, so the peak still pops
-// even when several nearby columns are already near-saturated.
-var statsHighlight = lipgloss.Color("#FFF3FA")
-
 // smoothWindow is smoothSamples' trailing-average width: enough to take
 // the jitter off a noisy 1-second reading without smearing a genuine spike
 // into invisibility.
@@ -271,10 +266,9 @@ func abs(n int) int {
 // lightly smoothed, then connected sub-pixel to sub-pixel with
 // bresenhamRun so a steep jump between readings still looks like one
 // stroke. Each terminal column is tinted along statsGradient by its own
-// value, and the column containing the single highest point in the window
-// gets statsHighlight instead. Returns exactly height ANSI-styled lines,
-// each width printable columns wide, on the Stats tab's fixed black
-// background, or nil if width or height isn't positive.
+// value. Returns exactly height ANSI-styled lines, each width printable
+// columns wide, on the Stats tab's fixed black background, or nil if
+// width or height isn't positive.
 func renderThroughputLine(samples []int64, width, height int) []string {
 	if width <= 0 || height <= 0 {
 		return nil
@@ -287,10 +281,10 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 	copy(window[subWidth-len(visible):], visible)
 	smoothed := smoothSamples(window)
 
-	peak, peakAt := int64(1), 0
-	for i, v := range smoothed {
+	peak := int64(1)
+	for _, v := range smoothed {
 		if v > peak {
-			peak, peakAt = v, i
+			peak = v
 		}
 	}
 
@@ -317,9 +311,6 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 	}
 
 	colorFor := func(cellX int) lipgloss.Color {
-		if peakAt/2 == cellX {
-			return statsHighlight
-		}
 		level := max(y[cellX*2], y[cellX*2+1])
 		frac := float64(level) / float64(subHeight-1)
 		idx := int(frac * float64(len(statsGradient)-1))

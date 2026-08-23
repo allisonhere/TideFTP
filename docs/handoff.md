@@ -1110,10 +1110,11 @@ colors. The graph is additionally tinted per terminal column along
 to hot pink, using whichever of that column's two sub-columns sits higher
 — a column near the window's peak is hotter, not just taller, so the
 color is another encoding of the data rather than decoration on top of
-it. The single column containing the window's highest point instead gets
-`statsHighlight`, a near-white pink distinct from the gradient's own
-brightest step, so the peak still pops even when several neighboring
-columns are already near-saturated. `lipgloss`'s color-profile detection
+it. An earlier pass gave the single highest point its own near-white
+highlight color distinct from the gradient, but at that lightness it just
+read as plain white rather than a tinted glow, so it's gone — the peak
+now simply reaches the gradient's own hottest step like any other high
+point. `lipgloss`'s color-profile detection
 falls back to plain text when stdout isn't a real terminal (true of every
 `go test` run), which is why `TestRenderThroughputLineProducesRealANSIColor`
 has to force a profile with `lipgloss.SetColorProfile` to actually see the
