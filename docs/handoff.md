@@ -344,6 +344,14 @@ First build slice:
   `transfer.Engine` stub so they never depend on goroutine timing
 - `internal/ui/integration_test.go`: real model plus real `faketransfer`
   engine, pumping actual events end to end
+- `internal/ui/golden_test.go` + `internal/ui/testdata/*.golden`:
+  ANSI-stripped full-frame snapshots of the main screen and every overlay,
+  over a fixed-timestamp fixture (`goldenModel`) so they never drift day to
+  day; `-update` regenerates them
+- `internal/ui/key_routing_test.go`: focus cycling, selection, and
+  modal-vs-quit key routing
+- `internal/ui/resize_test.go`: panic smoke tests across tiny/degenerate
+  terminal sizes
 - `README.md`: quick run instructions and keybindings
 
 ## Design Notes
@@ -908,11 +916,32 @@ contrast-aware shadow whatthedock gets from `Render` directly.
    - The fake adapters and their tests are the contract that proves the UI
      did not regress while real adapters land.
 
-7. Expand TUI tests.
-   - Snapshot/golden views for main screen and overlays
-   - Key routing tests for focus, selection, tabs, and modals
-   - Resize tests for small terminals
-   - Transfer queue state tests
+7. ~~Expand TUI tests.~~ Done.
+   - ~~Snapshot/golden views for main screen and overlays.~~ Done —
+     `internal/ui/golden_test.go` + `internal/ui/testdata/*.golden`, ANSI
+     stripped so files stay plain text and don't churn across themes.
+     `goldenModel` uses fixed timestamps rather than a real fakefs/localfs
+     listing, whose `Modified` times are wall-clock-relative and would
+     make every golden file drift day to day. Regenerate with
+     `go test ./internal/ui/... -run TestGolden -update` and review the
+     diff before committing
+   - ~~Key routing tests for focus, selection, tabs, and modals.~~ Done —
+     `internal/ui/key_routing_test.go`. Coverage-guided: `toggleSelection`
+     (space), `clearSelection` (esc), `queueFocusedTransfer` (the "o" demo
+     conflict prompt's confirm path), tab/shift-tab's actual cycling order
+     across all three panes, and that an open overlay's `q` closes it
+     rather than falling through to the top-level quit binding were all at
+     0% coverage before this
+   - ~~Resize tests for small terminals.~~ Done —
+     `internal/ui/resize_test.go`: every overlay rendered across a sweep
+     down to 1x1 and 0x0, and a shrink-then-grow `WindowSizeMsg` sequence,
+     both asserting only "does not panic" — `TestFirstFileRowMatchesTheRenderedLayout`
+     already pins exact layout at realistic sizes; this is for sizes no
+     layout math was ever written against
+   - ~~Transfer queue state tests.~~ Already substantially covered by
+     `internal/ui/transfer_queue_test.go` (parallelism, row cursor,
+     cancel, retry, aging) and the recursive-folder tests in
+     `internal/ui/model_test.go` from the transfer-queue-polish work
 
 ## Known Gaps
 

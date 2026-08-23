@@ -1,0 +1,30 @@
+   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50  
+╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
+│Local                       /home/allie/projects││Remote                              /public_html│
+│mode        size        modified        name    ││mode        size        modified        name    │
+│  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
+│    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
+│    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
+│                                                ││                                                │
+│           ╭─ tideftp · file exists ──────────────────────────────────────────────────╮           │
+│           │                                                                          │           │
+│           │    Overwrite                                                             │           │
+│           │    Overwrite if source newer                                             │           │
+│           │    Overwrite if different size                                           │           │
+│           │    Overwrite if different size or source newer                           │           │
+│           │    Resume                                                                │           │
+│           │    Rename                                                                │           │
+│           │  ▌ Skip                                                                  │           │
+│           │                                                                          │           │
+│           │  Scope: this file / current queue / session                              │           │
+│           │    enter simulate   esc cancel                                           │           │
+│           │                                                                          │           │
+╰───────────╰──────────────────────────────────────────────────────────────────────────╯───────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│Transfers                                                                                    queue│
+│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log                                         │
+│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main…        50% transferring│
+│↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr… 

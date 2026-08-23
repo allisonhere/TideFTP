@@ -1,0 +1,30 @@
+   TideFTP    ╭─ tideftp · help ─────────────────────────────────────────────────────╮ split 50/50  
+╭─────────────│                                                                      │─────────────╮
+│Local        │   Keyboard                                                           │ /public_html│
+│mode        s│                                                                      │     name    │
+│  ▸ drwxr-xr-│  Navigate                                                            │:30 uploads  │
+│    -rw-r--r-│    tab / shift+tab                                   switch panes    │:30 index.htm│
+│    -rw-r--r-│    up/down, k/j                                       move cursor    │             │
+│             │    pgup / pgdown                                   page up / down    │             │
+│             │    enter                                           open directory    │             │
+│             │    backspace / h                                 parent directory    │             │
+│             │                                                                      │             │
+│             │  Act                                                                 │             │
+│             │    space                                         toggle selection    │             │
+│             │    ctrl+a                                              select all    │             │
+│             │    esc                                   clear selection / cancel    │             │
+│             │    u                                                       upload    │             │
+│             │    d                                                     download    │             │
+│             │    r                                                      refresh    │             │
+│             │    x                    cancel active transfer (queue pane) / all    │             │
+│             │    R                               retry selected failed transfer    │             │
+│             │    +/-                              more/fewer parallel transfers    │             │
+╰─────────────│    o                                       conflict prompt (demo)    │─────────────╯
+╭─────────────│    .                                          toggle hidden files    │─────────────╮
+│Transfers    │                                                                      │        queue│
+│  1 Queue (2x│  View                                                                │             │
+│↑ [========= │    c                                         connect / disconnect    │ transferring│
+│↓ [          │    t                                                 theme picker    │    0% queued│
+│             │    ,                                                     settings    │             │
+╰─────────────│    i                                                 toggle icons    │─────────────╯
+   ready   tab│    shift+left/right                             resize file panes    │e  shift+arr… 
