@@ -265,3 +265,17 @@ func TestFormatRateClampsNegativeToZero(t *testing.T) {
 		t.Fatalf("formatRate(-500) = %q, want %q", got, "0 B/s")
 	}
 }
+
+func TestPercentDoneIsZeroWithNothingToMeasure(t *testing.T) {
+	snap := statsSnapshot{}
+	if got := snap.percentDone(); got != 0 {
+		t.Fatalf("percentDone with totalBytes 0 = %v, want 0", got)
+	}
+}
+
+func TestPercentDoneIsBytesTransferredOverTotalBytes(t *testing.T) {
+	snap := statsSnapshot{bytesTransferred: 25, totalBytes: 100}
+	if got := snap.percentDone(); got != 25 {
+		t.Fatalf("percentDone = %v, want 25", got)
+	}
+}

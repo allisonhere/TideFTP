@@ -1102,14 +1102,20 @@ the scale, or a flat run of small values would wrongly pin itself at full
 height just for being the tallest thing currently on screen.
 
 `renderStatsTab` packs everything but the graph into exactly two lines —
-a live snapshot on top, totals/averages/per-protocol breakdown combined
-into one line on the bottom — specifically so the graph gets as much of
-the available height as the pane has to give, rather than losing rows to
-one-line-per-fact formatting. Below `height == 2` it drops to just those
-two lines (no graph), and at `height == 1`, just the first — the same
-"keep the most useful thing longest" instinct `renderBottomPane`'s own
-`"no rows yet"` fallback already has for an empty tab, just with a lower
-floor now that there's less fixed content to protect.
+a live snapshot on top (active/queued counts, current throughput, and
+overall progress as `bytesTransferred of totalBytes (percent)`), totals/
+averages/per-protocol breakdown combined into one line on the bottom —
+specifically so the graph gets as much of the available height as the
+pane has to give, rather than losing rows to one-line-per-fact formatting.
+Below `height == 2` it drops to just those two lines (no graph), and at
+`height == 1`, just the first — the same "keep the most useful thing
+longest" instinct `renderBottomPane`'s own `"no rows yet"` fallback
+already has for an empty tab, just with a lower floor now that there's
+less fixed content to protect. `statsSnapshot.totalBytes` sums
+`BytesTotal` the same way `bytesTransferred` already summed `BytesDone` —
+across every transfer in `m.transfers` regardless of status — so
+`percentDone()` reads as overall session progress, not just "how far
+along is whatever's active right now."
 
 The whole tab paints a fixed black background with green text
 (`statsBackground`/`statsForeground`/`statsMeta` in `internal/ui/stats.go`)

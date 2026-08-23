@@ -60,10 +60,20 @@ type statsSnapshot struct {
 	activeCount, queuedCount int
 	doneCount, failedCount   int
 	bytesTransferred         int64   // sum of BytesDone across every transfer this session
+	totalBytes               int64   // sum of BytesTotal across every transfer this session — what bytesTransferred is a fraction of
 	avgSpeed                 float64 // bytes/sec, mean over completed transfers
 	avgFileSize              int64   // mean BytesTotal over completed transfers
 	currentThroughput        int64   // bytes/sec, this tick's sample
 	byProtocol               map[string]protocolStats
+}
+
+// percentDone is bytesTransferred as a percentage of totalBytes, 0 when
+// there's nothing to measure yet rather than dividing by zero.
+func (s statsSnapshot) percentDone() float64 {
+	if s.totalBytes <= 0 {
+		return 0
+	}
+	return float64(s.bytesTransferred) / float64(s.totalBytes) * 100
 }
 
 type protocolStats struct {
@@ -142,6 +152,7 @@ func (m Model) computeStats() statsSnapshot {
 	var totalFileSize int64
 	for _, t := range m.transfers {
 		snapshot.bytesTransferred += t.BytesDone
+		snapshot.totalBytes += t.BytesTotal
 		switch t.Status {
 		case domain.Queued:
 			snapshot.queuedCount++
@@ -361,10 +372,12 @@ func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []str
 	}
 
 	line1 := statsLine(width, statsForeground, fmt.Sprintf(
-		"Active %d · Queued %d · ↕ %s", m.stats.activeCount, m.stats.queuedCount, formatRate(m.stats.currentThroughput)))
+		"Active %d · Queued %d · ↕ %s · %s of %s (%.0f%%)",
+		m.stats.activeCount, m.stats.queuedCount, formatRate(m.stats.currentThroughput),
+		formatSize(m.stats.bytesTransferred), formatSize(m.stats.totalBytes), m.stats.percentDone()))
 
-	summary := fmt.Sprintf("Done %d · Failed %d · Moved %s · Avg %s (%s files)",
-		m.stats.doneCount, m.stats.failedCount, formatSize(m.stats.bytesTransferred),
+	summary := fmt.Sprintf("Done %d · Failed %d · Avg %s (%s files)",
+		m.stats.doneCount, m.stats.failedCount,
 		formatRate(int64(m.stats.avgSpeed)), formatSize(m.stats.avgFileSize))
 	for _, proto := range knownProtocols {
 		ps, ok := m.stats.byProtocol[proto]
