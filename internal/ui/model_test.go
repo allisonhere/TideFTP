@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"tideftp/internal/config"
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
 	"tideftp/internal/localfs"
@@ -103,7 +104,7 @@ func loadedModelWithDialer(t *testing.T, dialer *stubDialer) (Model, *stubDialer
 // disconnectedMsg in by hand.
 func connectModel(t *testing.T, local vfs.FS, dialer *stubDialer) (Model, *stubDialer) {
 	t.Helper()
-	model := NewModel(local, dialer, []session.Target{testTarget})
+	model := NewModel(local, dialer, []session.Target{testTarget}, config.Default(), nil)
 	model.width, model.height = 120, 36
 	model = settle(t, model, listCmd(model.localFS, paneLocal, model.local.requestToken, model.local.path, model.local.showHidden, listingNavigate))
 	if dialer.err != nil {
@@ -221,6 +222,78 @@ func TestShiftArrowsResizeLayout(t *testing.T) {
 	model = updated.(Model)
 	if model.bottomSplit.Value() <= startBottom {
 		t.Fatalf("shift+up did not grow bottom split: got %v want > %v", model.bottomSplit.Value(), startBottom)
+	}
+}
+
+func TestNewModelAppliesConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.Theme = "nord"
+	cfg.Density = "comfortable"
+	cfg.Shadow = false
+	cfg.ShowIcons = false
+	cfg.MaxParallel = 4
+	cfg.Layout = config.Layout{FileSplit: 0.6, BottomSplit: 0.4}
+
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, cfg, nil)
+
+	if model.theme.Name != "nord" {
+		t.Fatalf("theme = %q, want nord", model.theme.Name)
+	}
+	if model.density != tideui.Comfortable {
+		t.Fatalf("density = %q, want comfortable", model.density)
+	}
+	if model.shadow || model.showIcons {
+		t.Fatalf("shadow=%v showIcons=%v, want both false", model.shadow, model.showIcons)
+	}
+	if model.maxParallel != 4 {
+		t.Fatalf("maxParallel = %d, want 4", model.maxParallel)
+	}
+	if model.fileSplit.Value() != 0.6 || model.bottomSplit.Value() != 0.4 {
+		t.Fatalf("layout = %v/%v, want 0.6/0.4", model.fileSplit.Value(), model.bottomSplit.Value())
+	}
+}
+
+func TestNewModelClampsLayoutOutOfRange(t *testing.T) {
+	cfg := config.Default()
+	cfg.Layout = config.Layout{FileSplit: 0.9, BottomSplit: 0.05}
+
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, nil, cfg, nil)
+
+	if got := model.fileSplit.Value(); got != 0.75 {
+		t.Fatalf("file split clamped to %v, want 0.75", got)
+	}
+	if got := model.bottomSplit.Value(); got != 0.15 {
+		t.Fatalf("bottom split clamped to %v, want 0.15", got)
+	}
+}
+
+func TestPersistWritesOnChange(t *testing.T) {
+	var saved []config.Config
+	save := func(c config.Config) error { saved = append(saved, c); return nil }
+
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, nil, config.Default(), save)
+	model.width, model.height = 120, 36
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	model = updated.(Model)
+	if len(saved) != 1 {
+		t.Fatalf("icon toggle saved %d times, want 1", len(saved))
+	}
+	if saved[0].ShowIcons {
+		t.Fatalf("after toggling icons off, saved ShowIcons = true, want false")
+	}
+
+	before := model.fileSplit.Value()
+	updated, _ = model.updateKey(tea.KeyMsg{Type: tea.KeyShiftRight})
+	model = updated.(Model)
+	if len(saved) != 2 {
+		t.Fatalf("resize saved %d times, want 2", len(saved))
+	}
+	if saved[1].Layout.FileSplit <= before {
+		t.Fatalf("after widening, saved FileSplit = %v, want > %v", saved[1].Layout.FileSplit, before)
 	}
 }
 
@@ -705,7 +778,7 @@ func TestClosedEventStreamStopsThePump(t *testing.T) {
 
 func TestInitLoadsLocalAndDialsTheFirstTarget(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget})
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
 	model.width, model.height = 120, 36
 
 	if !model.local.loading {
@@ -741,7 +814,7 @@ func TestInitLoadsLocalAndDialsTheFirstTarget(t *testing.T) {
 
 func TestModelWithNoTargetsStartsDisconnected(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, nil)
+	model := NewModel(localfs.New(), dialer, nil, config.Default(), nil)
 	model.width, model.height = 120, 36
 	model = settle(t, model, model.Init())
 
@@ -925,7 +998,7 @@ func TestEnterOnAFileDoesNothing(t *testing.T) {
 
 func TestConnectFailureLeavesTheAppUsable(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: errors.New("no route to host")}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget})
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
 	model.width, model.height = 120, 36
 
 	model = settle(t, model, model.Init())
@@ -1050,51 +1123,102 @@ func TestLateConnectionIsClosedNotUsed(t *testing.T) {
 	_ = dialer
 }
 
-func TestConnectMenuOffersDisconnectWhenConnected(t *testing.T) {
+func TestConnectFormDisconnectsWhenConnected(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 
 	model = press(t, model, runes("c"))
 	if model.overlay != overlayConnect {
 		t.Fatalf("c did not open the connect overlay")
 	}
-	rows := model.connectRows()
-	if len(rows) != 2 || !rows[0].disconnect {
-		t.Fatalf("connect menu = %+v, want a disconnect action then the target", rows)
-	}
 
-	// Enter on the first row disconnects.
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlD})
 	if model.overlay != overlayNone {
-		t.Fatalf("enter did not close the overlay")
+		t.Fatalf("ctrl+d did not close the overlay")
 	}
 	model = settle(t, model, func() tea.Msg { return disconnectedMsg{conn: model.conn} })
 	if model.connected() {
-		t.Fatalf("choosing disconnect left the model connected")
-	}
-
-	// With nothing connected the menu is just the targets.
-	model = press(t, model, runes("c"))
-	rows = model.connectRows()
-	if len(rows) != 1 || rows[0].disconnect {
-		t.Fatalf("disconnected menu = %+v, want just the target", rows)
+		t.Fatalf("disconnecting left the model connected")
 	}
 }
 
-func TestConnectMenuCursorStaysInRange(t *testing.T) {
+func TestConnectFormFieldCursorWraps(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < int(connectFieldCount); i++ {
 		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	}
-	if want := len(model.connectRows()) - 1; model.targetIndex != want {
-		t.Fatalf("targetIndex = %d after paging down, want %d", model.targetIndex, want)
+	if model.connectField != connectFieldProtocol {
+		t.Fatalf("after %d downs, field = %d, want protocol (%d)", int(connectFieldCount), model.connectField, connectFieldProtocol)
 	}
-	for i := 0; i < 10; i++ {
-		model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
+	if model.connectField != connectFieldPath {
+		t.Fatalf("after one up from protocol, field = %d, want path (%d)", model.connectField, connectFieldPath)
 	}
-	if model.targetIndex != 0 {
-		t.Fatalf("targetIndex = %d after paging up, want 0", model.targetIndex)
+}
+
+func TestConnectFormConnectsFromFields(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	model = press(t, model, runes("c"))
+
+	// Down to Host, clear it, type a new host.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+	model = press(t, model, runes("ftp.example.com"))
+	// Down to Port, then Username; clear and set the user.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+	model = press(t, model, runes("bob"))
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = updated.(Model)
+	if model.overlay != overlayNone {
+		t.Fatalf("alt+enter did not close the overlay")
+	}
+	if model.target.Host != "ftp.example.com" || model.target.User != "bob" || model.target.Protocol != "sftp" {
+		t.Fatalf("target = %+v, want host ftp.example.com user bob protocol sftp", model.target)
+	}
+	if model.state != connConnecting {
+		t.Fatalf("state = %v after connect, want connecting", model.state)
+	}
+}
+
+func TestConnectFieldDisplayInsertsCaret(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host
+	if got := model.connectFieldDisplay(connectFieldHost); got != "test.local|" {
+		t.Fatalf("host display = %q, want a caret after the value", got)
+	}
+}
+
+func TestConnectFormRejectsEmptyHost(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = updated.(Model)
+	if model.overlay != overlayConnect {
+		t.Fatalf("empty host should keep the form open, overlay = %v", model.overlay)
+	}
+	if !model.statusErr {
+		t.Fatalf("empty host should set an error")
+	}
+}
+
+func TestConnectFormRendersFields(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+
+	plain := ansi.Strip(model.View())
+	for _, want := range []string{"connect", "Protocol", "Host", "Port", "Username", "Path", "sftp"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("connect form is missing %q", want)
+		}
 	}
 }
 

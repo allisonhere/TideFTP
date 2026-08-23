@@ -456,24 +456,37 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "help", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(content, "\n"))})
 		return &overlay
 	case overlayConnect:
-		rows := make([]string, 0, len(m.connectRows())+6)
-		for index, row := range m.connectRows() {
-			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{Text: row.label, Selected: index == m.targetIndex}, 60))
+		width := min(76, max(60, m.width-8))
+		contentWidth := width - 4
+		formWidth := max(28, contentWidth)
+		rows := make([]string, 0, 10)
+		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("Status  "+m.connectionSummary()))
+		rows = append(rows, "")
+		for field := connectFieldProtocol; field < connectFieldCount; field++ {
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
+				Text:     connectFieldLabel(field),
+				Suffix:   m.connectFieldDisplay(field),
+				Selected: field == m.connectField,
+			}, formWidth))
 		}
-		if len(rows) == 0 {
-			rows = append(rows, renderer.Styles.DetailMeta.Render("No connection profiles configured."))
+		if m.statusErr {
+			rows = append(rows, "", renderer.Styles.StatusError.Width(contentWidth).Render(m.status))
+		} else {
+			rows = append(rows, "", renderer.Styles.DetailMeta.Width(contentWidth).Render("Passwords come from the environment; a password field lands with credential handling."))
 		}
-		rows = append(rows,
-			"",
-			renderer.Styles.DetailMeta.Render("Status: "+m.connectionSummary()),
-			renderer.Styles.DetailMeta.Render("Passwords are redacted and prompt by default."),
-			"",
-			renderer.RenderSoftHints(60,
-				tideui.SoftHint{Key: "up/down", Label: "choose"},
-				tideui.SoftHint{Key: "enter", Label: "go"},
+		rows = append(rows, "",
+			renderer.RenderSoftHints(contentWidth,
+				tideui.SoftHint{Key: "tab", Label: "next"},
+				tideui.SoftHint{Key: "h/l", Label: "change"},
+				tideui.SoftHint{Key: "ctrl/alt+enter", Label: "connect"},
+				tideui.SoftHint{Key: "ctrl+u", Label: "clear"},
 				tideui.SoftHint{Key: "esc", Label: "cancel"}),
 		)
-		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Width: 66, Content: renderer.RenderSoftBody(66, strings.Join(rows, "\n"))})
+		if m.conn != nil {
+			rows = append(rows, renderer.RenderSoftHints(contentWidth, tideui.SoftHint{Key: "ctrl+d", Label: "disconnect"}))
+		}
+		content := renderer.RenderSoftBody(width, strings.Join(rows, "\n"))
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Content: content, Width: width})
 		return &overlay
 	case overlayConflict:
 		options := []string{"Overwrite", "Overwrite if source newer", "Overwrite if different size", "Overwrite if different size or source newer", "Resume", "Rename", "Skip"}

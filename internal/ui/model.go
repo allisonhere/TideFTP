@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"tideftp/internal/config"
 	"tideftp/internal/domain"
 	"tideftp/internal/session"
 	"tideftp/internal/transfer"
@@ -177,9 +178,14 @@ type Model struct {
 	// connection cannot leave a stale adapter wired into the UI.
 	dialer      session.Dialer
 	targets     []session.Target
-	targetIndex int
 	target      session.Target
-	conn        session.Conn
+
+	// Connect form state, editable while the connect overlay is open.
+	connectForm   connectFormValue
+	connectField  connectField
+	connectCursor int
+
+	conn     session.Conn
 	remoteFS    vfs.FS
 	engine      transfer.Engine
 	state       connState
@@ -200,6 +206,11 @@ type Model struct {
 
 	fileSplit   tideui.PaneRatio
 	bottomSplit tideui.PaneRatio
+
+	// save persists the current settings, if non-nil. It is a seam set by
+	// the caller (main) so the UI never touches the filesystem; tests leave
+	// it nil and persistence is simply skipped.
+	save config.SaveFunc
 
 	status    string
 	statusErr bool
@@ -229,10 +240,23 @@ const firstFileRow = 4
 
 // NewModel builds the UI over a local filesystem and a dialer. It starts
 // disconnected; Init dials the first target so the app opens onto something.
-func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target) Model {
+//
+// cfg supplies the persisted settings. Pass config.Default() or a config.Load
+// result — the zero Config would silently turn off shadow and icons, so it is
+// not a sensible input. save, when non-nil, is called to persist every change
+// the user makes to those settings.
+func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg config.Config, save config.SaveFunc) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
+	}
+	density := tideui.Compact
+	if tideui.Density(cfg.Density) == tideui.Comfortable {
+		density = tideui.Comfortable
+	}
+	maxParallel := cfg.MaxParallel
+	if maxParallel < 1 {
+		maxParallel = defaultParallelTransfers
 	}
 	model := Model{
 		focus: focusLocal,
@@ -253,13 +277,14 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target) Mod
 		targets:        targets,
 		state:          connDisconnected,
 		nextTransferID: 1,
-		maxParallel:    defaultParallelTransfers,
-		theme:          tideNight,
-		density:        tideui.Compact,
-		shadow:         true,
-		showIcons:      true,
-		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.5, Min: 0.25, Max: 0.75, Step: 0.03}),
-		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03}),
+		maxParallel:    maxParallel,
+		theme:          themeByName(cfg.Theme),
+		density:        density,
+		shadow:         cfg.Shadow,
+		showIcons:      cfg.ShowIcons,
+		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
+		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
+		save:           save,
 		logs:           []string{"redacted logs enabled", "fake protocol adapter online", "profiles: demo ftp / demo ftps / demo sftp"},
 		status:         "fake adapter ready",
 	}
@@ -277,6 +302,30 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target) Mod
 		model.state = connConnecting
 	}
 	return model
+}
+
+// snapshotConfig captures the current settings for persistence.
+func (m Model) snapshotConfig() config.Config {
+	return config.Config{
+		Theme:       m.theme.Name,
+		Density:     string(m.density),
+		Shadow:      m.shadow,
+		ShowIcons:   m.showIcons,
+		MaxParallel: m.maxParallel,
+		Layout: config.Layout{
+			FileSplit:   m.fileSplit.Value(),
+			BottomSplit: m.bottomSplit.Value(),
+		},
+	}
+}
+
+// persist saves the current settings if a saver was configured. Failures are
+// swallowed on purpose: persistence is best-effort, and a full disk or a
+// read-only home directory must never interrupt the UI.
+func (m Model) persist() {
+	if m.save != nil {
+		_ = m.save(m.snapshotConfig())
+	}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -367,6 +416,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			m.overlay = overlayNone
 			m.theme = m.themePicker.ConfirmedTheme()
 			m.setStatus("theme set to " + m.theme.Name)
+			m.persist()
 		case tideui.ThemePickerCancel:
 			m.overlay = overlayNone
 			m.theme = m.themePicker.ConfirmedTheme()
@@ -375,19 +425,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 	if m.overlay == overlayConnect {
-		switch msg.String() {
-		case "esc", "q":
-			m.overlay = overlayNone
-			m.setStatus("cancelled")
-		case "up", "k":
-			m.moveConnectCursor(-1)
-		case "down", "j":
-			m.moveConnectCursor(1)
-		case "enter":
-			m.overlay = overlayNone
-			cmd = m.activateConnectChoice()
-		}
-		return m, cmd
+		return m, m.handleConnectKey(msg)
 	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
@@ -447,6 +485,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		} else {
 			m.setStatus("icons off")
 		}
+		m.persist()
 	case "u":
 		m.queueUpload()
 	case "d":
@@ -458,8 +497,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "r":
 		cmd = m.refresh()
 	case "c":
-		m.overlay = overlayConnect
-		m.targetIndex = 0
+		m.openConnectForm()
 	case "t":
 		m.overlay = overlayTheme
 		m.themePicker.Open(m.theme.Name)
@@ -468,19 +506,24 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "shift+left":
 		m.fileSplit.Shrink()
 		m.setStatus("local pane narrower")
+		m.persist()
 	case "shift+right":
 		m.fileSplit.Grow()
 		m.setStatus("local pane wider")
+		m.persist()
 	case "shift+up":
 		m.bottomSplit.Grow()
 		m.setStatus("transfer pane taller")
+		m.persist()
 	case "shift+down":
 		m.bottomSplit.Shrink()
 		m.setStatus("transfer pane shorter")
+		m.persist()
 	case "ctrl+0":
 		m.fileSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.5, Min: 0.25, Max: 0.75, Step: 0.03})
 		m.bottomSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03})
 		m.setStatus("layout reset")
+		m.persist()
 	case "1":
 		tabSwitch = true
 		m.setBottomTab(tabQueue)
@@ -655,48 +698,6 @@ func (m *Model) clearConnection() {
 	if m.focus == focusRemote {
 		m.focus = focusLocal
 	}
-}
-
-// connectRow is one line of the connect overlay's menu.
-type connectRow struct {
-	label      string
-	target     session.Target
-	disconnect bool
-}
-
-// connectRows builds the menu: a disconnect action first when there is a live
-// connection, then every known target.
-func (m Model) connectRows() []connectRow {
-	rows := make([]connectRow, 0, len(m.targets)+1)
-	if m.conn != nil {
-		rows = append(rows, connectRow{label: "Disconnect from " + m.target.Label(), disconnect: true})
-	}
-	for _, target := range m.targets {
-		rows = append(rows, connectRow{label: target.Label() + "  " + target.Address(), target: target})
-	}
-	return rows
-}
-
-func (m *Model) moveConnectCursor(delta int) {
-	rows := len(m.connectRows())
-	if rows == 0 {
-		m.targetIndex = 0
-		return
-	}
-	m.targetIndex = min(max(0, m.targetIndex+delta), rows-1)
-}
-
-func (m *Model) activateConnectChoice() tea.Cmd {
-	rows := m.connectRows()
-	if len(rows) == 0 {
-		m.setError("no connection profiles configured")
-		return nil
-	}
-	row := rows[min(max(0, m.targetIndex), len(rows)-1)]
-	if row.disconnect {
-		return m.disconnect()
-	}
-	return m.connect(row.target)
 }
 
 // connected reports whether the remote pane and the transfer queue can do

@@ -2,10 +2,10 @@
 
 ## Current State
 
-TideFTP is a new Go terminal file transfer client in
-`/home/allie/Projects/whatthedock/TideFTP`.
-The first implementation slice is a polished UI shell with a fake remote adapter,
-not real FTP/FTPS/SFTP networking yet.
+TideFTP is a Go terminal file transfer client in
+`/home/allieb/Projects/tideftp`.
+The UI shell is polished, and real SFTP/FTP/FTPS adapters now sit behind the
+same interfaces as the fakes — see **Implemented** below.
 
 Implemented:
 
@@ -28,8 +28,12 @@ Implemented:
 - Bottom tabs: Queue, Active, Failed, History, Log
 - Theme picker on `t`
 - Connect, help, and conflict modals
+- Editable connect form (`c`) over Protocol/Host/Port/Username/Path, styled
+  like whatthedock's soft forms (see **Connect form**)
 - Keyboard-driven navigation plus initial mouse focus/select behavior
 - Shift-arrow pane resizing
+- Config persistence: XDG paths plus a `config.toml` under `internal/config`,
+  loaded on startup and saved on change (see **Config persistence**)
 - Basic UI tests for layout, theme registration, and resizing
 
 Git repository state:
@@ -44,7 +48,7 @@ Git repository state:
 Run the TUI:
 
 ```bash
-cd /home/allie/Projects/whatthedock/TideFTP
+cd /home/allieb/Projects/tideftp
 ./start.sh
 # or: go run ./cmd/tideftp
 ```
@@ -262,6 +266,10 @@ First build slice:
   `session.Dialer`; succeeds only for hosts it was told about, so the
   connect-failure path is reachable, and `Conn.Drop` simulates a server
   going away
+- `internal/config/`: XDG path resolution and the `config.toml` schema.
+  `Default`/`Load`/`Save` (atomic write) plus a `SaveFunc` seam the UI calls
+  so it never touches the filesystem. The state and cache roots are resolved
+  but unused
 - `internal/sftpsession/`: the real SFTP adapter. `sftpsession.go` dials
   (agent and key-file auth, strict known_hosts), `fs.go` implements
   `vfs.FS`, `engine.go` implements `transfer.Engine`. All three share one
@@ -275,6 +283,8 @@ First build slice:
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
+- `internal/ui/connect_form.go`: the editable connect form (Protocol/Host/Port/
+  Username/Path) and its key grammar, styled like whatthedock's soft forms
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
@@ -432,6 +442,51 @@ the work they are given but never queue. The contract that keeps this honest:
 every accepted Request must produce exactly one terminal event (Completed,
 Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
+### Config persistence
+
+`internal/config` owns the three XDG roots and a small `Config` struct
+serialised to `~/.config/tideftp/config.toml` (go-toml/v2). `Load` layers the
+file over `Default`, so a missing, corrupt, or hand-edited file falls back to
+defaults rather than crashing; `Save` writes atomically (temp file + rename)
+and creates the directory first.
+
+The UI never touches the filesystem. `NewModel` takes the loaded `Config` plus
+a `config.SaveFunc`, and applies what it can — theme, density, shadow, icons,
+`maxParallel`, and the two pane splits (rebuilt through `PaneRatio`, which
+clamps out-of-range values back into bounds). `persist()` calls that func after
+each user change: theme confirm, icon toggle, the four shift-arrow resizes, and
+the layout reset. The save func is the seam that keeps this testable — UI tests
+pass `nil` and persistence is skipped, while main wires it to `config.Save`.
+
+Three scope calls to remember:
+
+- `config.Default()` must stay in step with the values `NewModel` used to
+  hardcode, or a first run would differ from a later saved run. The two
+  cross-reference in comments.
+- The file is written on the first change, not on first launch: a run that
+  changes nothing leaves no config file behind.
+- `showHidden` is per-pane and deliberately not persisted here; the
+  `[profiles]` table is item 4 and the schema is shaped to take it.
+
+### Connect form
+
+`internal/ui/connect_form.go` replaces the old connect *menu* with an editable
+form that dials a `session.Target`. It is styled like whatthedock's soft forms
+— `SoftPanel` + `RenderSoftRow` (label left, value right, the selected row
+highlighted) + `RenderSoftHints` — with the same inline `|` caret and key
+grammar: `tab`/`up`/`down` move fields, `h`/`l`/`left`/`right` cycle the
+Protocol picker or move the caret, `ctrl/alt+enter` connects, `ctrl+d`
+disconnects a live connection, `ctrl+u` clears a field. `alt+enter` is the
+reliable confirm — a terminal cannot distinguish `ctrl+enter` from plain
+`enter` — so the hint names both but the handler keys on `alt+enter`.
+
+tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins
+(`v0.2.3-0.20260820020614-441c283e776f`) for two things the older release
+lacks: `SoftRow`'s selected-row background highlight and the `ModalShadow`
+style option. The app still composites overlays itself (`overlayOnBase`), so
+`ModalShadow` is unused here — the drop shadow keeps coming from the app's own
+path.
+
 ## Suggested Next Steps
 
 1. ~~Initialize or fix Git repository state.~~ Done — real repo on `main`,
@@ -443,22 +498,23 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
    `localfs.FS` and `fakefs.Remote` implement it; `internal/ui` takes both
    via `NewModel(local, remote, engine)` and never imports an adapter.
 
-3. Add real layout/config persistence.
-   - XDG config path: `~/.config/tideftp/config.toml`
-   - State/log path: `~/.local/state/tideftp/`
-   - Cache path: `~/.cache/tideftp/`
+3. ~~Add real layout/config persistence.~~ Done — `internal/config` resolves
+   the XDG paths (config/state/cache) and persists theme, density, shadow,
+   icons, `maxParallel`, and the pane splits to
+   `~/.config/tideftp/config.toml` (go-toml/v2), loaded on startup and saved
+   on change. The state and cache roots are resolved but unused; see
+   **Config persistence** under Design Notes.
 
 4. Build profile model and connect form.
-   - `session.Target` is the beginning of the profile model: protocol, host,
-     port, user, start path. `cmd/tideftp/main.go` hardcodes three demo
-     targets; the connect overlay (`c`) is a menu over them plus a
-     disconnect action
-   - `--host/--user/--port/--path/--identity/--known-hosts` reach a real
-     server today; the form replaces them
-   - Still missing: an editable form (no text input anywhere in the app
-     yet), persistence, and everything credential-related — password mode
-     (prompt/keyring/config), SFTP agent/key file, FTPS certificate
-     verification, SFTP known-host mode
+   - ~~Editable form.~~ Done — `internal/ui/connect_form.go` is a
+     whatthedock-styled form over Protocol/Host/Port/Username/Path, opened
+     with `c`; it dials a `session.Target` and replaces the old hardcoded
+     target menu.
+   - `--host/--user/--port/--path/--identity/--known-hosts` still reach a real
+     server; the form is the interactive path into the same dialers
+   - Still missing: profile persistence (a `[profiles]` table in config.toml),
+     and everything credential-related — password mode (prompt/keyring/config),
+     SFTP agent/key file, FTPS certificate verification, SFTP known-host mode
 
 5. Improve transfer queue behavior.
    - Configurable parallelism — the cap is now `Model.maxParallel`
@@ -516,17 +572,20 @@ Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 - All three seams (`session.Dialer`, `vfs.FS`, `transfer.Engine`) now have
   both a fake and a real implementation, which is the evidence they are the
   right shape
-- The connect overlay is a menu over hardcoded targets, not a form. There is
-  no text input in the app yet, so a host cannot be typed
+- The connect form has no credential fields yet: password, SFTP agent/key
+  file, FTPS certificate, and known-host mode all wait on credential handling
+  (passwords still come from the environment)
 - No credential handling of any kind: nothing prompts, stores, or sends a
   password, and `fakesession` needs none
 - A connection is never retried automatically after a drop
 - A listing that hangs is bounded only by `listTimeout` (20s) and cannot be
   cancelled from the UI — there is no key to abandon a slow directory
-- No config persistence yet
+- Config persistence covers only global prefs (theme, density, shadow, icons,
+  `maxParallel`, and the pane splits). Profiles, `showHidden`, and any use of
+  the state/cache directories are not persisted yet
 - No saved profiles yet
 - No real credential storage yet
-- The connect overlay is keyboard-only; mouse clicks do not select a row in it
+- The connect form is keyboard-only; mouse clicks do not edit its fields
 - Mouse support is basic: focus/select, not full range selection or context
   menus. The click-to-row mapping depends on the chrome above the file panes
   (`firstFileRow` in `internal/ui/model.go`) and on `topPaneHeight`, which

@@ -26,3 +26,15 @@ func appThemes() []tideui.Theme {
 	themes = append(themes, tideui.BuiltinThemes...)
 	return themes
 }
+
+// themeByName resolves a persisted theme name to a Theme by searching the app
+// themes (tide-night plus tideui's builtins). An unknown or stale name falls
+// back to tide-night so a hand-edited config cannot blank the UI.
+func themeByName(name string) tideui.Theme {
+	for _, theme := range appThemes() {
+		if theme.Name == name {
+			return theme
+		}
+	}
+	return tideNight
+}

@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"tideftp/internal/config"
 	"tideftp/internal/fakesession"
 	"tideftp/internal/ftpsession"
 	"tideftp/internal/localfs"
@@ -51,7 +52,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// Load settings from ~/.config/tideftp/config.toml (or the XDG location),
+	// falling back to defaults when the file is absent, corrupt, or unreadable.
+	configPath := config.ConfigPath()
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tideftp: warning: could not read %s: %v (using defaults)\n", configPath, err)
+		cfg = config.Default()
+	}
+	saveConfig := func(c config.Config) error { return config.Save(configPath, c) }
+
+	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
 		os.Exit(1)
