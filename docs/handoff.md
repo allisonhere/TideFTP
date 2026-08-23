@@ -1069,11 +1069,39 @@ dot-line plot (the other option offered) as equivalent visual ambition for
 meaningfully less rendering risk: a bar's fill height per column is a pure
 function of one value, whereas a connected braille line has to reason
 about slope between adjacent columns to look continuous rather than
-speckled. `renderStatsTab` degrades what it shows as the bottom pane
-shrinks — first dropping the graph and any per-protocol lines that don't
-fit, keeping the live-snapshot line longest — the same instinct
-`renderBottomPane`'s existing `"no rows yet"` fallback already has for an
-empty tab.
+speckled.
+
+`renderStatsTab` packs everything but the graph into exactly two lines —
+a live snapshot on top, totals/averages/per-protocol breakdown combined
+into one line on the bottom — specifically so the graph gets as much of
+the available height as the pane has to give, rather than losing rows to
+one-line-per-fact formatting. Below `height == 2` it drops to just those
+two lines (no graph), and at `height == 1`, just the first — the same
+"keep the most useful thing longest" instinct `renderBottomPane`'s own
+`"no rows yet"` fallback already has for an empty tab, just with a lower
+floor now that there's less fixed content to protect.
+
+The whole tab paints a fixed black background with green text
+(`statsBackground`/`statsForeground`/`statsMeta` in `internal/ui/stats.go`)
+regardless of the active theme — on request, the one deliberate exception
+to "everything follows the theme" anywhere in this app, the same way a
+terminal monitoring widget (htop, an old oscilloscope-green VU meter)
+usually commits to one look rather than adapting to its surroundings.
+`statsLine` and `renderThroughputGraphColored` both go through
+`segment`/`clampView` (the same explicit-background-per-span technique
+`renderTransferRow`'s progress bar already used) rather than
+`renderer.Styles`, so nothing here can accidentally inherit the theme's
+colors. The graph is additionally tinted along `statsGradient`, a
+low-to-high ramp within the green family — each column's color comes from
+the same eighths value that decides its glyph, so a tall bar is both
+bigger *and* brighter, not decoration layered on top of the data but
+another encoding of it. `lipgloss`'s color-profile detection falls back to
+plain text when stdout isn't a real terminal (true of every `go test`
+run), which is why `TestRenderThroughputGraphColoredProducesRealANSIColor`
+has to force a profile with `lipgloss.SetColorProfile` to actually see the
+escape codes it's asserting on — everything else here is verified through
+`ansi.Strip`ped goldens, which were never going to catch a missing color
+in the first place.
 
 ## Suggested Next Steps
 

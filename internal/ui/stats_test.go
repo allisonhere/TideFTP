@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"tideftp/internal/config"
 	"tideftp/internal/domain"
@@ -165,6 +169,23 @@ func TestRenderThroughputGraphInvalidDimensionsReturnNil(t *testing.T) {
 	}
 	if rows := renderThroughputGraph([]int64{1, 2, 3}, 5, 0); rows != nil {
 		t.Fatalf("height 0 = %v, want nil", rows)
+	}
+}
+
+// TestRenderThroughputGraphColoredProducesRealANSIColor forces a color
+// profile (go test's stdout isn't a terminal, so lipgloss otherwise
+// auto-detects "no color" and segment would silently render plain text)
+// to prove renderThroughputGraphColored actually emits color codes, not
+// just the right glyphs.
+func TestRenderThroughputGraphColoredProducesRealANSIColor(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previous)
+
+	rows := renderThroughputGraphColored([]int64{0, 500, 2000, 8000}, 4, 2)
+	joined := strings.Join(rows, "\n")
+	if !strings.Contains(joined, "\x1b[") {
+		t.Fatalf("rows = %q, want ANSI escape codes present", rows)
 	}
 }
 
