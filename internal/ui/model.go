@@ -293,8 +293,8 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
 		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
 		save:           save,
-		logs:           []string{"redacted logs enabled", "fake protocol adapter online", "profiles: demo ftp / demo ftps / demo sftp"},
-		status:         "fake adapter ready",
+		logs:           []string{"redacted logs enabled"},
+		status:         "ready",
 	}
 	model.themePicker = tideui.NewThemePicker(tideui.ThemePickerOptions{
 		Themes:       appThemes(),

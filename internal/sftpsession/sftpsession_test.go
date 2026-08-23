@@ -89,6 +89,43 @@ func TestDialFailsWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestDialWithIdentityFileOverrideReplacesConfiguredKeys(t *testing.T) {
+	server := startTestServer(t)
+	// dialerFor configures a valid key file that TestDialWithAKeyFile proves
+	// succeeds on its own; an IdentityFile override must replace it, not add
+	// to it, so pointing the override at a key that doesn't exist fails the
+	// dial even though the Dialer's own configured key would have worked.
+	dialer := dialerFor(t, server)
+
+	_, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{
+		IdentityFile: filepath.Join(t.TempDir(), "no-such-key"),
+	})
+	if err == nil {
+		t.Fatalf("an IdentityFile override should have replaced the working configured key, but the dial succeeded")
+	}
+}
+
+func TestDialWithKnownHostsOverrideVerifiesAgainstIt(t *testing.T) {
+	server := startTestServer(t)
+	// Configured with a known_hosts that does NOT have this server's key —
+	// TestDialRejectsAnUnknownHostKey proves that fails on its own — so a
+	// successful dial here can only be explained by the override actually
+	// being used instead.
+	dialer := New(Config{
+		KnownHostsPath: server.wrongKnownHostsFile(t),
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+
+	conn, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{
+		KnownHostsPath: server.knownHostsFile(t),
+	})
+	if err != nil {
+		t.Fatalf("Dial with a KnownHostsPath override: %v", err)
+	}
+	conn.Close()
+}
+
 func TestDialWithPasswordOnlySkipsConfiguredKeyFiles(t *testing.T) {
 	server := startTestServer(t)
 	// dialerFor configures a valid key file that TestDialWithAKeyFile proves

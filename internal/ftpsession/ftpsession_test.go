@@ -3,12 +3,14 @@ package ftpsession
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jlaffaye/ftp"
 
 	"tideftp/internal/domain"
+	"tideftp/internal/session"
 )
 
 var errStub = errors.New("stub dial")
@@ -19,6 +21,53 @@ func names(entries []domain.Entry) []string {
 		out = append(out, entry.Name)
 	}
 	return out
+}
+
+func TestTLSConfigCAFileOverrideTakesPriorityOverConfig(t *testing.T) {
+	d := New(Config{RootCAFile: "/nonexistent/config-ca.pem"})
+	_, err := d.tlsConfig(session.Target{Host: "example.com"}, session.Credentials{FTPSCAFile: "/nonexistent/creds-ca.pem"})
+	if err == nil || !strings.Contains(err.Error(), "creds-ca.pem") {
+		t.Fatalf("error = %v, want it to reference the connect form's override path, not the Config one", err)
+	}
+}
+
+func TestTLSConfigFallsBackToConfigCAFileWhenCredentialsHaveNone(t *testing.T) {
+	d := New(Config{RootCAFile: "/nonexistent/config-ca.pem"})
+	_, err := d.tlsConfig(session.Target{Host: "example.com"}, session.Credentials{})
+	if err == nil || !strings.Contains(err.Error(), "config-ca.pem") {
+		t.Fatalf("error = %v, want it to reference the Dialer's own configured CA path", err)
+	}
+}
+
+func TestTLSConfigInsecureIsORedNotReplaced(t *testing.T) {
+	target := session.Target{Host: "example.com"}
+
+	cfg, err := New(Config{}).tlsConfig(target, session.Credentials{})
+	if err != nil {
+		t.Fatalf("tlsConfig: %v", err)
+	}
+	if cfg.InsecureSkipVerify {
+		t.Fatalf("InsecureSkipVerify = true with neither side asking for it")
+	}
+
+	cfg, err = New(Config{}).tlsConfig(target, session.Credentials{FTPSInsecure: true})
+	if err != nil {
+		t.Fatalf("tlsConfig: %v", err)
+	}
+	if !cfg.InsecureSkipVerify {
+		t.Fatalf("InsecureSkipVerify = false when the connect form asked for insecure")
+	}
+
+	// A Dialer already configured insecure must stay that way even when this
+	// one attempt's Credentials do not ask for it — the field only ever
+	// turns verification off, never quietly back on.
+	cfg, err = New(Config{InsecureSkipVerify: true}).tlsConfig(target, session.Credentials{})
+	if err != nil {
+		t.Fatalf("tlsConfig: %v", err)
+	}
+	if !cfg.InsecureSkipVerify {
+		t.Fatalf("InsecureSkipVerify = false when Config already asked for insecure")
+	}
 }
 
 func TestConvertEntriesDropsDotDirectories(t *testing.T) {

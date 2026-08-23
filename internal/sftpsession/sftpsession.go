@@ -97,7 +97,7 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	if err != nil {
 		return nil, err
 	}
-	hostKeys, err := d.hostKeyCallback()
+	hostKeys, err := d.hostKeyCallback(creds.KnownHostsPath)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +156,10 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 // creds.PasswordOnly bypasses the agent and key files entirely rather than
 // merely appending Password after them — it is what "password" means as an
 // explicit choice in the connect form, not just another fallback.
+//
+// creds.IdentityFile, when set, replaces the Dialer's configured identity
+// files with just that one path and implies not offering the agent — the
+// same as the --identity flag at startup, but scoped to this one attempt.
 func (d *Dialer) authMethods(creds session.Credentials) ([]ssh.AuthMethod, error) {
 	if creds.PasswordOnly {
 		if creds.Password == "" {
@@ -163,13 +167,20 @@ func (d *Dialer) authMethods(creds session.Credentials) ([]ssh.AuthMethod, error
 		}
 		return []ssh.AuthMethod{ssh.Password(creds.Password)}, nil
 	}
+	useAgent := d.cfg.UseAgent
+	identityFiles := d.cfg.IdentityFiles
+	if creds.IdentityFile != "" {
+		identityFiles = []string{creds.IdentityFile}
+		useAgent = false
+	}
+
 	var methods []ssh.AuthMethod
-	if d.cfg.UseAgent {
+	if useAgent {
 		if method, err := agentAuth(); err == nil {
 			methods = append(methods, method)
 		}
 	}
-	for _, path := range d.cfg.IdentityFiles {
+	for _, path := range identityFiles {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			// A key that is not there is not an error; a profile can name
@@ -221,8 +232,14 @@ func agentAuth() (ssh.AuthMethod, error) {
 	return ssh.PublicKeysCallback(agent.NewClient(conn).Signers), nil
 }
 
-func (d *Dialer) hostKeyCallback() (ssh.HostKeyCallback, error) {
-	path := d.cfg.KnownHostsPath
+// hostKeyCallback resolves the known_hosts file to verify against: override
+// (from this Dial's Credentials) first, then the Dialer's own Config, then
+// the user's default.
+func (d *Dialer) hostKeyCallback(override string) (ssh.HostKeyCallback, error) {
+	path := override
+	if path == "" {
+		path = d.cfg.KnownHostsPath
+	}
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

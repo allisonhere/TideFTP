@@ -21,6 +21,10 @@ const (
 	connectFieldUsername
 	connectFieldAuth
 	connectFieldPassword
+	connectFieldIdentity
+	connectFieldKnownHosts
+	connectFieldFTPSVerify
+	connectFieldFTPSCA
 	connectFieldPath
 	connectFieldCount
 )
@@ -32,6 +36,9 @@ var connectProtocols = []string{"sftp", "ftp", "ftps"}
 // SFTP — FTP and FTPS have no other way to authenticate, so they force
 // "password" without showing the field at all; see connectAuthMode.
 var connectAuthChoices = []string{"agent/key", "password"}
+
+// connectFTPSVerifyChoices is the FTPS Verify picker's cycle order.
+var connectFTPSVerifyChoices = []string{"verify", "insecure"}
 
 // connectFormValue holds the connect form's field values. Protocol is an index
 // into connectProtocols, profile is an index into the model's profile choices
@@ -45,16 +52,20 @@ var connectAuthChoices = []string{"agent/key", "password"}
 // whole text before typing over it would; any other edit (backspace, delete,
 // ctrl+u) marks it not fresh, so typing again only ever inserts.
 type connectFormValue struct {
-	profile  int
-	name     string
-	protocol int
-	host     string
-	port     string
-	username string
-	auth     int
-	password string
-	path     string
-	fresh    [connectFieldCount]bool
+	profile    int
+	name       string
+	protocol   int
+	host       string
+	port       string
+	username   string
+	auth       int
+	password   string
+	identity   string
+	knownHosts string
+	ftpsVerify int
+	ftpsCA     string
+	path       string
+	fresh      [connectFieldCount]bool
 }
 
 // connectAuthMode reports how the form will authenticate: always "password"
@@ -68,33 +79,54 @@ func (m Model) connectAuthMode() string {
 }
 
 // connectFieldVisible reports whether field is shown and reachable in the
-// form's current state. Auth only matters for SFTP, the only protocol with
-// more than one way to authenticate; Password only matters when the resolved
-// auth mode actually uses one.
+// form's current state. Auth, Identity, and KnownHosts only matter for
+// SFTP; Identity only when the resolved auth mode actually offers a key
+// (there is nothing to name a key file for if the connection will
+// authenticate with a password); Password only when the resolved auth mode
+// uses one; FTPSVerify and FTPSCA only matter for FTPS, and FTPSCA only
+// when Verify is not already "insecure" — a CA to trust is moot once every
+// certificate is accepted anyway.
 func (m Model) connectFieldVisible(field connectField) bool {
+	protocol := connectProtocols[m.connectForm.protocol]
 	switch field {
 	case connectFieldAuth:
-		return connectProtocols[m.connectForm.protocol] == "sftp"
+		return protocol == "sftp"
 	case connectFieldPassword:
 		return m.connectAuthMode() == "password"
+	case connectFieldIdentity:
+		return protocol == "sftp" && m.connectAuthMode() != "password"
+	case connectFieldKnownHosts:
+		return protocol == "sftp"
+	case connectFieldFTPSVerify:
+		return protocol == "ftps"
+	case connectFieldFTPSCA:
+		return protocol == "ftps" && connectFTPSVerifyChoices[m.connectForm.ftpsVerify] != "insecure"
 	default:
 		return true
 	}
 }
 
-// credentialsFromForm builds what Dial needs to authenticate. It never
-// touches session.Target — credentials are deliberately not part of what a
+// credentialsFromForm builds what Dial needs to authenticate and verify the
+// host. It never touches session.Target — none of this is part of what a
 // profile can persist. PasswordOnly is set only for SFTP, where choosing
 // "password" explicitly means skipping the agent and key files rather than
 // merely offering Password as a fallback after them.
 func (m Model) credentialsFromForm() session.Credentials {
-	if m.connectAuthMode() != "password" {
-		return session.Credentials{}
+	protocol := connectProtocols[m.connectForm.protocol]
+	var creds session.Credentials
+	if m.connectAuthMode() == "password" {
+		creds.Password = m.connectForm.password
+		creds.PasswordOnly = protocol == "sftp"
 	}
-	return session.Credentials{
-		Password:     m.connectForm.password,
-		PasswordOnly: connectProtocols[m.connectForm.protocol] == "sftp",
+	if protocol == "sftp" {
+		creds.IdentityFile = strings.TrimSpace(m.connectForm.identity)
+		creds.KnownHostsPath = strings.TrimSpace(m.connectForm.knownHosts)
 	}
+	if protocol == "ftps" {
+		creds.FTPSCAFile = strings.TrimSpace(m.connectForm.ftpsCA)
+		creds.FTPSInsecure = connectFTPSVerifyChoices[m.connectForm.ftpsVerify] == "insecure"
+	}
+	return creds
 }
 
 // connectProfileNew is the label shown when the Profile field points at no
@@ -216,6 +248,14 @@ func connectFieldLabel(field connectField) string {
 		return "Auth"
 	case connectFieldPassword:
 		return "Password"
+	case connectFieldIdentity:
+		return "Identity"
+	case connectFieldKnownHosts:
+		return "Known Hosts"
+	case connectFieldFTPSVerify:
+		return "Verify"
+	case connectFieldFTPSCA:
+		return "CA File"
 	case connectFieldPath:
 		return "Path"
 	}
@@ -244,6 +284,14 @@ func (m Model) connectFieldValue(field connectField) string {
 		return connectAuthChoices[m.connectForm.auth]
 	case connectFieldPassword:
 		return m.connectForm.password
+	case connectFieldIdentity:
+		return m.connectForm.identity
+	case connectFieldKnownHosts:
+		return m.connectForm.knownHosts
+	case connectFieldFTPSVerify:
+		return connectFTPSVerifyChoices[m.connectForm.ftpsVerify]
+	case connectFieldFTPSCA:
+		return m.connectForm.ftpsCA
 	case connectFieldPath:
 		return m.connectForm.path
 	}
@@ -262,6 +310,12 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 		m.connectForm.username = value
 	case connectFieldPassword:
 		m.connectForm.password = value
+	case connectFieldIdentity:
+		m.connectForm.identity = value
+	case connectFieldKnownHosts:
+		m.connectForm.knownHosts = value
+	case connectFieldFTPSCA:
+		m.connectForm.ftpsCA = value
 	case connectFieldPath:
 		m.connectForm.path = value
 	}
@@ -270,7 +324,12 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 // connectChoiceField reports whether the given field is a cycled picker rather
 // than free text.
 func connectChoiceField(field connectField) bool {
-	return field == connectFieldProfile || field == connectFieldProtocol || field == connectFieldAuth
+	switch field {
+	case connectFieldProfile, connectFieldProtocol, connectFieldAuth, connectFieldFTPSVerify:
+		return true
+	default:
+		return false
+	}
 }
 
 // connectFieldDisplay returns the value shown for field, with a caret inserted
@@ -322,6 +381,9 @@ func (m *Model) cycleConnectChoice(delta int) {
 	case connectFieldAuth:
 		n := len(connectAuthChoices)
 		m.connectForm.auth = (m.connectForm.auth + delta + n) % n
+	case connectFieldFTPSVerify:
+		n := len(connectFTPSVerifyChoices)
+		m.connectForm.ftpsVerify = (m.connectForm.ftpsVerify + delta + n) % n
 	}
 }
 

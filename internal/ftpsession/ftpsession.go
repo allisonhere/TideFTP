@@ -120,7 +120,7 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 			ftp.DialWithTimeout(timeout),
 		}
 		if d.cfg.ExplicitTLS {
-			config, err := d.tlsConfig(target)
+			config, err := d.tlsConfig(target, creds)
 			if err != nil {
 				return nil, err
 			}
@@ -157,7 +157,12 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 // tlsConfig builds the FTPS client configuration. Verification is on unless
 // explicitly disabled: a self-signed server certificate is meant to be handled
 // by trusting it through RootCAFile, not by accepting every certificate.
-func (d *Dialer) tlsConfig(target session.Target) (*tls.Config, error) {
+//
+// creds.FTPSCAFile, when set, overrides RootCAFile for this attempt.
+// creds.FTPSInsecure is ORed with InsecureSkipVerify rather than replacing
+// it, so it can only turn verification off, never quietly turn a Dialer
+// already configured insecure back on.
+func (d *Dialer) tlsConfig(target session.Target, creds session.Credentials) (*tls.Config, error) {
 	if d.cfg.TLSConfig != nil {
 		return d.cfg.TLSConfig.Clone(), nil
 	}
@@ -169,7 +174,7 @@ func (d *Dialer) tlsConfig(target session.Target) (*tls.Config, error) {
 		ServerName:         target.Host,
 		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         maxVersion,
-		InsecureSkipVerify: d.cfg.InsecureSkipVerify,
+		InsecureSkipVerify: d.cfg.InsecureSkipVerify || creds.FTPSInsecure,
 		// vsftpd defaults to require_ssl_reuse=YES: the data connection must
 		// resume the control connection's TLS session, or it answers "522 SSL
 		// connection failed: session reuse required". jlaffaye/ftp has no
@@ -177,13 +182,17 @@ func (d *Dialer) tlsConfig(target session.Target) (*tls.Config, error) {
 		// so a session cache lets crypto/tls resume on its own.
 		ClientSessionCache: tls.NewLRUClientSessionCache(sessionCacheSize),
 	}
-	if d.cfg.RootCAFile == "" {
+	caFile := creds.FTPSCAFile
+	if caFile == "" {
+		caFile = d.cfg.RootCAFile
+	}
+	if caFile == "" {
 		return config, nil
 	}
 
-	pemBytes, err := os.ReadFile(d.cfg.RootCAFile)
+	pemBytes, err := os.ReadFile(caFile)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", d.cfg.RootCAFile, err)
+		return nil, fmt.Errorf("read %s: %w", caFile, err)
 	}
 	// Start from the system roots so pinning one server does not stop every
 	// normally-trusted server from working.
@@ -192,7 +201,7 @@ func (d *Dialer) tlsConfig(target session.Target) (*tls.Config, error) {
 		roots = x509.NewCertPool()
 	}
 	if !roots.AppendCertsFromPEM(pemBytes) {
-		return nil, fmt.Errorf("%s contains no certificates", d.cfg.RootCAFile)
+		return nil, fmt.Errorf("%s contains no certificates", caFile)
 	}
 	config.RootCAs = roots
 	return config, nil

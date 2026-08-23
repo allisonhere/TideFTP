@@ -26,7 +26,8 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.BoolVar(showVersion, "v", false, "print the version and exit")
-	host := flag.String("host", "", "host to connect to; without it the app runs on the fake demo adapter")
+	host := flag.String("host", "", "host for an initial target to auto-connect to; without it the app just opens, ready for the connect form")
+	demo := flag.Bool("demo", false, "run against the simulated demo adapter instead of real servers, regardless of --host")
 	protocol := flag.String("protocol", "sftp", "sftp, ftp, or ftps")
 	port := flag.Int("port", 0, "port (default: 22 for sftp, 21 for ftp, 990 for ftps)")
 	username := flag.String("user", "", "username (default: the current user)")
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	dialer, targets, err := buildSession(sessionOptions{
-		protocol: *protocol, host: *host, port: *port, username: *username,
+		demo: *demo, protocol: *protocol, host: *host, port: *port, username: *username,
 		startPath: *startPath, identity: *identity, knownHosts: *knownHosts,
 		ftpsCA: *ftpsCA, ftpsInsecure: *ftpsInsecure, ftpsAllowTLS13: *ftpsTLS13,
 	})
@@ -70,13 +71,16 @@ func main() {
 	}
 }
 
-// buildSession wires up every real protocol adapter behind a router.Dialer
-// when a host is named, and the demo fakes otherwise. All three protocols
+// buildSession wires up every real protocol adapter behind a router.Dialer,
+// unless --demo asks for the simulated fakes instead. All three protocols
 // are always dialable — not just the one --protocol names — because the
 // connect form lets the user pick any of sftp/ftp/ftps per attempt, for any
-// target, not only the one CLI flags describe; --protocol only decides what
-// that one flag-described target uses to auto-connect at startup.
+// target, not only the one CLI flags describe. --host is likewise optional:
+// it only names an initial target to auto-connect to at startup, not a
+// requirement for the connect form to be usable — without one, the app just
+// opens ready for `c`.
 type sessionOptions struct {
+	demo                 bool
 	protocol, host       string
 	port                 int
 	username, startPath  string
@@ -87,32 +91,15 @@ type sessionOptions struct {
 }
 
 func buildSession(options sessionOptions) (session.Dialer, []session.Target, error) {
-	protocol, host := options.protocol, options.host
-	username, startPath := options.username, options.startPath
-	if host == "" {
+	if options.demo {
 		return demoSession(), demoTargets(), nil
 	}
+
+	protocol := options.protocol
 	switch protocol {
 	case "sftp", "ftp", "ftps":
 	default:
 		return nil, nil, fmt.Errorf("unknown protocol %q: want sftp, ftp, or ftps", protocol)
-	}
-
-	if username == "" {
-		current, err := user.Current()
-		if err != nil {
-			return nil, nil, fmt.Errorf("no --user given and the current user could not be determined: %w", err)
-		}
-		username = current.Username
-	}
-
-	target := session.Target{
-		Name:      username + "@" + host,
-		Protocol:  protocol,
-		Host:      host,
-		Port:      options.port,
-		User:      username,
-		StartPath: startPath,
 	}
 
 	// Password auth for FTP/FTPS is offered only if one is in the
@@ -146,6 +133,29 @@ func buildSession(options sessionOptions) (session.Dialer, []session.Target, err
 		"ftp":  ftpsession.New(ftpConfig),
 		"ftps": ftpsession.New(ftpsConfig),
 	})
+
+	host := options.host
+	if host == "" {
+		return dialer, nil, nil
+	}
+
+	username := options.username
+	if username == "" {
+		current, err := user.Current()
+		if err != nil {
+			return nil, nil, fmt.Errorf("no --user given and the current user could not be determined: %w", err)
+		}
+		username = current.Username
+	}
+
+	target := session.Target{
+		Name:      username + "@" + host,
+		Protocol:  protocol,
+		Host:      host,
+		Port:      options.port,
+		User:      username,
+		StartPath: options.startPath,
+	}
 	return dialer, []session.Target{target}, nil
 }
 

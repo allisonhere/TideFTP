@@ -34,6 +34,11 @@ Implemented:
   for SFTP (FTP/FTPS always show Password, since they have nothing else);
   never persisted, only ever passed to that one connect attempt (see
   **Connect form**)
+- SFTP Identity/Known Hosts and FTPS Verify/CA File fields: everything that
+  used to be CLI-flag-only (`--identity`, `--known-hosts`, `--ftps-ca`,
+  `--ftps-insecure`) now has a form field too, shown only when it applies
+  and overriding the flag-configured default for that one attempt (see
+  **Connect form**)
 - Keyboard-driven navigation plus initial mouse focus/select behavior
 - Shift-arrow pane resizing
 - Config persistence: XDG paths plus a `config.toml` under `internal/config`,
@@ -309,8 +314,8 @@ First build slice:
   `transfer.Engine`, never on a concrete adapter
 - `internal/ui/view.go`: custom two-over-one layout, panes, overlays, status bars, transfer rows
 - `internal/ui/connect_form.go`: the editable connect form (Profile/Name/
-  Protocol/Host/Port/Username/Auth/Password/Path) and its key grammar,
-  styled like whatthedock's soft forms
+  Protocol/Host/Port/Username/Auth/Password/Identity/Known Hosts/Verify/CA
+  File/Path) and its key grammar, styled like whatthedock's soft forms
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
   `transfer.Engine` stub so they never depend on goroutine timing
@@ -688,6 +693,27 @@ building any other auth method. Choosing "password" with the field left
 blank is caught in the form itself (`creds.PasswordOnly && creds.Password ==
 ""`) rather than surfacing as a dial failure, since it can never succeed.
 
+Identity, Known Hosts, Verify, and CA File follow the same shape as Password
+— conditionally visible, never touched by `openConnectForm`/
+`loadConnectProfile`/`upsertProfile`, folded into `session.Credentials` by
+`credentialsFromForm` — because they answer the same question a password
+does: not where to connect or as whom, but how to prove it and how to trust
+what answers, both of which end at `Dial` and nowhere else. Identity is
+SFTP-only and only when the auth mode is not password (there is nothing to
+name a key file for otherwise); Known Hosts is SFTP-only regardless of auth
+mode, since host-key verification happens either way; Verify and CA File are
+FTPS-only, and CA File further hides once Verify is set to "insecure" — a
+certificate to trust is moot once every certificate is accepted. Each
+overrides — replaces, not merges with — whatever the Dialer was configured
+with at startup (`sftpsession.Config.IdentityFiles`/`KnownHostsPath`,
+`ftpsession.Config.RootCAFile`) when the form's field is non-empty, the same
+override-wins-else-fall-back pattern `Dialer.password` already used for
+Password. `FTPSInsecure` is the one exception: it is ORed with the Dialer's
+own `InsecureSkipVerify` rather than overriding it, so a blank form field can
+never quietly turn a Dialer already configured insecure back on — the field
+can only ever make a connection *less* strict than its Dialer was
+configured, never more.
+
 This is also why `session.Dialer.Dial` takes a `session.Credentials`
 parameter now, alongside `Target`: credentials have to reach `Dial` somehow,
 and putting them on `Target` would mean either persisting them (Target is
@@ -726,8 +752,9 @@ path.
      whatthedock-styled form over Protocol/Host/Port/Username/Path, opened
      with `c`; it dials a `session.Target` and replaces the old hardcoded
      target menu.
-   - `--host/--user/--port/--path/--identity/--known-hosts` still reach a real
-     server; the form is the interactive path into the same dialers
+   - `--host/--user/--port/--path` still reach a real server at startup; the
+     form is the interactive path into the same dialers for that target and
+     every other one
    - ~~Profile persistence.~~ Done — a `[[profiles]]` array table in
      `config.toml`, via `config.Profile`; the form's Profile field cycles
      through them and `ctrl+s`/`ctrl+x` save/delete (see **Connect form**)
@@ -737,10 +764,15 @@ path.
      for that one attempt only — password mode is "prompt every time" by
      design, since profiles and config.toml never see it (see
      **Connect form**)
+   - ~~SFTP identity/known-hosts and FTPS verify/CA fields.~~ Done — Identity
+     and Known Hosts (SFTP), Verify and CA File (FTPS) are form fields now,
+     shown only when they apply, each overriding the CLI-flag-configured
+     default for that one attempt via `session.Credentials` (see
+     **Connect form**)
    - Still missing: keyring/config-file password storage (an alternative to
-     prompting every time), FTPS certificate verification as a form setting,
-     SFTP known-host mode as a form setting. `--identity`/`--known-hosts`
-     still only reach a real server via CLI flags, not the form
+     prompting every time). Nothing else waits on credential handling now —
+     every setting `--identity`/`--known-hosts`/`--ftps-ca`/`--ftps-insecure`
+     configure at startup can also be set per attempt from the form
 
 5. Improve transfer queue behavior.
    - Configurable parallelism — the cap is now `Model.maxParallel`
@@ -797,9 +829,13 @@ path.
 - All three seams (`session.Dialer`, `vfs.FS`, `transfer.Engine`) now have
   both a fake and a real implementation, which is the evidence they are the
   right shape
-- The connect form has an Auth/Password field (see **Connect form**), but
-  SFTP identity files, agent socket, FTPS certificate verification, and
-  known-host mode are still CLI-flag-only, not form fields
+- The connect form has Auth/Password, Identity/Known Hosts, and Verify/CA
+  File fields (see **Connect form**), covering everything `--identity`,
+  `--known-hosts`, `--ftps-ca`, and `--ftps-insecure` configure at startup.
+  Still missing: no way to point at a different agent socket than
+  `SSH_AUTH_SOCK`, and known-host verification is strict-or-nothing — a
+  known_hosts override lets a different file be strict against, but there is
+  still no ask/accept-once flow for a host key that file does not have
 - No real credential storage: the form's password is typed fresh for every
   connect attempt and never persisted, matching the documented default of
   "prompt every time" — there is no keyring or config-file option yet, and

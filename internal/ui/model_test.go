@@ -1422,15 +1422,20 @@ func TestConnectFormRendersFields(t *testing.T) {
 	model = press(t, model, runes("c"))
 
 	plain := ansi.Strip(model.View())
-	for _, want := range []string{"connect", "Profile", "Name", "Protocol", "Host", "Port", "Username", "Auth", "Path", "sftp"} {
+	for _, want := range []string{
+		"connect", "Profile", "Name", "Protocol", "Host", "Port", "Username",
+		"Auth", "Identity", "Known Hosts", "Path", "sftp",
+	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("connect form is missing %q", want)
 		}
 	}
-	// The default auth is agent/key, so Password has nothing to do yet and
-	// should not clutter the form.
-	if strings.Contains(plain, "Password") {
-		t.Errorf("connect form shows Password before password auth is chosen")
+	// The default auth is agent/key, so Password has nothing to do yet; the
+	// protocol is sftp, so the FTPS-only fields have nothing to do either.
+	for _, absent := range []string{"Password", "Verify", "CA File"} {
+		if strings.Contains(plain, absent) {
+			t.Errorf("connect form shows %q when it should be hidden", absent)
+		}
 	}
 }
 
@@ -1473,6 +1478,122 @@ func TestConnectFormAuthFieldOnlyOfferedForSFTP(t *testing.T) {
 	}
 	if !model.connectFieldVisible(connectFieldPassword) {
 		t.Fatalf("password field should be visible for ftp")
+	}
+}
+
+func TestConnectFormIdentityAndKnownHostsVisibility(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+
+	// Default auth is agent/key: both fields are offered for SFTP.
+	if !model.connectFieldVisible(connectFieldIdentity) {
+		t.Fatalf("identity field should be visible for sftp with agent/key auth")
+	}
+	if !model.connectFieldVisible(connectFieldKnownHosts) {
+		t.Fatalf("known hosts field should be visible for sftp")
+	}
+
+	// Switching to password auth: there is no key to name a file for.
+	model.connectField = connectFieldAuth
+	model = press(t, model, runes("l"))
+	if model.connectFieldVisible(connectFieldIdentity) {
+		t.Fatalf("identity field should be hidden once password auth is chosen")
+	}
+	if !model.connectFieldVisible(connectFieldKnownHosts) {
+		t.Fatalf("known hosts field should stay visible under password auth (host key verification still happens)")
+	}
+
+	// Neither applies outside SFTP.
+	model.connectField = connectFieldProtocol
+	model = press(t, model, runes("l")) // sftp -> ftp
+	if model.connectFieldVisible(connectFieldIdentity) || model.connectFieldVisible(connectFieldKnownHosts) {
+		t.Fatalf("identity/known-hosts fields should be hidden for ftp")
+	}
+}
+
+func TestConnectFormFTPSVerifyAndCAVisibility(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model = press(t, model, runes("c"))
+
+	if model.connectFieldVisible(connectFieldFTPSVerify) || model.connectFieldVisible(connectFieldFTPSCA) {
+		t.Fatalf("FTPS fields should be hidden for sftp")
+	}
+
+	model.connectField = connectFieldProtocol
+	model = press(t, model, runes("l"))
+	model = press(t, model, runes("l")) // sftp -> ftp -> ftps
+
+	if !model.connectFieldVisible(connectFieldFTPSVerify) {
+		t.Fatalf("verify field should be visible for ftps")
+	}
+	if !model.connectFieldVisible(connectFieldFTPSCA) {
+		t.Fatalf("CA field should be visible for ftps while verify is on")
+	}
+
+	model.connectField = connectFieldFTPSVerify
+	model = press(t, model, runes("l")) // verify -> insecure
+	if model.connectFieldVisible(connectFieldFTPSCA) {
+		t.Fatalf("CA field should be hidden once verify is set to insecure")
+	}
+}
+
+func TestConnectFormConnectsWithIdentityAndKnownHostsOverrides(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	model = press(t, model, runes("c"))
+
+	model.connectField = connectFieldIdentity
+	model = press(t, model, runes("/tmp/my_key"))
+	model.connectField = connectFieldKnownHosts
+	model = press(t, model, runes("/tmp/my_known_hosts"))
+
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = settle(t, updated.(Model), cmd)
+
+	if model.overlay != overlayNone {
+		t.Fatalf("alt+enter did not close the overlay")
+	}
+	got := dialer.creds[len(dialer.creds)-1]
+	if got.IdentityFile != "/tmp/my_key" || got.KnownHostsPath != "/tmp/my_known_hosts" {
+		t.Fatalf("credentials = %+v, want the typed identity/known-hosts overrides", got)
+	}
+}
+
+func TestConnectFormConnectsWithFTPSCAAndInsecureOverrides(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model, _ := loadedModelWithDialer(t, dialer)
+	model = press(t, model, runes("c"))
+
+	model.connectField = connectFieldProtocol
+	model = press(t, model, runes("l"))
+	model = press(t, model, runes("l")) // sftp -> ftp -> ftps
+	model.connectField = connectFieldPassword
+	model = press(t, model, runes("s3cret"))
+	model.connectField = connectFieldFTPSCA
+	model = press(t, model, runes("/tmp/ca.pem"))
+
+	updated, cmd := model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = settle(t, updated.(Model), cmd)
+
+	if model.overlay != overlayNone {
+		t.Fatalf("alt+enter did not close the overlay")
+	}
+	got := dialer.creds[len(dialer.creds)-1]
+	if got.FTPSCAFile != "/tmp/ca.pem" || got.FTPSInsecure {
+		t.Fatalf("credentials = %+v, want the typed CA file and insecure left off", got)
+	}
+
+	// Now flip Verify to insecure and reconnect.
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldFTPSVerify
+	model = press(t, model, runes("l"))
+
+	updated, cmd = model.updateKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	model = settle(t, updated.(Model), cmd)
+
+	got = dialer.creds[len(dialer.creds)-1]
+	if !got.FTPSInsecure {
+		t.Fatalf("credentials = %+v, want FTPSInsecure set once Verify is switched to insecure", got)
 	}
 }
 

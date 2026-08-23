@@ -83,6 +83,27 @@ type Credentials struct {
 	// only as a fallback after they fail. FTP and FTPS ignore it, since they
 	// have no other auth method to skip.
 	PasswordOnly bool
+
+	// IdentityFile is SFTP-specific: it overrides the Dialer's configured
+	// identity files with this single path, and implies not offering the
+	// agent — the same as the --identity flag does at startup, but for one
+	// attempt. Empty defers to however the Dialer was already configured.
+	IdentityFile string
+	// KnownHostsPath is SFTP-specific: it overrides the Dialer's configured
+	// known_hosts file for this attempt. Empty defers to however the Dialer
+	// was already configured.
+	KnownHostsPath string
+
+	// FTPSCAFile is FTPS-specific: a PEM file to trust for this attempt,
+	// overriding the Dialer's own configured one. Empty defers to however
+	// the Dialer was already configured.
+	FTPSCAFile string
+	// FTPSInsecure is FTPS-specific: it accepts any server certificate for
+	// this attempt. It only ever turns verification off, never back on —
+	// ORed with the Dialer's own configured setting rather than replacing
+	// it, so this cannot silently make a Dialer already configured insecure
+	// look verified.
+	FTPSInsecure bool
 }
 
 // Conn is a live connection. Its FS and Engine are valid only until the
