@@ -500,7 +500,13 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			return nil
 		}
 		scan := m.preflight
-		summary := fmt.Sprintf("%d file(s) already exist at their destination", scan.conflictCount())
+		idx := scan.currentConflictIndex()
+		if idx < 0 {
+			return nil
+		}
+		current := scan.files[idx]
+		summary := fmt.Sprintf("file %d of %d: %s — %s here, %s at destination",
+			scan.resolvedConflictCount()+1, scan.conflictCount(), current.name, formatSize(current.size), formatSize(current.conflict.Size))
 		rows := make([]string, 0, int(conflictPolicyCount)+4)
 		rows = append(rows, renderer.Styles.DetailBody.Width(68).Render(summary), "")
 		for p := conflictPolicy(0); p < conflictPolicyCount; p++ {
@@ -508,8 +514,9 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		}
 		rows = append(rows, "", renderer.RenderSoftHints(68,
 			tideui.SoftHint{Key: "↑↓", Label: "select"},
-			tideui.SoftHint{Key: "enter", Label: "apply to queue"},
-			tideui.SoftHint{Key: "s", Label: "apply & remember"},
+			tideui.SoftHint{Key: "enter", Label: "this file"},
+			tideui.SoftHint{Key: "a", Label: "all"},
+			tideui.SoftHint{Key: "s", Label: "all+remember"},
 			tideui.SoftHint{Key: "esc", Label: "cancel"}))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "file exists", Width: 74, Content: renderer.RenderSoftBody(74, strings.Join(rows, "\n"))})
 		return &overlay

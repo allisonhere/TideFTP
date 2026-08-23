@@ -101,7 +101,7 @@ func TestConflictOverwriteQueuesUnconditionally(t *testing.T) {
 	}
 }
 
-func TestConflictOverwriteIfSourceNewerAppliesPerFile(t *testing.T) {
+func TestConflictOverwriteIfSourceNewerAppliesPerFileWhenAppliedToAll(t *testing.T) {
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := old.Add(24 * time.Hour)
 
@@ -125,14 +125,14 @@ func TestConflictOverwriteIfSourceNewerAppliesPerFile(t *testing.T) {
 		t.Fatalf("overlay = %v, want overlayConflict", model.overlay)
 	}
 	model.preflight.cursor = int(conflictOverwriteIfSourceNewer)
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	model = press(t, model, runes("a"))
 
 	if len(model.transfers) != 1 || model.transfers[0].Destination != testTarget.StartPath+"/newer.txt" {
 		t.Fatalf("transfers = %+v, want only newer.txt queued", model.transfers)
 	}
 }
 
-func TestConflictOverwriteIfDifferentSizeAppliesPerFile(t *testing.T) {
+func TestConflictOverwriteIfDifferentSizeAppliesPerFileWhenAppliedToAll(t *testing.T) {
 	dst := &conflictFS{entries: map[string][]domain.Entry{
 		testTarget.StartPath: {
 			{Name: "changed.txt", Size: 5},
@@ -150,7 +150,7 @@ func TestConflictOverwriteIfDifferentSizeAppliesPerFile(t *testing.T) {
 
 	model = press(t, model, runes("u"))
 	model.preflight.cursor = int(conflictOverwriteIfDifferentSize)
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	model = press(t, model, runes("a"))
 
 	if len(model.transfers) != 1 || model.transfers[0].Destination != testTarget.StartPath+"/changed.txt" {
 		t.Fatalf("transfers = %+v, want only changed.txt queued", model.transfers)
@@ -175,7 +175,7 @@ func TestConflictResumeSetsOffsetAndSkipsCompleteFiles(t *testing.T) {
 
 	model = press(t, model, runes("u"))
 	model.preflight.cursor = int(conflictResume)
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	model = press(t, model, runes("a"))
 
 	if len(model.transfers) != 1 {
 		t.Fatalf("transfers = %+v, want only partial.bin queued (complete.bin has nothing to resume)", model.transfers)
@@ -238,6 +238,76 @@ func TestConflictSessionScopeRemembersThePolicyForLaterBatches(t *testing.T) {
 	}
 	if len(model.transfers) != 0 {
 		t.Fatalf("transfers = %+v, want nothing queued (remembered policy was Skip)", model.transfers)
+	}
+}
+
+func TestConflictThisFileAdvancesToTheNextConflictWithoutQueuing(t *testing.T) {
+	dst := &conflictFS{entries: map[string][]domain.Entry{
+		testTarget.StartPath: {
+			{Name: "a.txt", Size: 5},
+			{Name: "b.txt", Size: 5},
+		},
+	}}
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: dst, engine: newScriptedEngine()})
+	model.focus = focusLocal
+	model.local.entries = []domain.Entry{
+		{Name: "a.txt", Size: 20},
+		{Name: "b.txt", Size: 20},
+	}
+	model.local.cursor = 0
+	model.local.selected = map[string]bool{"a.txt": true, "b.txt": true}
+
+	model = press(t, model, runes("u"))
+	if model.overlay != overlayConflict || model.preflight.conflictCount() != 2 {
+		t.Fatalf("setup: overlay=%v conflicts=%v", model.overlay, model.preflight)
+	}
+
+	model.preflight.cursor = int(conflictOverwrite)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayConflict || model.preflight == nil {
+		t.Fatalf("resolving the first of two conflicts closed the overlay early: overlay=%v", model.overlay)
+	}
+	if len(model.transfers) != 0 {
+		t.Fatalf("transfers = %+v, want nothing queued until every conflict in the batch is resolved", model.transfers)
+	}
+	idx := model.preflight.currentConflictIndex()
+	if idx < 0 || model.preflight.files[idx].name != "b.txt" {
+		t.Fatalf("expected the overlay to now be asking about b.txt, files = %+v", model.preflight.files)
+	}
+}
+
+func TestConflictThisFileResolvesEachFileWithItsOwnPolicy(t *testing.T) {
+	dst := &conflictFS{entries: map[string][]domain.Entry{
+		testTarget.StartPath: {
+			{Name: "keep.txt", Size: 5},
+			{Name: "drop.txt", Size: 5},
+		},
+	}}
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: dst, engine: newScriptedEngine()})
+	model.focus = focusLocal
+	model.local.entries = []domain.Entry{
+		{Name: "keep.txt", Size: 20},
+		{Name: "drop.txt", Size: 20},
+	}
+	model.local.cursor = 0
+	model.local.selected = map[string]bool{"keep.txt": true, "drop.txt": true}
+
+	model = press(t, model, runes("u"))
+	model.preflight.cursor = int(conflictOverwrite)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter}) // resolves keep.txt: Overwrite
+
+	if model.overlay != overlayConflict {
+		t.Fatalf("overlay = %v, want it still open on drop.txt", model.overlay)
+	}
+	model.preflight.cursor = int(conflictSkip)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter}) // resolves drop.txt: Skip
+
+	if model.overlay != overlayNone || model.preflight != nil {
+		t.Fatalf("overlay/preflight did not clear once every conflict was resolved: overlay=%v preflight=%v", model.overlay, model.preflight)
+	}
+	if len(model.transfers) != 1 || model.transfers[0].Destination != testTarget.StartPath+"/keep.txt" {
+		t.Fatalf("transfers = %+v, want only keep.txt queued (drop.txt was Skipped)", model.transfers)
 	}
 }
 

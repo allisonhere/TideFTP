@@ -48,10 +48,12 @@ func conflictPolicyLabel(policy conflictPolicy) string {
 }
 
 // handleConflictKey routes keys while overlayConflict is open: up/down move
-// the policy row cursor, enter applies it to this batch only, s applies it
-// and remembers it for the rest of the session, esc/q/n cancels the whole
-// batch — including any files in it that had no conflict at all, the same
-// all-or-nothing cancel every other confirm overlay already has.
+// the policy row cursor, enter applies it to just the one conflict currently
+// shown and advances to the next (or commits if that was the last one), a
+// applies it to every remaining conflict in the batch at once, s does that
+// and also remembers it for the rest of the session, esc/q/n cancels the
+// whole batch — including any files in it that had no conflict at all, the
+// same all-or-nothing cancel every other confirm overlay already has.
 func (m *Model) handleConflictKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "q", "n":
@@ -67,45 +69,65 @@ func (m *Model) handleConflictKey(msg tea.KeyMsg) tea.Cmd {
 			m.preflight.moveCursor(1)
 		}
 	case "enter", "y":
-		return m.confirmConflict(false)
+		return m.resolveOneConflict()
+	case "a":
+		return m.resolveAllConflicts(false)
 	case "s":
-		return m.confirmConflict(true)
+		return m.resolveAllConflicts(true)
 	}
 	return nil
 }
 
-// confirmConflict applies the policy under the overlay's cursor to the
-// pending scan and queues the result. remember additionally sets
-// Model.sessionConflictPolicy, so a later conflicting batch resolves the
-// same way without asking again.
-func (m *Model) confirmConflict(remember bool) tea.Cmd {
+// resolveOneConflict applies the overlay cursor's policy to just the
+// conflict currently shown. If another conflict remains in the batch, the
+// overlay stays open on it; once every conflict has a resolution, the whole
+// batch — resolved conflicts and clean files alike — queues.
+func (m *Model) resolveOneConflict() tea.Cmd {
 	if m.preflight == nil {
 		return nil
+	}
+	policy := conflictPolicy(m.preflight.cursor)
+	if m.preflight.resolveCurrent(policy) {
+		return nil // another conflict remains; stay open on it
 	}
 	scan := *m.preflight
 	m.preflight = nil
 	m.overlay = overlayNone
+	m.commitScan(scan)
+	return nil
+}
 
-	policy := conflictPolicy(scan.cursor)
+// resolveAllConflicts applies the overlay cursor's policy to every
+// remaining unresolved conflict in the batch at once and queues
+// immediately. remember additionally sets Model.sessionConflictPolicy, so a
+// later conflicting batch resolves the same way without asking again.
+func (m *Model) resolveAllConflicts(remember bool) tea.Cmd {
+	if m.preflight == nil {
+		return nil
+	}
+	policy := conflictPolicy(m.preflight.cursor)
+	m.preflight.resolveAllRemaining(policy)
 	if remember {
 		m.sessionConflictPolicy = &policy
 	}
-	m.commitScan(scan, &policy)
+	scan := *m.preflight
+	m.preflight = nil
+	m.overlay = overlayNone
+	m.commitScan(scan)
 	return nil
 }
 
 // commitScan turns a resolved preflightScan into queued domain.Transfers and
-// starts the queue. policy is nil when scan has no conflicts at all — every
-// file queues unconditionally in that case. Otherwise every conflicting
-// file is resolved per *policy; a clean file (no conflict) always queues
-// regardless of policy.
-func (m *Model) commitScan(scan preflightScan, policy *conflictPolicy) {
+// starts the queue. Every conflicting file must already have a resolution
+// by the time this runs (resolveOneConflict/resolveAllConflicts guarantee
+// it); a clean file (no conflict) always queues unconditionally.
+func (m *Model) commitScan(scan preflightScan) {
 	claimed := map[string]bool{}
 	queued := 0
 	for _, f := range scan.files {
 		dst, resumeFrom := f.dst, int64(0)
 		if f.conflict != nil {
-			switch *policy {
+			switch *f.resolution {
 			case conflictOverwrite:
 				// dst and resumeFrom already right: overwrite unconditionally.
 			case conflictOverwriteIfSourceNewer:

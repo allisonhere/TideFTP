@@ -1161,6 +1161,9 @@ type preflightFile struct {
 	size     int64
 	modified time.Time
 	conflict *domain.Entry
+	// resolution is set once the conflict overlay has decided what to do
+	// with this file — nil until then. Meaningless when conflict is nil.
+	resolution *conflictPolicy
 }
 
 // preflightScan is the result of walking every folder in a queueTransfer
@@ -1205,6 +1208,53 @@ func (s *preflightScan) conflictCount() int {
 func (s *preflightScan) moveCursor(delta int) {
 	n := int(conflictPolicyCount)
 	s.cursor = ((s.cursor+delta)%n + n) % n
+}
+
+// resolvedConflictCount is how many of the scan's conflicts already have a
+// resolution — for the overlay's "file X of Y" progress line.
+func (s *preflightScan) resolvedConflictCount() int {
+	n := 0
+	for _, f := range s.files {
+		if f.conflict != nil && f.resolution != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// currentConflictIndex is the first file with a conflict still waiting on a
+// resolution — the one overlayConflict is asking about right now. -1 once
+// every conflict has one.
+func (s *preflightScan) currentConflictIndex() int {
+	for i, f := range s.files {
+		if f.conflict != nil && f.resolution == nil {
+			return i
+		}
+	}
+	return -1
+}
+
+// resolveCurrent assigns policy to the conflict currentConflictIndex points
+// at and reports whether any conflict is still unresolved afterward — the
+// caller's cue to keep the overlay open on the next one rather than commit.
+func (s *preflightScan) resolveCurrent(policy conflictPolicy) bool {
+	idx := s.currentConflictIndex()
+	if idx < 0 {
+		return false
+	}
+	s.files[idx].resolution = &policy
+	return s.currentConflictIndex() >= 0
+}
+
+// resolveAllRemaining assigns policy to every conflict that doesn't already
+// have a resolution — the "apply to all" and remembered-session paths.
+func (s *preflightScan) resolveAllRemaining(policy conflictPolicy) {
+	for i := range s.files {
+		if s.files[i].conflict != nil && s.files[i].resolution == nil {
+			p := policy
+			s.files[i].resolution = &p
+		}
+	}
 }
 
 // preflightScanMsg reports beginPreflightScan's result.
@@ -1336,11 +1386,12 @@ func (m *Model) applyPreflightScan(msg preflightScanMsg) {
 			m.overlay = overlayPreflight
 			return
 		}
-		m.commitScan(scan, nil)
+		m.commitScan(scan)
 		return
 	}
 	if m.sessionConflictPolicy != nil {
-		m.commitScan(scan, m.sessionConflictPolicy)
+		scan.resolveAllRemaining(*m.sessionConflictPolicy)
+		m.commitScan(scan)
 		return
 	}
 	m.preflight = &scan
@@ -1357,7 +1408,7 @@ func (m *Model) confirmPreflightQueue() tea.Cmd {
 	}
 	scan := m.preflight
 	m.preflight = nil
-	m.commitScan(*scan, nil)
+	m.commitScan(*scan)
 	return nil
 }
 

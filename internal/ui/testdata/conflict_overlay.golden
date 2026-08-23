@@ -7,7 +7,7 @@
 │    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
 │           ╭─ tideftp · file exists ──────────────────────────────────────────────────╮           │
 │           │                                                                          │           │
-│           │  1 file(s) already exist at their destination                            │           │
+│           │  file 1 of 1: index.html — 8.0 KB here, 8.0 KB at destination            │           │
 │           │                                                                          │           │
 │           │  ▌ Overwrite                                                             │           │
 │           │    Overwrite if source newer                                             │           │
@@ -17,7 +17,7 @@
 │           │    Rename                                                                │           │
 │           │    Skip                                                                  │           │
 │           │                                                                          │           │
-│           │    ↑↓ select   enter apply to queue   s apply & remember   esc cancel    │           │
+│           │    ↑↓ select   enter this file   a all   s all+remember   esc cancel     │           │
 │           │                                                                          │           │
 ╰───────────╰──────────────────────────────────────────────────────────────────────────╯───────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮

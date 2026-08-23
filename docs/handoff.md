@@ -71,11 +71,14 @@ Implemented:
   checks its destination, and any that already exists opens `overlayConflict`
   with the full FileZilla-style option list from Product Decisions —
   Overwrite / Overwrite if source newer / Overwrite if different size /
-  Overwrite if different size or source newer / Resume / Rename / Skip —
-  applied to the whole conflicting batch at once. `enter` applies it to this
-  queue, `s` applies it and remembers it for the session. Resume is real:
-  both `internal/sftpsession` and `internal/ftpsession` now move bytes
-  starting from an offset instead of always truncating the destination
+  Overwrite if different size or source newer / Resume / Rename / Skip.
+  All three product-decision scopes are real: `enter` resolves just the one
+  conflicting file shown and advances to the next (**this file**), `a`
+  applies the choice to every remaining conflict in the batch at once
+  (**current queue**), `s` does that and also remembers it for later
+  batches (**this session**). Resume is real: both `internal/sftpsession`
+  and `internal/ftpsession` now move bytes starting from an offset instead
+  of always truncating the destination
 
 Git repository state:
 
@@ -929,19 +932,35 @@ actually found does anything visibly change.
 `preflightScan` becomes queued `domain.Transfer` rows. It replaces three
 previously-separate copies of nearly the same append loop: the plain-file
 instant-queue path (now gone), `confirmPreflightQueue`'s folder-summary
-confirm, and the new conflict-resolved path all funnel through it now,
-parameterized by an optional `*conflictPolicy` (nil means "nothing to
-resolve, queue everything"). A fix to how a `domain.Transfer` gets built
-from a scan now lives in one place.
+confirm, and the new conflict-resolved path all funnel through it now. It
+takes no policy parameter — every conflicting `preflightFile` already
+carries its own `resolution *conflictPolicy` by the time `commitScan` ever
+sees it, set per-file rather than once for the whole batch (see below). A
+fix to how a `domain.Transfer` gets built from a scan now lives in one
+place.
 
-Six of the seven Product Decisions options are per-file rules evaluated
-inside `commitScan`'s loop even though the *prompt* is a single batch
-decision (see **Context** in the plan this shipped from — a deliberate
-scope cut from FileZilla's true per-file "this file" scope, which would
-prompt once per conflicting file): "Overwrite if source newer" still only
-overwrites the files that are actually newer, "Resume" still only resumes
-files with something left to resume, and so on — one policy choice, evaluated
-per file. `conflictResume`'s guard (`f.conflict.Size >= f.size`) matters
+The overlay resolves conflicts one file at a time, matching FileZilla's own
+"this file" scope literally rather than only in name.
+`preflightScan.currentConflictIndex()` is the first file with a conflict
+and no `resolution` yet — the one `overlayConflict` is showing. `enter`
+(`resolveOneConflict`) sets just that file's `resolution` to the row under
+the cursor and, if another unresolved conflict remains, leaves the overlay
+open on it rather than committing; the overlay's title line
+("file 2 of 5: ...") comes from `resolvedConflictCount()`. `a`
+(`resolveAllConflicts`) instead calls `resolveAllRemaining`, which does the
+same assignment to every still-unresolved conflict at once — the "current
+queue" scope — and `s` does that plus sets `Model.sessionConflictPolicy` —
+"this session". Both `resolveOneConflict` and `resolveAllConflicts` commit
+once nothing is left unresolved, so a batch of one conflict behaves
+identically to a plain `enter` under all three scopes: nothing to advance
+to, nothing left over, straight to committing.
+
+Six of the seven policies are themselves per-file rules regardless of which
+scope picked them: "Overwrite if source newer" still only overwrites the
+files that are actually newer, "Resume" still only resumes files with
+something left to resume, and so on — `commitScan`'s loop evaluates each
+file's own `*f.resolution` against its own conflict, not some batch-wide
+average. `conflictResume`'s guard (`f.conflict.Size >= f.size`) matters
 here: a destination already at least as large as the source has nothing
 left to continue, so it's treated as already complete and skipped rather
 than resumed into a corrupt state or silently truncated.
@@ -1107,12 +1126,8 @@ this.
   profile — every unknown host always prompts today
 - Conflict resolution is real now (see **Conflict resolution**): a queued
   file whose destination already exists opens `overlayConflict` with every
-  option from Product Decisions above, including Resume. The one deliberate
-  simplification from that list: there is no true per-file "this file"
-  scope — a batch's conflicts are resolved with one chosen policy applied to
-  all of them (per-file rules like "if source newer" still evaluate
-  per-file, just without a separate prompt for each). "Current queue" and
-  "this session" both work as described
+  option from Product Decisions above, including Resume, and all three
+  scopes work as described — this file, current queue, this session
 - Folders now queue recursively — a preflight scan flattens them into
   individual file transfers before confirming (see **Recursive folders**);
   no adapter changes needed, since `transfer.Engine` still only ever sees
