@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"tideftp/internal/config"
@@ -134,55 +135,102 @@ func TestSetBottomTabReturnsNilForNonStatsTabs(t *testing.T) {
 	}
 }
 
-func TestRenderThroughputGraphAllZeroSamplesRendersBlank(t *testing.T) {
-	rows := renderThroughputGraph([]int64{0, 0, 0}, 3, 2)
-	want := []string{"   ", "   "}
-	if len(rows) != len(want) || rows[0] != want[0] || rows[1] != want[1] {
-		t.Fatalf("rows = %q, want %q", rows, want)
+func TestSmoothSamplesIsATrailingMovingAverage(t *testing.T) {
+	// window is 3: smoothed[i] = mean of samples[max(0,i-2)..i].
+	got := smoothSamples([]int64{0, 3, 6, 9, 12})
+	want := []int64{0, 1, 3, 6, 9} // means: 0, (0+3)/2=1, (0+3+6)/3=3, (3+6+9)/3=6, (6+9+12)/3=9
+	if len(got) != len(want) {
+		t.Fatalf("smoothSamples = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("smoothSamples = %v, want %v", got, want)
+		}
 	}
 }
 
-func TestRenderThroughputGraphPadsWhenFewerSamplesThanWidth(t *testing.T) {
-	// One sample at full scale, width 4: three blank columns on the left,
-	// the sample right-aligned in the last column.
-	rows := renderThroughputGraph([]int64{100}, 4, 1)
-	want := []string{"   █"}
-	if len(rows) != 1 || rows[0] != want[0] {
-		t.Fatalf("rows = %q, want %q", rows, want)
+func TestSmoothSamplesEmptyInputStaysEmpty(t *testing.T) {
+	if got := smoothSamples(nil); len(got) != 0 {
+		t.Fatalf("smoothSamples(nil) = %v, want empty", got)
 	}
 }
 
-func TestRenderThroughputGraphUsesOnlyTheMostRecentSamples(t *testing.T) {
-	// Five samples, width 2: only the last two (40, 50) should be visible;
-	// the peak among them is 50, so the last column (50) is full and the
-	// second-to-last (40) is 40/50 of a single row -> 8*40/50 = 6.4 -> round 6 eighths.
-	rows := renderThroughputGraph([]int64{10, 20, 30, 40, 50}, 2, 1)
-	want := []string{"▆█"} // ▆█: 6/8 and 8/8
-	if len(rows) != 1 || rows[0] != want[0] {
-		t.Fatalf("rows = %q, want %q", rows, want)
+func TestBresenhamRunConnectsADiagonal(t *testing.T) {
+	var got [][2]int
+	bresenhamRun(0, 0, 3, 3, func(x, y int) { got = append(got, [2]int{x, y}) })
+	want := [][2]int{{0, 0}, {1, 1}, {2, 2}, {3, 3}}
+	if len(got) != len(want) {
+		t.Fatalf("bresenhamRun points = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("bresenhamRun points = %v, want %v", got, want)
+		}
 	}
 }
 
-func TestRenderThroughputGraphInvalidDimensionsReturnNil(t *testing.T) {
-	if rows := renderThroughputGraph([]int64{1, 2, 3}, 0, 5); rows != nil {
+func TestBresenhamRunConnectsAVerticalJump(t *testing.T) {
+	var got []int
+	bresenhamRun(5, 0, 5, 4, func(x, y int) { got = append(got, y) })
+	want := []int{0, 1, 2, 3, 4}
+	if len(got) != len(want) {
+		t.Fatalf("bresenhamRun ys = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("bresenhamRun ys = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestRenderThroughputLineInvalidDimensionsReturnNil(t *testing.T) {
+	if rows := renderThroughputLine([]int64{1, 2, 3}, 0, 5); rows != nil {
 		t.Fatalf("width 0 = %v, want nil", rows)
 	}
-	if rows := renderThroughputGraph([]int64{1, 2, 3}, 5, 0); rows != nil {
+	if rows := renderThroughputLine([]int64{1, 2, 3}, 5, 0); rows != nil {
 		t.Fatalf("height 0 = %v, want nil", rows)
 	}
 }
 
-// TestRenderThroughputGraphColoredProducesRealANSIColor forces a color
-// profile (go test's stdout isn't a terminal, so lipgloss otherwise
-// auto-detects "no color" and segment would silently render plain text)
-// to prove renderThroughputGraphColored actually emits color codes, not
-// just the right glyphs.
-func TestRenderThroughputGraphColoredProducesRealANSIColor(t *testing.T) {
+func TestRenderThroughputLineReturnsExactDimensions(t *testing.T) {
+	rows := renderThroughputLine([]int64{0, 100, 500, 200, 900, 300}, 6, 3)
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	for _, row := range rows {
+		if got := lipgloss.Width(row); got != 6 {
+			t.Fatalf("row width = %d, want 6: %q", got, row)
+		}
+	}
+}
+
+func TestRenderThroughputLineFlatZeroDrawsABaseline(t *testing.T) {
+	// A flat zero history is a flat line along the bottom, not a blank
+	// pane — an ECG-style baseline rather than "nothing happened yet"
+	// looking identical to "nothing has ever moved through this app".
+	rows := renderThroughputLine([]int64{0, 0, 0, 0}, 4, 2)
+	if lipgloss.Width(rows[0]) == 0 {
+		t.Fatalf("top row missing entirely")
+	}
+	// Bottom row's braille cells must have at least the bottom sub-row lit
+	// (codepoint > the blank braille cell, 0x2800) for every column.
+	for _, r := range []rune(ansi.Strip(rows[1])) {
+		if r <= 0x2800 {
+			t.Fatalf("bottom row has an empty cell %q, want a baseline dot in every column", r)
+		}
+	}
+}
+
+// TestRenderThroughputLineProducesRealANSIColor forces a color profile (go
+// test's stdout isn't a terminal, so lipgloss otherwise auto-detects "no
+// color" and segment would silently render plain text) to prove
+// renderThroughputLine actually emits color codes, not just glyphs.
+func TestRenderThroughputLineProducesRealANSIColor(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(previous)
 
-	rows := renderThroughputGraphColored([]int64{0, 500, 2000, 8000}, 4, 2)
+	rows := renderThroughputLine([]int64{0, 500, 2000, 8000}, 4, 2)
 	joined := strings.Join(rows, "\n")
 	if !strings.Contains(joined, "\x1b[") {
 		t.Fatalf("rows = %q, want ANSI escape codes present", rows)

@@ -80,11 +80,13 @@ Implemented:
   and `internal/ftpsession` now move bytes starting from an offset instead
   of always truncating the destination
 - A Stats tab (`6`, see **Stats tab**) alongside Queue/Active/Failed/
-  History/Log: a live snapshot line, a multi-row realtime throughput graph
-  (bottom-aligned Unicode eighth-block bars, most recent sample on the
-  right), session totals, averages over completed transfers, and a
-  per-protocol breakdown. Sampling runs on a 1-second tick — the first
-  periodic ticker anywhere in `internal/ui` — only while the tab is open
+  History/Log: a live snapshot line, a realtime throughput graph — a
+  smoothed, connected Unicode Braille line plot, gradient-colored by
+  intensity with a highlighted peak, on a fixed black background
+  regardless of theme — session totals, averages over completed transfers,
+  and a per-protocol breakdown. Sampling runs on a 1-second tick — the
+  first periodic ticker anywhere in `internal/ui` — only while the tab is
+  open
 
 Git repository state:
 
@@ -372,7 +374,7 @@ First build slice:
   resolution**)
 - `internal/ui/stats.go`: the Stats tab's data model (`statsSnapshot`),
   1-second ticking (`applyStatsTick`), aggregation (`computeStats`), and
-  the throughput graph renderer (`renderThroughputGraph`) — see **Stats
+  the throughput graph renderer (`renderThroughputLine`) — see **Stats
   tab**
 - `internal/ui/themes.go`: app theme registration, including `tide-night`
 - `internal/ui/model_test.go`: UI behavior tests, driven by a hand-scripted
@@ -1061,15 +1063,27 @@ rate is a derivative: `applyStatsTick` keeps exactly two pieces of
 carried state (`statsLastBytes`, `statsLastSampleAt`) to diff the total
 bytes moved against the previous tick.
 
-`renderThroughputGraph` draws with the "lower N eighths" Unicode block
-glyphs (▁▂▃▄▅▆▇█), which are already bottom-aligned — exactly a bar
-chart's convention — stacked across multiple rows for resolution beyond
-what one row of blocks could show. It was picked over a true braille
-dot-line plot (the other option offered) as equivalent visual ambition for
-meaningfully less rendering risk: a bar's fill height per column is a pure
-function of one value, whereas a connected braille line has to reason
-about slope between adjacent columns to look continuous rather than
-speckled.
+`renderThroughputLine` (`internal/ui/stats.go`) draws a true connected
+line with Unicode Braille dots rather than the stacked-block bar chart the
+first pass shipped with — a deliberate reversal of that pass's own
+reasoning (a block bar's fill height is a pure function of one value; a
+connected line has to reason about slope between columns to look
+continuous rather than speckled), made because the visual payoff turned
+out to be worth it on request. Each braille cell packs a 2-wide by 4-tall
+grid of sub-pixels (`brailleBits`, the standard Unicode Braille Patterns
+dot numbering), so the plotted resolution — and how much throughput
+history fits across the same terminal width — is double what one sample
+per column gave the bar chart. Two adjacent sub-columns whose values jump
+by more than one sub-row are connected with `bresenhamRun`, the standard
+integer line algorithm, so a sudden spike still reads as one stroke
+instead of two disconnected dots. `smoothSamples` runs a trailing 3-sample
+moving average over the window before any of this, since a raw 1-second
+reading is noisy enough on its own to make an unsmoothed connected line
+look jittery rather than fluid — this is also why a flat-zero history
+still draws a visible baseline along the bottom rather than rendering as
+nothing (`TestRenderThroughputLineFlatZeroDrawsABaseline` pins this): a
+connected line at zero is a real reading, not the absence of one, the way
+an ECG's flat baseline is still a trace.
 
 `renderStatsTab` packs everything but the graph into exactly two lines —
 a live snapshot on top, totals/averages/per-protocol breakdown combined
@@ -1087,17 +1101,21 @@ regardless of the active theme — on request, the one deliberate exception
 to "everything follows the theme" anywhere in this app, the same way a
 terminal monitoring widget (htop, an old oscilloscope-green VU meter)
 usually commits to one look rather than adapting to its surroundings.
-`statsLine` and `renderThroughputGraphColored` both go through
-`segment`/`clampView` (the same explicit-background-per-span technique
+`statsLine` and `renderThroughputLine` both go through `segment`/
+`clampView` (the same explicit-background-per-span technique
 `renderTransferRow`'s progress bar already used) rather than
 `renderer.Styles`, so nothing here can accidentally inherit the theme's
-colors. The graph is additionally tinted along `statsGradient`, a
-low-to-high ramp within the green family — each column's color comes from
-the same eighths value that decides its glyph, so a tall bar is both
-bigger *and* brighter, not decoration layered on top of the data but
-another encoding of it. `lipgloss`'s color-profile detection falls back to
-plain text when stdout isn't a real terminal (true of every `go test`
-run), which is why `TestRenderThroughputGraphColoredProducesRealANSIColor`
+colors. The graph is additionally tinted per terminal column along
+`statsGradient`, a low-to-high ramp within the green family, using
+whichever of that column's two sub-columns sits higher — a column near
+the window's peak is brighter, not just taller, so the color is another
+encoding of the data rather than decoration on top of it. The single
+column containing the window's highest point instead gets
+`statsHighlight`, a near-white green distinct from the gradient's own
+brightest step, so the peak still pops even when several neighboring
+columns are already near-saturated. `lipgloss`'s color-profile detection
+falls back to plain text when stdout isn't a real terminal (true of every
+`go test` run), which is why `TestRenderThroughputLineProducesRealANSIColor`
 has to force a profile with `lipgloss.SetColorProfile` to actually see the
 escape codes it's asserting on — everything else here is verified through
 `ansi.Strip`ped goldens, which were never going to catch a missing color

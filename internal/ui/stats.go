@@ -179,88 +179,163 @@ func formatRate(bytesPerSecond int64) string {
 	return formatSize(max(0, bytesPerSecond)) + "/s"
 }
 
-// eighthBlocks are the "lower N eighths" Unicode block glyphs, bottom-
-// aligned — index 0 is blank, index 8 is a full block. Exactly the
-// convention a bar chart growing from the bottom needs.
-var eighthBlocks = [9]rune{' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+// statsHighlight marks the single highest point in the visible window —
+// distinct from statsGradient's own brightest step, so the peak still pops
+// even when several nearby columns are already near-saturated.
+var statsHighlight = lipgloss.Color("#F2FFE0")
 
-// graphEighths windows samples to the last width of them (right-aligned,
-// left-padded with zeros if there aren't enough yet) and reports, for each
-// column, how many eighth-rows (0..height*8) it fills relative to the
-// window's own peak. Shared by renderThroughputGraph and its colored
-// counterpart so the two can never disagree about the underlying shape.
-func graphEighths(samples []int64, width, height int) []int {
-	window := make([]int64, width)
-	start := max(0, len(samples)-width)
+// smoothWindow is smoothSamples' trailing-average width: enough to take
+// the jitter off a noisy 1-second reading without smearing a genuine spike
+// into invisibility.
+const smoothWindow = 3
+
+// smoothSamples applies a trailing moving average of smoothWindow samples,
+// so the line reads as a flowing curve rather than jittering with every
+// raw reading's noise. Returns a slice the same length as samples.
+func smoothSamples(samples []int64) []int64 {
+	if len(samples) == 0 {
+		return samples
+	}
+	smoothed := make([]int64, len(samples))
+	var sum int64
+	for i, v := range samples {
+		sum += v
+		if i >= smoothWindow {
+			sum -= samples[i-smoothWindow]
+		}
+		smoothed[i] = sum / int64(min(i+1, smoothWindow))
+	}
+	return smoothed
+}
+
+// brailleBits maps a sub-pixel's (column, row) position within one braille
+// cell — column 0/1 left/right, row 0-3 top-to-bottom — to the bit it
+// contributes to that cell's Unicode Braille Pattern codepoint, per the
+// standard dot numbering (1,2,3,7 left top-to-bottom, 4,5,6,8 right).
+var brailleBits = [2][4]int{
+	{0x01, 0x02, 0x04, 0x40},
+	{0x08, 0x10, 0x20, 0x80},
+}
+
+const brailleBase = 0x2800
+
+// bresenhamRun calls plot(x, y) for every integer point on the line from
+// (x0,y0) to (x1,y1) inclusive — the standard integer line algorithm, used
+// here so two adjacent sub-columns whose values jump by more than one
+// sub-row still connect as one continuous stroke instead of two
+// disconnected dots.
+func bresenhamRun(x0, y0, x1, y1 int, plot func(x, y int)) {
+	dx, sx := abs(x1-x0), 1
+	if x0 > x1 {
+		sx = -1
+	}
+	dy, sy := -abs(y1-y0), 1
+	if y0 > y1 {
+		sy = -1
+	}
+	err := dx + dy
+	x, y := x0, y0
+	for {
+		plot(x, y)
+		if x == x1 && y == y1 {
+			return
+		}
+		e2 := 2 * err
+		if e2 >= dy {
+			err += dy
+			x += sx
+		}
+		if e2 <= dx {
+			err += dx
+			y += sy
+		}
+	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// renderThroughputLine draws samples (bytes/sec, oldest first) as a
+// connected line using Unicode Braille dots — 2 sub-columns and 4 sub-rows
+// per terminal cell, so the plotted resolution (and how much history fits
+// across the same width) is double what one sample per terminal column
+// would give. Samples are windowed to the last width*2 of them
+// (right-aligned, left-padded with zeros if there aren't enough yet),
+// lightly smoothed, then connected sub-pixel to sub-pixel with
+// bresenhamRun so a steep jump between readings still looks like one
+// stroke. Each terminal column is tinted along statsGradient by its own
+// value, and the column containing the single highest point in the window
+// gets statsHighlight instead. Returns exactly height ANSI-styled lines,
+// each width printable columns wide, on the Stats tab's fixed black
+// background, or nil if width or height isn't positive.
+func renderThroughputLine(samples []int64, width, height int) []string {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	subWidth, subHeight := width*2, height*4
+
+	window := make([]int64, subWidth)
+	start := max(0, len(samples)-subWidth)
 	visible := samples[start:]
-	copy(window[width-len(visible):], visible)
+	copy(window[subWidth-len(visible):], visible)
+	smoothed := smoothSamples(window)
 
-	peak := int64(1)
-	for _, v := range window {
+	peak, peakAt := int64(1), 0
+	for i, v := range smoothed {
 		if v > peak {
-			peak = v
+			peak, peakAt = v, i
 		}
 	}
 
-	eighths := make([]int, width)
-	for i, v := range window {
-		e := int(math.Round(float64(v) / float64(peak) * float64(height*8)))
-		eighths[i] = min(max(e, 0), height*8)
+	// y[i] is sub-column i's height from the bottom, in sub-rows.
+	y := make([]int, subWidth)
+	for i, v := range smoothed {
+		level := int(math.Round(float64(v) / float64(peak) * float64(subHeight-1)))
+		y[i] = min(max(level, 0), subHeight-1)
 	}
-	return eighths
-}
 
-// renderThroughputGraph draws samples (bytes/sec, oldest first) as a
-// multi-row block bar chart, most recent sample on the right — the
-// reading direction htop's meters use. Returns exactly height lines, each
-// width runes wide, or nil if width or height isn't positive. Degrades to
-// flat empty bars when every visible sample is zero, rather than dividing
-// by zero.
-func renderThroughputGraph(samples []int64, width, height int) []string {
-	if width <= 0 || height <= 0 {
-		return nil
+	dots := make([][]bool, subWidth)
+	for i := range dots {
+		dots[i] = make([]bool, subHeight)
 	}
-	eighths := graphEighths(samples, width, height)
-
-	rows := make([]string, height)
-	for r := range height {
-		// Row 0 is the top row; a column's band for row r spans eighths
-		// [(height-1-r)*8, (height-r)*8).
-		floor := (height - 1 - r) * 8
-		line := make([]rune, width)
-		for c, e := range eighths {
-			line[c] = eighthBlocks[min(max(e-floor, 0), 8)]
+	plot := func(x, yFromBottom int) {
+		if x < 0 || x >= subWidth {
+			return
 		}
-		rows[r] = string(line)
+		dots[x][subHeight-1-min(max(yFromBottom, 0), subHeight-1)] = true
 	}
-	return rows
-}
-
-// renderThroughputGraphColored is renderThroughputGraph with each column
-// tinted along statsGradient by its own fill level — the same eighths that
-// decide the glyph also decide the color, so a tall bar is both bigger and
-// brighter. Returns ANSI-styled rows, each exactly width printable columns
-// wide, on the Stats tab's fixed black background.
-func renderThroughputGraphColored(samples []int64, width, height int) []string {
-	if width <= 0 || height <= 0 {
-		return nil
+	plot(0, y[0])
+	for i := 1; i < subWidth; i++ {
+		bresenhamRun(i-1, y[i-1], i, y[i], plot)
 	}
-	eighths := graphEighths(samples, width, height)
-	maxEighths := height * 8
 
-	colorFor := func(e int) lipgloss.Color {
-		frac := float64(e) / float64(maxEighths)
+	colorFor := func(cellX int) lipgloss.Color {
+		if peakAt/2 == cellX {
+			return statsHighlight
+		}
+		level := max(y[cellX*2], y[cellX*2+1])
+		frac := float64(level) / float64(subHeight-1)
 		idx := int(frac * float64(len(statsGradient)-1))
 		return statsGradient[min(max(idx, 0), len(statsGradient)-1)]
 	}
 
 	rows := make([]string, height)
 	for r := range height {
-		floor := (height - 1 - r) * 8
 		var line strings.Builder
-		for _, e := range eighths {
-			filled := min(max(e-floor, 0), 8)
-			line.WriteString(segment(statsBackground, colorFor(e), string(eighthBlocks[filled])))
+		for c := range width {
+			bits := 0
+			for subCol := range 2 {
+				for subRow := range 4 {
+					if dots[c*2+subCol][r*4+subRow] {
+						bits |= brailleBits[subCol][subRow]
+					}
+				}
+			}
+			line.WriteString(segment(statsBackground, colorFor(c), string(rune(brailleBase+bits))))
 		}
 		rows[r] = clampView(line.String(), width, 1, statsBackground)
 	}
@@ -276,7 +351,7 @@ var knownProtocols = []string{"sftp", "ftp", "ftps"}
 // as much of the available height as possible — and a second line packing
 // in session totals, averages, and the per-protocol breakdown. Everything
 // here paints the fixed black/green palette rather than the active theme
-// (statsLine, renderThroughputGraphColored). Below a usable-graph floor it
+// (statsLine, renderThroughputLine). Below a usable-graph floor it
 // drops to just the two text lines, mirroring how renderBottomPane itself
 // falls back to "no rows yet" when there's no room for anything at all.
 func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []string {
@@ -309,7 +384,7 @@ func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []str
 	graphHeight := height - 2
 	lines := make([]string, 0, height)
 	lines = append(lines, line1)
-	lines = append(lines, renderThroughputGraphColored(m.statsHistory, width, graphHeight)...)
+	lines = append(lines, renderThroughputLine(m.statsHistory, width, graphHeight)...)
 	lines = append(lines, line2)
 	return lines
 }
