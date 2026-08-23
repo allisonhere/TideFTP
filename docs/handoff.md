@@ -247,9 +247,11 @@ First build slice:
 
 ## Code Map
 
-- `cmd/tideftp/main.go`: Bubble Tea program entrypoint; constructs the fake
-  remote adapter and the fake transfer engine, and wires them into the UI as
-  a `vfs.FS` pair plus a `transfer.Engine`
+- `cmd/tideftp/main.go`: Bubble Tea program entrypoint. `buildSession` wires
+  the demo fakes when no `--host` is given; otherwise it builds all three
+  real protocol dialers (SFTP, FTP, FTPS) and wraps them in a
+  `router.Dialer`, since the connect form can pick any of them per attempt
+  regardless of `--protocol` (see **Protocol routing**)
 - `internal/domain/domain.go`: shared entry and transfer types
 - `internal/vfs/vfs.go`: filesystem interface both panes browse through
   (`List`/`Child`/`Parent`). `List` blocks and takes a `context.Context`;
@@ -261,8 +263,14 @@ First build slice:
   loading state is visible when running by hand
 - `internal/transfer/transfer.go`: protocol-agnostic transfer engine
   interface (`Start`/`Cancel`/`Events`/`Close`) that FTP/FTPS/SFTP engines
-  will implement. Asynchronous by contract: `Start` returns immediately and
+  implement. Asynchronous by contract: `Start` returns immediately and
   everything afterwards arrives as a `transfer.Event`
+- `internal/transfer/runner.go`: `Runner` implements that whole interface —
+  starting, canceling, closing, exactly-one-terminal-event — over a
+  protocol-supplied `MoveFunc` that only knows how to move one transfer's
+  bytes. `internal/sftpsession` and `internal/ftpsession` each embed a
+  `*Runner` in their `Engine` rather than reimplementing the bookkeeping
+  (see **Shared transfer runner**)
 - `internal/faketransfer/faketransfer.go`: simulated engine, implements
   `transfer.Engine`; emits timed progress events and fails every fifth
   transfer so the Failed tab stays reachable
@@ -284,13 +292,18 @@ First build slice:
   `internal/ui` converts between the two
 - `internal/sftpsession/`: the real SFTP adapter. `sftpsession.go` dials
   (agent, key-file, and password auth, strict known_hosts), `fs.go`
-  implements `vfs.FS`, `engine.go` implements `transfer.Engine`. All three
-  share one `sftp.Client`, which is safe for concurrent use
+  implements `vfs.FS`, `engine.go` wraps a `transfer.Runner` with the
+  SFTP-specific `move`/`open`. All three share one `sftp.Client`, which is
+  safe for concurrent use
 - `internal/sftpsession/testserver_test.go`: a real SSH server with pkg/sftp's
   server half, on a loopback listener rooted at a temp directory. The adapter
   is tested against genuine protocol traffic, with no external sshd
 - `internal/ftpsession/`: the real FTP/FTPS adapter, over jlaffaye/ftp.
-  `pool.go` is the part that differs from SFTP and drives the package
+  `pool.go` is the part that differs from SFTP and drives the package;
+  `engine.go` wraps a `transfer.Runner` with the FTP-specific
+  `move`/`download`/`upload`
+- `internal/router/router.go`: `Dialer` picks a protocol-specific
+  `session.Dialer` by `Target.Protocol` (see **Protocol routing**)
 - `internal/ui/model.go`: Bubble Tea state, update loop, listing requests and
   replies, transfer queue, key/mouse routing; depends only on `vfs.FS` and
   `transfer.Engine`, never on a concrete adapter
@@ -306,6 +319,43 @@ First build slice:
 - `README.md`: quick run instructions and keybindings
 
 ## Design Notes
+
+### Protocol routing
+
+`model.dialer` is one `session.Dialer` — always was, and still is a single
+field with a single interface value. What changed is what that value is. It
+used to be whichever concrete adapter `--protocol` picked at startup, which
+meant the connect form's Protocol field was partly cosmetic: cycling it to a
+different protocol and connecting dialed the new target through the old
+adapter (an FTP target handed to the SFTP client, say), silently, since
+`fakesession` — the only dialer exercised by hand without a real server —
+ignores `Target.Protocol` entirely and so never surfaced the bug.
+
+`internal/router` fixes this by being the thing `model.dialer` actually
+holds when a real server is in play: `router.Dialer` wraps one real
+`session.Dialer` per protocol and picks between them by `Target.Protocol` on
+every call. `buildSession` in `cmd/tideftp/main.go` builds all three real
+adapters unconditionally now — not just the one `--protocol` names — because
+the form can reach any of them for any target, not only the one flags
+describe. `--protocol` still matters, just for less: it is now only what the
+one flag-described target uses to auto-connect at startup; every other
+target the form dials goes through whatever Protocol field it was given.
+
+FTP and FTPS are two separate `*ftpsession.Dialer` instances in the routing
+map — `ExplicitTLS` is a `Config` field fixed at construction, not a per-Dial
+parameter, so there is no single FTP dialer that could serve both. This is
+safe because `ftpsession.Dialer` is stateless: `Dial` builds a fresh pool per
+call, so nothing is shared between the two instances that construction-time
+config could leak across.
+
+Building three real adapters up front also meant relaxing a check: `--host`
+with `ftp`/`ftps` used to hard-fail at startup if `TIDEFTP_FTP_PASSWORD` was
+unset, because a password was the only way FTP could ever authenticate. Now
+the connect form's Password field is another way, supplied per attempt (see
+**Connect form**), so failing the whole process before the form ever opens
+would foreclose the case it exists for. A target with no password anywhere
+still fails to dial — just asynchronously, as a `connectFailedMsg` the user
+can react to by opening the form, rather than a startup error.
 
 ### FTP connections are borrowed, not shared
 
@@ -326,6 +376,60 @@ FTP also has no equivalent of `ssh.Client.Wait`, so a dropped connection is
 only noticed by trying to use one. `Conn.keepalive` sends a periodic `NOOP`;
 if the pool is too busy to lend a connection for it, that is itself evidence
 the connection is alive and the tick is skipped.
+
+`MKD`, unlike SFTP's `MkdirAll`, only ever creates the one directory it is
+given — it fails if that directory's own parent does not exist yet. An
+upload's destination directory used to get exactly one `MakeDir` call, which
+is enough when the parent already exists but silently fails to create
+anything for a destination nested two or more levels under directories that
+do not exist, where SFTP's `MkdirAll` would succeed. `makeDirAll` in
+`engine.go` walks the path from the root down, `MakeDir`-ing each level —
+mirroring what `MkdirAll` does for SFTP.
+
+`FS.List` runs `conn.List` on its own goroutine, since jlaffaye/ftp's calls
+are blocking with no context of their own, and races that goroutine against
+`ctx.Done()` to decide how long to wait. The result channel must be sent to
+exactly once, unconditionally — not selected against another case on the
+send side, which an earlier version of this did (`select { case done <-
+result{...}: case <-abandoned: discard }` inside the goroutine, racing a
+*buffered* send that could never actually block against an abandonment
+signal). A buffered send is always ready, so that select could go either
+way; picking the send left both the `ctx.Done()` branch in `List` (which had
+already returned) and the goroutine done with nothing claiming the
+connection — leaked, along with its pool slot, forever. The fix: the
+goroutine always sends; `List` picks exactly one of "got the result" or
+"gave up," and giving up spawns a cleanup goroutine that waits for the
+result and discards the connection once it arrives, rather than trying to
+race the decision at the point of giving up.
+
+### Shared transfer runner
+
+`internal/sftpsession/engine.go` and `internal/ftpsession/engine.go` used to
+each implement the whole `transfer.Engine` interface from scratch:
+`Start`/`Cancel`/`Close`/`run`/`canceled`/`emit`/`done`, the `running` map,
+the `wg`/`closed`/`quit` bookkeeping, even the `progressInterval`/`copyChunk`
+constants — identical between the two, because none of it is actually
+protocol-specific. Only how to move one transfer's bytes differs: FTP splits
+that into `download`/`upload` because `Stor` drains a reader itself rather
+than being driven in a loop, where SFTP's `copy` handles both directions the
+same way.
+
+`transfer.Runner` (`internal/transfer/runner.go`) is that shared bookkeeping,
+factored out once and used by both. It takes one `MoveFunc` — `func(req
+Request, stop, quit <-chan struct{}, report func(int64)) (int64, error)` —
+and implements the rest of `transfer.Engine` around it: starting, canceling,
+closing, and translating the `MoveFunc`'s result into exactly one terminal
+event (`Completed`, `Failed`, or `Canceled` when the error wraps
+`transfer.ErrCanceled`), which is the contract the UI's queue depends on.
+Each protocol's `Engine` is now just `*transfer.Runner` embedded alongside
+whatever it needs to actually move bytes (an `*sftp.Client`, a `*pool`), plus
+a `move` method passed to `transfer.NewRunner` as the `MoveFunc`. A fix to
+cancellation or close ordering now lives in one place instead of needing to
+be re-applied twice and — history being what it is — probably diverging.
+
+`transfer.IsCanceled(stop, quit)` and the `ProgressInterval`/`CopyChunk`
+constants moved to the `transfer` package alongside `Runner` for the same
+reason: both engines' copy loops used identical logic, just copy-pasted.
 
 ### FTPS
 
@@ -418,9 +522,19 @@ Four things the lifecycle has to get right, all in `model.go`:
 - **A stale disconnect is ignored.** Each connection has its own watcher, so an
   old one reporting in must not tear down the connection that replaced it.
   Both checks compare against the current `conn`/`target`.
-- **In-flight transfers fail on a drop.** The bytes stopped moving whether or
-  not the user asked them to, so queued and active rows are marked Failed with
-  the reason. Finished rows are left alone.
+- **In-flight transfers fail on a drop — including a reconnect the user asked
+  for.** The bytes stopped moving whether or not the user asked them to, so
+  queued and active rows are marked Failed with the reason; finished rows
+  are left alone. This has to happen synchronously in `clearConnection`
+  itself, not by waiting for the old connection's `disconnectedMsg`:
+  `connect` calls `clearConnection` to tear down the previous connection
+  *before* dialing the next one, and by the time that old connection's own
+  disconnect message eventually arrives, `m.conn` already names the new
+  connection — so the staleness check above would discard it, and anything
+  it was carrying would never get marked Failed at all, staying Active
+  forever. `applyDisconnected` calls `clearConnection` too, for the ordinary
+  drop-or-user-disconnect path, so both routes funnel through the one place
+  that actually does the failing.
 - **Transfers refuse to start while disconnected.** `startQueuedTransfers` is
   guarded as well as `queueUpload`/`queueDownload`, since a queue can outlive
   the connection that filled it.
@@ -455,6 +569,20 @@ the work they are given but never queue. The contract that keeps this honest:
 every accepted Request must produce exactly one terminal event (Completed,
 Failed, or Canceled), or the UI's queue stalls waiting for a slot.
 
+`applyTransferEvent` clamps `BytesDone` to `BytesTotal` to keep a
+misreported total from showing over 100% — but only when `BytesTotal` is
+actually positive. A listing can report a size of 0 for a file that turns
+out not to be empty (an FTP `LIST` parser that could not tell, say);
+clamping to that 0 would pin the row's `BytesDone` at 0 for the whole
+transfer, including the terminal `Completed` event, which used to overwrite
+it with `BytesTotal` unconditionally. With an untrustworthy total, the row
+now just tracks the engine's own count of bytes moved instead.
+
+`domain.TransferStatus` has a `Canceled` value distinct from `Failed`, so a
+transfer the user canceled can be told apart from one that genuinely broke —
+useful groundwork for a retry flow that should treat the two differently.
+It still shares the Failed tab, though; there is no tab of its own.
+
 ### Config persistence
 
 `internal/config` owns the three XDG roots and a small `Config` struct
@@ -465,11 +593,27 @@ and creates the directory first.
 
 The UI never touches the filesystem. `NewModel` takes the loaded `Config` plus
 a `config.SaveFunc`, and applies what it can — theme, density, shadow, icons,
-`maxParallel`, and the two pane splits (rebuilt through `PaneRatio`, which
-clamps out-of-range values back into bounds). `persist()` calls that func after
-each user change: theme confirm, icon toggle, the four shift-arrow resizes, and
-the layout reset. The save func is the seam that keeps this testable — UI tests
-pass `nil` and persistence is skipped, while main wires it to `config.Save`.
+`maxParallel`, saved profiles, and the two pane splits (rebuilt through
+`PaneRatio`, which clamps out-of-range values back into bounds). `persist()`
+returns a `tea.Cmd` that calls the save func after each user change: theme
+confirm, icon toggle, the four shift-arrow resizes, the layout reset, and
+saving/deleting a connect-form profile. The save func is the seam that keeps
+this testable — UI tests pass `nil` and persistence is skipped, while main
+wires it to `config.Save`.
+
+`persist()` builds the `Config` snapshot synchronously — so it always
+captures the settings as they were at the moment of the change, not
+whatever they happen to be by the time the command runs — but returns the
+actual disk write as a command rather than calling `config.Save` inline.
+`config.Save`'s mkdir, marshal, temp file, and rename are blocking disk I/O;
+running them straight inside `Update` stalled the whole redraw loop on every
+settings change, most visibly holding a shift-arrow resize key, which fires
+a `persist()` on every repeat. Every call site changed to route through the
+returned `tea.Cmd` — `cmd = m.persist()` inside `updateKey`'s switch,
+`return m, m.persist()` where a case returns directly, same in
+`connect_form.go`'s save/delete-profile handlers — rather than calling it
+and discarding the result, which would silently turn persistence back into
+a no-op.
 
 Three scope calls to remember:
 
@@ -636,10 +780,9 @@ path.
 - The SFTP test server's `/upload` is not readable by `ftp_test`, so the SFTP
   live tests cannot do a round trip until that is fixed on the server (see
   **Test Servers**)
-- Passwords come from the environment (`TIDEFTP_FTP_PASSWORD`,
-  `TIDEFTP_SFTP_PASSWORD`), never a flag. A passphrase-protected SSH key is
-  reported rather than prompted for; real credential handling waits on the
-  connect form
+- Passwords come from the connect form's Password field or the environment
+  (`TIDEFTP_FTP_PASSWORD`, `TIDEFTP_SFTP_PASSWORD`), never a flag. A
+  passphrase-protected SSH key is reported rather than prompted for
 - Host keys are verified strictly against known_hosts, with no ask or
   accept-once flow: both need a prompt that does not exist yet. A missing
   known_hosts fails the connection closed, which is deliberate

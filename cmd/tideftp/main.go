@@ -14,6 +14,7 @@ import (
 	"tideftp/internal/fakesession"
 	"tideftp/internal/ftpsession"
 	"tideftp/internal/localfs"
+	"tideftp/internal/router"
 	"tideftp/internal/session"
 	"tideftp/internal/sftpsession"
 	"tideftp/internal/ui"
@@ -69,9 +70,12 @@ func main() {
 	}
 }
 
-// buildSession picks the real SFTP adapter when a host is named, and the demo
-// fakes otherwise. There is no form to type a host into yet, so the flags are
-// how a real server is reached.
+// buildSession wires up every real protocol adapter behind a router.Dialer
+// when a host is named, and the demo fakes otherwise. All three protocols
+// are always dialable — not just the one --protocol names — because the
+// connect form lets the user pick any of sftp/ftp/ftps per attempt, for any
+// target, not only the one CLI flags describe; --protocol only decides what
+// that one flag-described target uses to auto-connect at startup.
 type sessionOptions struct {
 	protocol, host       string
 	port                 int
@@ -111,25 +115,23 @@ func buildSession(options sessionOptions) (session.Dialer, []session.Target, err
 		StartPath: startPath,
 	}
 
-	if protocol == "ftp" || protocol == "ftps" {
-		// The password comes from the environment, not a flag: a flag would
-		// put it in the process table for every other user on the box to read.
-		if os.Getenv(ftpsession.PasswordEnv) == "" {
-			return nil, nil, fmt.Errorf("%s protocol needs a password in %s", protocol, ftpsession.PasswordEnv)
-		}
-		config := ftpsession.Config{
-			ExplicitTLS:        protocol == "ftps",
-			RootCAFile:         options.ftpsCA,
-			InsecureSkipVerify: options.ftpsInsecure,
-		}
-		if options.ftpsAllowTLS13 {
-			config.MaxTLSVersion = tls.VersionTLS13
-		}
-		return ftpsession.New(config), []session.Target{target}, nil
+	// Password auth for FTP/FTPS is offered only if one is in the
+	// environment or typed into the connect form's Password field; key-based
+	// methods are tried first for SFTP either way. Nothing here requires a
+	// password up front — a target with none configured simply fails to
+	// dial until one is supplied, in either place.
+	// RootCAFile/InsecureSkipVerify/MaxTLSVersion are TLS-only settings, so
+	// plain FTP — no TLS at all — leaves ftpConfig at its zero value.
+	ftpConfig := ftpsession.Config{}
+	ftpsConfig := ftpsession.Config{
+		ExplicitTLS:        true,
+		RootCAFile:         options.ftpsCA,
+		InsecureSkipVerify: options.ftpsInsecure,
+	}
+	if options.ftpsAllowTLS13 {
+		ftpsConfig.MaxTLSVersion = tls.VersionTLS13
 	}
 
-	// Password auth is offered only if one is in the environment; key-based
-	// methods are tried first either way.
 	sshConfig := sftpsession.DefaultConfig()
 	if options.identity != "" {
 		sshConfig.IdentityFiles = []string{options.identity}
@@ -138,7 +140,13 @@ func buildSession(options sessionOptions) (session.Dialer, []session.Target, err
 	if options.knownHosts != "" {
 		sshConfig.KnownHostsPath = options.knownHosts
 	}
-	return sftpsession.New(sshConfig), []session.Target{target}, nil
+
+	dialer := router.New(map[string]session.Dialer{
+		"sftp": sftpsession.New(sshConfig),
+		"ftp":  ftpsession.New(ftpConfig),
+		"ftps": ftpsession.New(ftpsConfig),
+	})
+	return dialer, []session.Target{target}, nil
 }
 
 func demoTargets() []session.Target {
