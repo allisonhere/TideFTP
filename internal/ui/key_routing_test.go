@@ -10,20 +10,47 @@ import (
 	"tideftp/internal/fakefs"
 )
 
-func TestSpaceTogglesSelectionOnTheCursorEntry(t *testing.T) {
+// TestSpaceTogglesSelectionAndAdvances covers the ranger/nnn-style "toggle
+// and move on" rhythm: space marks the cursor entry and steps to the next
+// row, so a run of files can be selected with repeated space presses alone.
+func TestSpaceTogglesSelectionAndAdvances(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusLocal
-	model.local.entries = []domain.Entry{{Name: "a"}, {Name: "b"}}
+	model.local.entries = []domain.Entry{{Name: "a"}, {Name: "b"}, {Name: "c"}}
 	model.local.cursor = 0
 
 	model = press(t, model, tea.KeyMsg{Type: tea.KeySpace})
 	if !model.local.selected["a"] {
 		t.Fatalf("space did not select the cursor entry: selected = %v", model.local.selected)
 	}
+	if model.local.cursor != 1 {
+		t.Fatalf("cursor = %d after space, want it to advance to the next row", model.local.cursor)
+	}
 
 	model = press(t, model, tea.KeyMsg{Type: tea.KeySpace})
-	if model.local.selected["a"] {
-		t.Fatalf("space again did not deselect the cursor entry: selected = %v", model.local.selected)
+	if !model.local.selected["a"] || !model.local.selected["b"] {
+		t.Fatalf("a second space did not select the new cursor entry too: selected = %v", model.local.selected)
+	}
+	if model.local.cursor != 2 {
+		t.Fatalf("cursor = %d after a second space, want it to keep advancing", model.local.cursor)
+	}
+
+	// The cursor is now on the last row; space toggling it must not walk the
+	// cursor past the end of the list.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeySpace})
+	if !model.local.selected["c"] {
+		t.Fatalf("space on the last row did not select it: selected = %v", model.local.selected)
+	}
+	if model.local.cursor != 2 {
+		t.Fatalf("cursor = %d after space on the last row, want it clamped at 2", model.local.cursor)
+	}
+
+	// Moving back up and pressing space again deselects, the same toggle it
+	// always was — advancing doesn't change what space does to one row.
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeySpace})
+	if model.local.selected["b"] {
+		t.Fatalf("space on an already-selected row did not deselect it: selected = %v", model.local.selected)
 	}
 }
 

@@ -1035,6 +1035,11 @@ func (m *Model) parentDir() tea.Cmd {
 	return m.navigateTo(pane, parent)
 }
 
+// toggleSelection marks or unmarks the entry under the cursor and advances
+// to the next row, the same "toggle and move on" rhythm ranger/nnn/Midnight
+// Commander use — repeated space presses select a run of files without
+// needing a separate down keypress between each one. The caller's
+// clampCursors afterward keeps this from walking past the last row.
 func (m *Model) toggleSelection() {
 	pane := m.focusedFilePane()
 	if pane == nil {
@@ -1048,6 +1053,7 @@ func (m *Model) toggleSelection() {
 	if !pane.selected[entry.Name] {
 		delete(pane.selected, entry.Name)
 	}
+	m.moveCursor(1)
 }
 
 func (m *Model) clearSelection() {
