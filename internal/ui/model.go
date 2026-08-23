@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/config"
+	"tideftp/internal/credstore"
 	"tideftp/internal/domain"
 	"tideftp/internal/session"
 	"tideftp/internal/transfer"
@@ -218,6 +219,11 @@ type Model struct {
 	// the caller (main) so the UI never touches the filesystem; tests leave
 	// it nil and persistence is simply skipped.
 	save config.SaveFunc
+	// creds remembers a saved profile's password in the OS keyring, if
+	// non-nil. Like save, it is a seam: nil means the feature is
+	// unavailable, and the connect form's Remember field simply does not
+	// appear (see connectFieldVisible).
+	creds credstore.Store
 
 	status    string
 	statusErr bool
@@ -252,7 +258,7 @@ const firstFileRow = 4
 // result — the zero Config would silently turn off shadow and icons, so it is
 // not a sensible input. save, when non-nil, is called to persist every change
 // the user makes to those settings.
-func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg config.Config, save config.SaveFunc) Model {
+func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg config.Config, save config.SaveFunc, creds credstore.Store) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
@@ -293,6 +299,7 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
 		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
 		save:           save,
+		creds:          creds,
 		logs:           []string{"redacted logs enabled"},
 		status:         "ready",
 	}
@@ -412,6 +419,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasAtBottom := m.isAtBottomPane()
 		m.applyListing(msg)
 		m.settleBottomOffset(wasAtBottom)
+		return m, nil
+	case storedCredentialMsg:
+		if msg.token != m.connectForm.credToken {
+			return m, nil // superseded by a later profile selection
+		}
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("load saved password: %v", msg.err))
+			return m, nil
+		}
+		if msg.ok {
+			m.connectForm.password = msg.password
+			m.connectForm.remember = true
+			m.markConnectFieldsFresh(connectFieldPassword)
+		}
+		return m, nil
+	case credentialSyncMsg:
+		// Success says nothing new: the "saved profile"/"deleted profile"
+		// status set synchronously already covers it, and this must not
+		// clobber that with a redundant message. A failure does need
+		// reporting — the user otherwise has no way to know a password they
+		// asked to be remembered was not.
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("password not saved: %v", msg.err))
+		}
 		return m, nil
 	case transfer.Event:
 		// Applying an event can finish a transfer, which frees a slot for the
@@ -549,7 +580,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "r":
 		cmd = m.refresh()
 	case "c":
-		m.openConnectForm()
+		cmd = m.openConnectForm()
 	case "t":
 		m.overlay = overlayTheme
 		m.themePicker.Open(m.theme.Name)

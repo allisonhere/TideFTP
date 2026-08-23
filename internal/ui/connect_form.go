@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,7 @@ const (
 	connectFieldUsername
 	connectFieldAuth
 	connectFieldPassword
+	connectFieldRemember
 	connectFieldIdentity
 	connectFieldKnownHosts
 	connectFieldFTPSVerify
@@ -39,6 +41,9 @@ var connectAuthChoices = []string{"agent/key", "password"}
 
 // connectFTPSVerifyChoices is the FTPS Verify picker's cycle order.
 var connectFTPSVerifyChoices = []string{"verify", "insecure"}
+
+// connectRememberChoices is the Remember picker's cycle order.
+var connectRememberChoices = []string{"no", "yes"}
 
 // connectFormValue holds the connect form's field values. Protocol is an index
 // into connectProtocols, profile is an index into the model's profile choices
@@ -60,12 +65,19 @@ type connectFormValue struct {
 	username   string
 	auth       int
 	password   string
+	remember   bool
 	identity   string
 	knownHosts string
 	ftpsVerify int
 	ftpsCA     string
 	path       string
 	fresh      [connectFieldCount]bool
+
+	// credToken guards an in-flight credstore lookup (see
+	// beginCredentialLookup): a reply whose token no longer matches this one
+	// belongs to a profile selection the user has since moved past, and is
+	// dropped rather than clobbering newer form state.
+	credToken int
 }
 
 // connectAuthMode reports how the form will authenticate: always "password"
@@ -83,9 +95,11 @@ func (m Model) connectAuthMode() string {
 // SFTP; Identity only when the resolved auth mode actually offers a key
 // (there is nothing to name a key file for if the connection will
 // authenticate with a password); Password only when the resolved auth mode
-// uses one; FTPSVerify and FTPSCA only matter for FTPS, and FTPSCA only
-// when Verify is not already "insecure" — a CA to trust is moot once every
-// certificate is accepted anyway.
+// uses one; Remember only alongside Password, and only when a credstore was
+// actually wired in — offering to remember a password nothing can store it
+// would just be confusing; FTPSVerify and FTPSCA only matter for FTPS, and
+// FTPSCA only when Verify is not already "insecure" — a CA to trust is moot
+// once every certificate is accepted anyway.
 func (m Model) connectFieldVisible(field connectField) bool {
 	protocol := connectProtocols[m.connectForm.protocol]
 	switch field {
@@ -93,6 +107,8 @@ func (m Model) connectFieldVisible(field connectField) bool {
 		return protocol == "sftp"
 	case connectFieldPassword:
 		return m.connectAuthMode() == "password"
+	case connectFieldRemember:
+		return m.connectAuthMode() == "password" && m.creds != nil
 	case connectFieldIdentity:
 		return protocol == "sftp" && m.connectAuthMode() != "password"
 	case connectFieldKnownHosts:
@@ -157,6 +173,14 @@ func targetKey(t session.Target) profileKey {
 	return profileKey{protocol: t.Protocol, host: t.Host, port: t.Port, user: t.User}
 }
 
+// credentialKey is the opaque key a stored password lives under: the same
+// identity targetKey uses, not target.Name, so renaming a saved profile
+// never orphans its stored password.
+func credentialKey(t session.Target) string {
+	k := targetKey(t)
+	return fmt.Sprintf("%s|%s|%d|%s", k.protocol, k.host, k.port, k.user)
+}
+
 // profileIndexFor returns the Profile field index (1-based; 0 is "new") of
 // the saved profile matching target's key, or 0 if there is none.
 func (m Model) profileIndexFor(target session.Target) int {
@@ -170,11 +194,13 @@ func (m Model) profileIndexFor(target session.Target) int {
 }
 
 // loadConnectProfile fills the form's Protocol/Host/Port/Username/Path from
-// the saved profile at the Profile field's current selection. It is a no-op
-// when the selection is "(new)".
-func (m *Model) loadConnectProfile() {
+// the saved profile at the Profile field's current selection, and looks up
+// whatever password is stored for it. It is a no-op when the selection is
+// "(new)" — Password/Remember are left as they were, the same as every
+// other field when cycling to "(new)".
+func (m *Model) loadConnectProfile() tea.Cmd {
 	if m.connectForm.profile == 0 {
-		return
+		return nil
 	}
 	p := m.profiles[m.connectForm.profile-1]
 	m.connectForm.name = p.Name
@@ -187,6 +213,7 @@ func (m *Model) loadConnectProfile() {
 	m.connectForm.username = p.User
 	m.connectForm.path = p.StartPath
 	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
+	return m.beginCredentialLookup(p)
 }
 
 // markConnectFieldsFresh flags the given fields as showing a prefilled value
@@ -208,7 +235,7 @@ func protocolIndex(protocol string) int {
 
 // openConnectForm shows the connect form, prefilled from the current target
 // (or the first known one) so it is never blank.
-func (m *Model) openConnectForm() {
+func (m *Model) openConnectForm() tea.Cmd {
 	src := m.target
 	if src.Host == "" && len(m.targets) > 0 {
 		src = m.targets[0]
@@ -228,6 +255,7 @@ func (m *Model) openConnectForm() {
 	m.connectField = connectFieldProfile
 	m.connectCursor = 0
 	m.overlay = overlayConnect
+	return m.beginCredentialLookup(src)
 }
 
 func connectFieldLabel(field connectField) string {
@@ -248,6 +276,8 @@ func connectFieldLabel(field connectField) string {
 		return "Auth"
 	case connectFieldPassword:
 		return "Password"
+	case connectFieldRemember:
+		return "Remember"
 	case connectFieldIdentity:
 		return "Identity"
 	case connectFieldKnownHosts:
@@ -284,6 +314,8 @@ func (m Model) connectFieldValue(field connectField) string {
 		return connectAuthChoices[m.connectForm.auth]
 	case connectFieldPassword:
 		return m.connectForm.password
+	case connectFieldRemember:
+		return connectRememberChoices[boolToIndex(m.connectForm.remember)]
 	case connectFieldIdentity:
 		return m.connectForm.identity
 	case connectFieldKnownHosts:
@@ -325,11 +357,20 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 // than free text.
 func connectChoiceField(field connectField) bool {
 	switch field {
-	case connectFieldProfile, connectFieldProtocol, connectFieldAuth, connectFieldFTPSVerify:
+	case connectFieldProfile, connectFieldProtocol, connectFieldAuth, connectFieldRemember, connectFieldFTPSVerify:
 		return true
 	default:
 		return false
 	}
+}
+
+// boolToIndex is connectRememberChoices' bool-to-cycle-index mapping: false
+// is "no" (index 0), true is "yes" (index 1).
+func boolToIndex(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // connectFieldDisplay returns the value shown for field, with a caret inserted
@@ -369,12 +410,12 @@ func (m *Model) moveConnectCursor(delta int) {
 	m.connectCursor = min(max(m.connectCursor+delta, 0), len(runes))
 }
 
-func (m *Model) cycleConnectChoice(delta int) {
+func (m *Model) cycleConnectChoice(delta int) tea.Cmd {
 	switch m.connectField {
 	case connectFieldProfile:
 		n := len(m.profiles) + 1
 		m.connectForm.profile = (m.connectForm.profile + delta + n) % n
-		m.loadConnectProfile()
+		return m.loadConnectProfile()
 	case connectFieldProtocol:
 		n := len(connectProtocols)
 		m.connectForm.protocol = (m.connectForm.protocol + delta + n) % n
@@ -384,7 +425,10 @@ func (m *Model) cycleConnectChoice(delta int) {
 	case connectFieldFTPSVerify:
 		n := len(connectFTPSVerifyChoices)
 		m.connectForm.ftpsVerify = (m.connectForm.ftpsVerify + delta + n) % n
+	case connectFieldRemember:
+		m.connectForm.remember = !m.connectForm.remember
 	}
+	return nil
 }
 
 func (m *Model) editConnectField(s string) {
@@ -504,7 +548,7 @@ func (m *Model) saveConnectProfile() tea.Cmd {
 	idx := m.upsertProfile(target)
 	m.connectForm.profile = idx + 1
 	m.setStatus("saved profile " + target.Label())
-	return m.persist()
+	return tea.Batch(m.persist(), m.rememberCredentialCmd(target))
 }
 
 // deleteConnectProfile removes the profile the Profile field currently points
@@ -514,11 +558,83 @@ func (m *Model) deleteConnectProfile() tea.Cmd {
 		return nil
 	}
 	idx := m.connectForm.profile - 1
-	name := m.profiles[idx].Label()
+	target := m.profiles[idx]
+	name := target.Label()
 	m.profiles = append(m.profiles[:idx], m.profiles[idx+1:]...)
 	m.connectForm.profile = 0
 	m.setStatus("deleted profile " + name)
-	return m.persist()
+	return tea.Batch(m.persist(), m.forgetCredentialCmd(target))
+}
+
+// storedCredentialMsg reports the result of a credstore lookup begun by
+// beginCredentialLookup. A reply whose token no longer matches
+// connectForm.credToken belongs to a profile selection the user has since
+// moved past, and is dropped.
+type storedCredentialMsg struct {
+	token    int
+	password string
+	ok       bool
+	err      error
+}
+
+// beginCredentialLookup asks the credstore for target's password, clearing
+// the form's Password/Remember fields synchronously first — so the form
+// never shows a stale value while the (possibly slow: dbus, or a Keychain
+// prompt) lookup is in flight — and filling them back in once the reply
+// lands, via storedCredentialMsg in Update. A nil creds leaves the fields
+// cleared and does nothing further.
+func (m *Model) beginCredentialLookup(target session.Target) tea.Cmd {
+	m.connectForm.password = ""
+	m.connectForm.remember = false
+	if m.creds == nil {
+		return nil
+	}
+	m.connectForm.credToken++
+	token := m.connectForm.credToken
+	store, key := m.creds, credentialKey(target)
+	return func() tea.Msg {
+		password, ok, err := store.Get(key)
+		return storedCredentialMsg{token: token, password: password, ok: ok, err: err}
+	}
+}
+
+// credentialSyncMsg reports the result of storing or forgetting a password,
+// begun by rememberCredentialCmd or forgetCredentialCmd.
+type credentialSyncMsg struct{ err error }
+
+// rememberCredentialCmd stores or forgets target's password in the
+// credstore according to the form's current Remember/Password fields. Value
+// receiver, so it snapshots those fields at call time rather than reading
+// them again once the returned command actually runs — the same reason
+// Model.persist snapshots its config before returning.
+func (m Model) rememberCredentialCmd(target session.Target) tea.Cmd {
+	if m.creds == nil || !m.connectFieldVisible(connectFieldRemember) {
+		return nil
+	}
+	store, key := m.creds, credentialKey(target)
+	remember, password := m.connectForm.remember, m.connectForm.password
+	return func() tea.Msg {
+		var err error
+		if remember && password != "" {
+			err = store.Set(key, password)
+		} else {
+			err = store.Delete(key)
+		}
+		return credentialSyncMsg{err: err}
+	}
+}
+
+// forgetCredentialCmd unconditionally deletes target's stored password, for
+// deleteConnectProfile: a deleted profile's password must not survive it,
+// regardless of what Remember was last set to.
+func (m Model) forgetCredentialCmd(target session.Target) tea.Cmd {
+	if m.creds == nil {
+		return nil
+	}
+	store, key := m.creds, credentialKey(target)
+	return func() tea.Msg {
+		return credentialSyncMsg{err: store.Delete(key)}
+	}
 }
 
 // handleConnectKey routes keys while the connect overlay is open, mirroring
@@ -549,32 +665,27 @@ func (m *Model) handleConnectKey(msg tea.KeyMsg) tea.Cmd {
 		m.editConnectField("j")
 	case "h":
 		if connectChoiceField(m.connectField) {
-			m.cycleConnectChoice(-1)
-			return nil
+			return m.cycleConnectChoice(-1)
 		}
 		m.editConnectField("h")
 	case "l":
 		if connectChoiceField(m.connectField) {
-			m.cycleConnectChoice(1)
-			return nil
+			return m.cycleConnectChoice(1)
 		}
 		m.editConnectField("l")
 	case "left":
 		if connectChoiceField(m.connectField) {
-			m.cycleConnectChoice(-1)
-		} else {
-			m.moveConnectCursor(-1)
+			return m.cycleConnectChoice(-1)
 		}
+		m.moveConnectCursor(-1)
 	case "right":
 		if connectChoiceField(m.connectField) {
-			m.cycleConnectChoice(1)
-		} else {
-			m.moveConnectCursor(1)
+			return m.cycleConnectChoice(1)
 		}
+		m.moveConnectCursor(1)
 	case "enter":
 		if connectChoiceField(m.connectField) {
-			m.cycleConnectChoice(1)
-			return nil
+			return m.cycleConnectChoice(1)
 		}
 		m.moveConnectField(1)
 	case "ctrl+enter", "alt+enter":

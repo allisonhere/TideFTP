@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"tideftp/internal/config"
+	"tideftp/internal/credstore"
 	"tideftp/internal/fakesession"
 	"tideftp/internal/ftpsession"
 	"tideftp/internal/localfs"
@@ -64,7 +65,7 @@ func main() {
 	}
 	saveConfig := func(c config.Config) error { return config.Save(configPath, c) }
 
-	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig, credstore.New()), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
 		os.Exit(1)

@@ -107,7 +107,7 @@ func loadedModelWithDialer(t *testing.T, dialer *stubDialer) (Model, *stubDialer
 // disconnectedMsg in by hand.
 func connectModel(t *testing.T, local vfs.FS, dialer *stubDialer) (Model, *stubDialer) {
 	t.Helper()
-	model := NewModel(local, dialer, []session.Target{testTarget}, config.Default(), nil)
+	model := NewModel(local, dialer, []session.Target{testTarget}, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 	model = settle(t, model, listCmd(model.localFS, paneLocal, model.local.requestToken, model.local.path, model.local.showHidden, listingNavigate))
 	if dialer.err != nil {
@@ -238,7 +238,7 @@ func TestNewModelAppliesConfig(t *testing.T) {
 	cfg.Layout = config.Layout{FileSplit: 0.6, BottomSplit: 0.4}
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, cfg, nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, cfg, nil, nil)
 
 	if model.theme.Name != "nord" {
 		t.Fatalf("theme = %q, want nord", model.theme.Name)
@@ -262,7 +262,7 @@ func TestNewModelClampsLayoutOutOfRange(t *testing.T) {
 	cfg.Layout = config.Layout{FileSplit: 0.9, BottomSplit: 0.05}
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, nil, cfg, nil)
+	model := NewModel(localfs.New(), dialer, nil, cfg, nil, nil)
 
 	if got := model.fileSplit.Value(); got != 0.75 {
 		t.Fatalf("file split clamped to %v, want 0.75", got)
@@ -277,7 +277,7 @@ func TestPersistWritesOnChange(t *testing.T) {
 	save := func(c config.Config) error { saved = append(saved, c); return nil }
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, nil, config.Default(), save)
+	model := NewModel(localfs.New(), dialer, nil, config.Default(), save, nil)
 	model.width, model.height = 120, 36
 
 	// persist runs its save through a tea.Cmd rather than inline, so the key
@@ -806,7 +806,7 @@ func TestClosedEventStreamStopsThePump(t *testing.T) {
 
 func TestInitLoadsLocalAndDialsTheFirstTarget(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 
 	if !model.local.loading {
@@ -842,7 +842,7 @@ func TestInitLoadsLocalAndDialsTheFirstTarget(t *testing.T) {
 
 func TestModelWithNoTargetsStartsDisconnected(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, nil, config.Default(), nil)
+	model := NewModel(localfs.New(), dialer, nil, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 	model = settle(t, model, model.Init())
 
@@ -1026,7 +1026,7 @@ func TestEnterOnAFileDoesNothing(t *testing.T) {
 
 func TestConnectFailureLeavesTheAppUsable(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine(), err: errors.New("no route to host")}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 
 	model = settle(t, model, model.Init())
@@ -1228,7 +1228,7 @@ func TestConnectFormSavesProfile(t *testing.T) {
 	save := func(c config.Config) error { saved = append(saved, c); return nil }
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil)
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -1256,7 +1256,7 @@ func TestConnectFormCyclingProfileLoadsItsFields(t *testing.T) {
 	other := session.Target{Name: "other", Protocol: "ftp", Host: "other.example.com", Port: 2121, User: "otheruser", StartPath: "/incoming"}
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 	model.profiles = []session.Target{other}
 
@@ -1282,7 +1282,7 @@ func TestConnectFormCyclingProfileLoadsItsFields(t *testing.T) {
 
 func TestConnectFormTypedNameIsSavedVerbatim(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -1308,7 +1308,7 @@ func TestConnectFormDeletesProfile(t *testing.T) {
 	save := func(c config.Config) error { saved = append(saved, c); return nil }
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil)
 	model.width, model.height = 120, 36
 	model.profiles = []session.Target{testTarget}
 
@@ -1336,7 +1336,7 @@ func TestNewModelLoadsProfilesFromConfig(t *testing.T) {
 		{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob"},
 	}
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, nil, cfg, nil)
+	model := NewModel(localfs.New(), dialer, nil, cfg, nil, nil)
 
 	if len(model.profiles) != 1 {
 		t.Fatalf("profiles = %d, want 1", len(model.profiles))

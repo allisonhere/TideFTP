@@ -46,6 +46,10 @@ Implemented:
 - Saved connection profiles: a `Profile` field in the connect form cycles
   through profiles persisted in `config.toml`, `ctrl+s`/`ctrl+x` save and
   delete them (see **Connect form**)
+- Opt-in credential storage: a Remember field next to Password, backed by
+  the OS keyring (`internal/credstore`) — a saved profile's password is
+  remembered only if Remember was "yes" when it was saved with `ctrl+s`
+  (see **Connect form**)
 - Basic UI tests for layout, theme registration, and resizing
 
 Git repository state:
@@ -295,6 +299,14 @@ First build slice:
   but unused. `Profile` mirrors `session.Target`'s shape (minus credentials)
   rather than importing it, keeping this package free of that dependency;
   `internal/ui` converts between the two
+- `internal/credstore/`: `Store` (`Get`/`Set`/`Delete` by an opaque key) plus
+  `Keyring`, the real implementation over `github.com/zalando/go-keyring`
+  (macOS Keychain, Windows Credential Manager, Linux Secret Service). Lets a
+  saved profile's password be remembered opt-in, per profile — see the
+  Remember design note under **Connect form**
+- `internal/fakecredstore/fakecredstore.go`: in-memory `Store` for tests,
+  with an `Err` field to exercise what the UI does when the keyring is
+  unavailable
 - `internal/sftpsession/`: the real SFTP adapter. `sftpsession.go` dials
   (agent, key-file, and password auth, strict known_hosts), `fs.go`
   implements `vfs.FS`, `engine.go` wraps a `transfer.Runner` with the
@@ -722,6 +734,38 @@ what a profile keeps) or awkwardly stripping them back out before saving.
 — but every real `Dialer` and every call site had to change in step, which is
 the cost of extending an interface all three adapters implement.
 
+Remember is the one exception to "credentials are never persisted": it lets
+the user opt in, per saved profile, to having the OS keyring do exactly that
+— `internal/credstore.Store`, a new seam alongside `session.Dialer`/`vfs.FS`/
+`transfer.Engine`/`config.SaveFunc`, real-backed by
+`github.com/zalando/go-keyring` (`internal/credstore.Keyring`) and faked by
+`internal/fakecredstore` for tests. `Model.creds` is nil-able exactly like
+`Model.save`: nil means the feature is unavailable, and `connectFieldVisible`
+hides Remember entirely rather than showing a control that does nothing.
+Storage is keyed by the same `protocol|host|port|user` identity
+`targetKey`/`profileKey` already use for profile matching — not the
+profile's `Name` — via `credentialKey`, so renaming a profile never orphans
+its stored password. The write only happens on `ctrl+s`
+(`saveConnectProfile`, via `rememberCredentialCmd`): a bare connect never
+touches the keyring, matching how host/user/path are not persisted without
+an explicit save either. `ctrl+x` (`deleteConnectProfile`, via
+`forgetCredentialCmd`) always scrubs the stored password, regardless of what
+Remember was last set to — a deleted profile should not leave its password
+behind. Selecting a profile (`loadConnectProfile`) or opening the form
+(`openConnectForm`) both call `beginCredentialLookup`, which prefills
+Password/Remember from whatever is stored, if anything.
+
+All of this runs as a `tea.Cmd`, never inline in `Update` — keyring I/O can
+block (a dbus round-trip, or a macOS Keychain prompt), the same concern
+`persist`'s doc comment raises for disk I/O, more so here. A lookup is
+guarded by `connectFormValue.credToken`, the same pattern
+`filePane.requestToken` uses for stale listings: switching profiles twice
+before the first lookup returns must not let the first reply clobber the
+second selection's fields. A save/delete failure reaches the user through
+`setError` (`credentialSyncMsg`) without stomping the optimistic "saved
+profile X"/"deleted profile X" status unless it actually fails — success
+says nothing new, since that status already covers it.
+
 tideui was bumped from v0.2.2 to the pseudo-version whatthedock pins
 (`v0.2.3-0.20260820020614-441c283e776f`) for two things the older release
 lacks: `SoftRow`'s selected-row background highlight and the `ModalShadow`
@@ -769,10 +813,13 @@ path.
      shown only when they apply, each overriding the CLI-flag-configured
      default for that one attempt via `session.Credentials` (see
      **Connect form**)
-   - Still missing: keyring/config-file password storage (an alternative to
-     prompting every time). Nothing else waits on credential handling now —
-     every setting `--identity`/`--known-hosts`/`--ftps-ca`/`--ftps-insecure`
-     configure at startup can also be set per attempt from the form
+   - ~~Keyring password storage.~~ Done — a **Remember** field next to
+     Password, visible whenever Password is and a credstore was wired in;
+     `ctrl+s` stores or forgets the typed password in the OS keyring
+     accordingly, `ctrl+x` always forgets it. See the design note below.
+     Nothing else waits on credential handling now — every setting
+     `--identity`/`--known-hosts`/`--ftps-ca`/`--ftps-insecure` configure at
+     startup can also be set per attempt from the form
 
 5. Improve transfer queue behavior.
    - Configurable parallelism — the cap is now `Model.maxParallel`
@@ -836,9 +883,10 @@ path.
   `SSH_AUTH_SOCK`, and known-host verification is strict-or-nothing — a
   known_hosts override lets a different file be strict against, but there is
   still no ask/accept-once flow for a host key that file does not have
-- No real credential storage: the form's password is typed fresh for every
-  connect attempt and never persisted, matching the documented default of
-  "prompt every time" — there is no keyring or config-file option yet, and
+- Credential storage now exists but is opt-in per profile: a saved profile's
+  password is remembered in the OS keyring only if the form's Remember field
+  was "yes" when `ctrl+s` saved it (see **Connect form**); the default
+  remains "prompt every time" for anything not explicitly remembered, and
   `fakesession` needs no credentials at all
 - A connection is never retried automatically after a drop
 - A listing that hangs is bounded only by `listTimeout` (20s) and cannot be
