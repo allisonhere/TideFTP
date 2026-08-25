@@ -868,6 +868,51 @@ func TestModelWithNoTargetsStartsDisconnected(t *testing.T) {
 	}
 }
 
+func TestLocalPaneShowsParentDirectoryRow(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+
+	if len(model.local.entries) == 0 || model.local.entries[0].Name != parentEntryName {
+		t.Fatalf("local entries = %+v, want parent row first", model.local.entries)
+	}
+}
+
+func TestLocalPaneParentDirectoryRowNavigatesUp(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	model.local.cursor = 0
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.local.path != "/" {
+		t.Fatalf("local path = %q, want parent /", model.local.path)
+	}
+	if len(model.local.entries) > 0 && model.local.entries[0].Name == parentEntryName {
+		t.Fatalf("root local pane should not show a parent row")
+	}
+}
+
+func TestLocalPaneParentDirectoryRowIsNotSelectable(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	model.local.cursor = 0
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeySpace})
+	if model.local.selected[parentEntryName] {
+		t.Fatalf("parent row should not be selectable: %v", model.local.selected)
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlA})
+	if model.local.selected[parentEntryName] {
+		t.Fatalf("select all should skip parent row: %v", model.local.selected)
+	}
+}
+
 func TestPaneStaysUsableWhileLoading(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusRemote
@@ -1632,6 +1677,126 @@ func TestConnectFormIdentityAndKnownHostsVisibility(t *testing.T) {
 	model = press(t, model, runes("l")) // sftp -> ftp
 	if model.connectFieldVisible(connectFieldIdentity) || model.connectFieldVisible(connectFieldKnownHosts) {
 		t.Fatalf("identity/known-hosts fields should be hidden for ftp")
+	}
+}
+
+func TestConnectFormIdentityCanUseHighlightedLocalFile(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.local.path = "/home/allie/.ssh"
+	model.local.entries = []domain.Entry{{Name: "id_ed25519", Kind: domain.EntryFile}}
+	model.local.cursor = 0
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldIdentity
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlB})
+
+	if !model.connectIdentityBrowse {
+		t.Fatalf("ctrl+b should open the visible identity browser")
+	}
+	if plain := ansi.Strip(model.View()); !strings.Contains(plain, "choose identity file") || !strings.Contains(plain, "Choose identity file  /home/allie/.ssh") {
+		t.Fatalf("identity browser should be visible after ctrl+b")
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.connectForm.identity != "/home/allie/.ssh/id_ed25519" {
+		t.Fatalf("identity = %q, want highlighted local key file", model.connectForm.identity)
+	}
+	if model.connectIdentityBrowse {
+		t.Fatalf("identity browser should close after choosing a file")
+	}
+	if model.connectCursor != len([]rune(model.connectForm.identity)) {
+		t.Fatalf("cursor = %d, want end of identity path", model.connectCursor)
+	}
+	if model.statusErr || !strings.Contains(model.status, "identity file") {
+		t.Fatalf("status = %q err=%v, want successful identity browse status", model.status, model.statusErr)
+	}
+	if !strings.Contains(ansi.Strip(model.View()), "ctrl+b") {
+		t.Fatalf("identity field should show the ctrl+b browse hint")
+	}
+}
+
+func TestConnectFormIdentityBrowseOpensHighlightedLocalDirectory(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model.local.path = "/"
+	model.local.entries = []domain.Entry{{Name: "public_html", Kind: domain.EntryDir}}
+	model.local.cursor = 0
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldIdentity
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if !model.connectIdentityBrowse {
+		t.Fatalf("ctrl+b should open the visible identity browser")
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.connectForm.identity != "" {
+		t.Fatalf("identity = %q after browsing a directory, want unchanged blank", model.connectForm.identity)
+	}
+	if model.local.path != "/" {
+		t.Fatalf("local pane path = %q, want main local pane left alone", model.local.path)
+	}
+	if model.connectIdentityPane.path != "/public_html" {
+		t.Fatalf("identity browser path = %q, want to browse into /public_html", model.connectIdentityPane.path)
+	}
+	if model.connectField != connectFieldIdentity {
+		t.Fatalf("connect field = %v, want Identity to stay focused after browsing", model.connectField)
+	}
+	if !model.connectIdentityBrowse {
+		t.Fatalf("identity browser should stay open after entering a directory")
+	}
+	if model.statusErr {
+		t.Fatalf("status = %q err=%v, want browsing a directory to stay non-error", model.status, model.statusErr)
+	}
+}
+
+func TestConnectFormIdentityBrowserCanGoUpDirectoryTreeWithBackspace(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model.local.path = "/public_html"
+	model.local.entries = []domain.Entry{{Name: "assets", Kind: domain.EntryDir}}
+	model.local.cursor = 0
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldIdentity
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if got := model.connectIdentityPane.entries[0].Name; got != parentEntryName {
+		t.Fatalf("first identity browser entry = %q, want parent row", got)
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyBackspace})
+
+	if model.local.path != "/public_html" {
+		t.Fatalf("local pane path = %q, want main local pane left alone", model.local.path)
+	}
+	if model.connectIdentityPane.path != "/" {
+		t.Fatalf("identity browser path = %q, want parent /", model.connectIdentityPane.path)
+	}
+	if !model.connectIdentityBrowse {
+		t.Fatalf("identity browser should stay open after going up")
+	}
+}
+
+func TestConnectFormIdentityBrowserParentRowGoesUpDirectoryTree(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model.local.path = "/public_html"
+	model.local.entries = []domain.Entry{{Name: "assets", Kind: domain.EntryDir}}
+	model.local.cursor = 0
+	model = press(t, model, runes("c"))
+	model.connectField = connectFieldIdentity
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlB})
+	model.connectIdentityPane.cursor = 0
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.local.path != "/public_html" {
+		t.Fatalf("local pane path = %q, want main local pane left alone", model.local.path)
+	}
+	if model.connectIdentityPane.path != "/" {
+		t.Fatalf("identity browser path = %q, want parent /", model.connectIdentityPane.path)
+	}
+	if len(model.connectIdentityPane.entries) > 0 && model.connectIdentityPane.entries[0].Name == parentEntryName {
+		t.Fatalf("root identity browser should not show a parent row")
 	}
 }
 

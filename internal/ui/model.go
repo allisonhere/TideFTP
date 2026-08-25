@@ -49,6 +49,7 @@ const (
 	overlayPreflight
 	overlaySettings
 	overlayHostKey
+	overlayCommandPalette
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -58,11 +59,15 @@ type paneID int
 const (
 	paneLocal paneID = iota
 	paneRemote
+	paneIdentity
 )
 
 func (p paneID) String() string {
 	if p == paneLocal {
 		return "local"
+	}
+	if p == paneIdentity {
+		return "identity"
 	}
 	return "remote"
 }
@@ -195,9 +200,13 @@ type Model struct {
 	profiles []session.Target
 
 	// Connect form state, editable while the connect overlay is open.
-	connectForm   connectFormValue
-	connectField  connectField
-	connectCursor int
+	connectForm           connectFormValue
+	connectField          connectField
+	connectCursor         int
+	connectIdentityBrowse bool
+	connectIdentityPane   filePane
+	commandQuery          string
+	commandCursor         int
 
 	conn     session.Conn
 	remoteFS vfs.FS
@@ -294,6 +303,8 @@ const listTimeout = 20 * time.Second
 // topbar (1) + pane top border (1) + pane title header (1) + column
 // header (1). Mouse clicks above it are not on an entry.
 const firstFileRow = 4
+
+const parentEntryName = ".."
 
 // NewModel builds the UI over a local filesystem and a dialer. It starts
 // disconnected; Init dials the first target so the app opens onto something.
@@ -564,6 +575,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlaySettings {
 		return m, m.handleSettingsKey(msg)
 	}
+	if m.overlay == overlayCommandPalette {
+		return m, m.handleCommandPaletteKey(msg)
+	}
 	if m.overlay == overlayConflict {
 		return m, m.handleConflictKey(msg)
 	}
@@ -604,6 +618,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			return m, tea.Sequence(closeConnCmd(m.conn), tea.Quit)
 		}
 		return m, tea.Quit
+	case "ctrl+k":
+		m.openCommandPalette()
 	case "tab":
 		m.focus = (m.focus + 1) % 3
 	case "shift+tab":
@@ -967,9 +983,34 @@ func (m *Model) applyListing(msg listingMsg) {
 	case listingRefresh:
 		target.clamp(m.filePaneVisibleRows())
 	}
+	if msg.pane == paneLocal {
+		m.prependPaneParent(&m.local, m.localFS)
+		target.clamp(m.filePaneVisibleRows())
+	}
+	if msg.pane == paneIdentity {
+		m.prependPaneParent(&m.connectIdentityPane, m.localFS)
+		target.clamp(connectIdentityBrowserHeight - 1)
+	}
 	// Deliberately not clearing an error status here: refresh lists both
 	// panes, so a success on one would wipe a genuine failure reported by the
 	// other. The next action replaces the status anyway.
+}
+
+func parentDirEntry() domain.Entry {
+	return domain.Entry{Name: parentEntryName, Kind: domain.EntryDir, Mode: "drwxr-xr-x"}
+}
+
+func isParentDirEntry(entry domain.Entry) bool {
+	return entry.Name == parentEntryName && entry.IsDir()
+}
+
+func (m *Model) prependPaneParent(pane *filePane, fs vfs.FS) {
+	if pane.path == "" || fs.Parent(pane.path) == pane.path {
+		return
+	}
+	pane.entries = append([]domain.Entry{parentDirEntry()}, pane.entries...)
+	pane.cursor++
+	pane.offset++
 }
 
 // navigateTo walks a pane to dirPath. The path is not committed until the
@@ -983,11 +1024,14 @@ func (m *Model) filePaneByID(pane paneID) *filePane {
 	if pane == paneLocal {
 		return &m.local
 	}
+	if pane == paneIdentity {
+		return &m.connectIdentityPane
+	}
 	return &m.remote
 }
 
 func (m Model) fsByID(pane paneID) vfs.FS {
-	if pane == paneLocal {
+	if pane == paneLocal || pane == paneIdentity {
 		return m.localFS
 	}
 	return m.remoteFS
@@ -1037,6 +1081,9 @@ func (m *Model) activateCursor() tea.Cmd {
 	if !found || !entry.IsDir() {
 		return nil
 	}
+	if isParentDirEntry(entry) {
+		return m.parentDir()
+	}
 	return m.navigateTo(pane, m.fsByID(pane).Child(target.path, entry.Name))
 }
 
@@ -1068,6 +1115,9 @@ func (m *Model) toggleSelection() {
 	if !ok {
 		return
 	}
+	if isParentDirEntry(entry) {
+		return
+	}
 	pane.selected[entry.Name] = !pane.selected[entry.Name]
 	if !pane.selected[entry.Name] {
 		delete(pane.selected, entry.Name)
@@ -1085,6 +1135,9 @@ func (m *Model) clearSelection() {
 func (m *Model) selectAll() {
 	if pane := m.focusedFilePane(); pane != nil {
 		for _, entry := range pane.entries {
+			if isParentDirEntry(entry) {
+				continue
+			}
 			pane.selected[entry.Name] = true
 		}
 		m.setStatus(fmt.Sprintf("selected %d item(s)", len(pane.selected)))
@@ -1824,14 +1877,14 @@ func (p *filePane) reset() {
 func (p filePane) actionEntries() []domain.Entry {
 	if len(p.selected) == 0 {
 		entry, ok := p.current()
-		if !ok {
+		if !ok || isParentDirEntry(entry) {
 			return nil
 		}
 		return []domain.Entry{entry}
 	}
 	entries := make([]domain.Entry, 0, len(p.selected))
 	for _, entry := range p.entries {
-		if p.selected[entry.Name] {
+		if p.selected[entry.Name] && !isParentDirEntry(entry) {
 			entries = append(entries, entry)
 		}
 	}

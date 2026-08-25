@@ -462,6 +462,23 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 	case overlayConnect:
 		width := min(76, max(60, m.width-8))
 		contentWidth := width - 4
+		if m.connectIdentityBrowse {
+			browser := m.renderFilePane(renderer, m.connectIdentityPane, contentWidth, connectIdentityBrowserHeight)
+			rows := []string{
+				renderer.Styles.DetailMeta.Width(contentWidth).Render("Choose identity file  " + m.connectIdentityPane.displayPath()),
+				"",
+				browser,
+				"",
+				renderer.RenderSoftHints(contentWidth,
+					tideui.SoftHint{Key: "up/down", Label: "select"},
+					tideui.SoftHint{Key: "enter", Label: "open/use"},
+					tideui.SoftHint{Key: "backspace/..", Label: "up"},
+					tideui.SoftHint{Key: "esc", Label: "form"}),
+			}
+			content := renderer.RenderSoftBody(width, strings.Join(rows, "\n"))
+			overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "choose identity file", Content: content, Width: width})
+			return &overlay
+		}
 		formWidth := max(28, contentWidth)
 		rows := make([]string, 0, 10)
 		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("Status  "+m.connectionSummary()))
@@ -481,13 +498,18 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		} else if m.connectFieldVisible(connectFieldPassword) {
 			rows = append(rows, "", renderer.Styles.DetailMeta.Width(contentWidth).Render("Password can be left blank to fall back to the environment variable."))
 		}
+		actionHints := []tideui.SoftHint{
+			{Key: "tab", Label: "next"},
+			{Key: "h/l", Label: "change"},
+			{Key: "ctrl/alt+enter", Label: "connect"},
+			{Key: "ctrl+u", Label: "clear"},
+		}
+		if m.connectField == connectFieldIdentity && m.connectFieldVisible(connectFieldIdentity) {
+			actionHints = append(actionHints, tideui.SoftHint{Key: "ctrl+b", Label: "local file"})
+		}
+		actionHints = append(actionHints, tideui.SoftHint{Key: "esc", Label: "cancel"})
 		rows = append(rows, "",
-			renderer.RenderSoftHints(contentWidth,
-				tideui.SoftHint{Key: "tab", Label: "next"},
-				tideui.SoftHint{Key: "h/l", Label: "change"},
-				tideui.SoftHint{Key: "ctrl/alt+enter", Label: "connect"},
-				tideui.SoftHint{Key: "ctrl+u", Label: "clear"},
-				tideui.SoftHint{Key: "esc", Label: "cancel"}),
+			renderer.RenderSoftHints(contentWidth, actionHints...),
 			renderer.RenderSoftHints(contentWidth,
 				tideui.SoftHint{Key: "ctrl+s", Label: "save profile"},
 				tideui.SoftHint{Key: "ctrl+x", Label: "delete profile"}),
@@ -561,6 +583,39 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 				tideui.SoftHint{Key: "n", Label: "cancel"}),
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "unknown host key", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlayCommandPalette:
+		width := min(72, max(48, m.width-8))
+		contentWidth := width - 4
+		query := m.commandQuery
+		if query == "" {
+			query = "|"
+		} else {
+			query += "|"
+		}
+		commands := m.filteredPaletteCommands()
+		rows := []string{
+			renderer.Styles.DetailMeta.Width(contentWidth).Render("Search  " + query),
+			"",
+		}
+		if len(commands) == 0 {
+			rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("No matching commands"))
+		}
+		for i := 0; i < len(commands); i++ {
+			command := commands[i]
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
+				Text:     command.title,
+				Suffix:   command.hint,
+				Selected: i == m.commandCursor,
+			}, contentWidth))
+		}
+		rows = append(rows, "", renderer.RenderSoftHints(contentWidth,
+			tideui.SoftHint{Key: "type", Label: "filter"},
+			tideui.SoftHint{Key: "up/down", Label: "select"},
+			tideui.SoftHint{Key: "enter", Label: "run"},
+			tideui.SoftHint{Key: "esc", Label: "close"},
+		))
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "command palette", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlaySettings:
 		width := min(60, max(36, m.width-8))

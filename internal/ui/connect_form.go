@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"tideftp/internal/domain"
 	"tideftp/internal/session"
 )
 
@@ -44,6 +45,8 @@ var connectFTPSVerifyChoices = []string{"verify", "insecure"}
 
 // connectRememberChoices is the Remember picker's cycle order.
 var connectRememberChoices = []string{"no", "yes"}
+
+const connectIdentityBrowserHeight = 10
 
 // connectFormValue holds the connect form's field values. Protocol is an index
 // into connectProtocols, profile is an index into the model's profile choices
@@ -254,6 +257,7 @@ func (m *Model) openConnectForm() tea.Cmd {
 	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
 	m.connectField = connectFieldProfile
 	m.connectCursor = 0
+	m.connectIdentityBrowse = false
 	m.overlay = overlayConnect
 	return m.beginCredentialLookup(src)
 }
@@ -474,6 +478,97 @@ func (m *Model) editConnectFieldDelete() {
 	m.setConnectFieldValue(m.connectField, string(runes))
 }
 
+// openConnectIdentityBrowser shows a local file browser inside the connect
+// overlay so the SFTP Identity field can be filled without leaving the form.
+func (m *Model) openConnectIdentityBrowser() {
+	if m.connectField != connectFieldIdentity || !m.connectFieldVisible(connectFieldIdentity) {
+		return
+	}
+	m.connectIdentityPane = filePane{
+		title:      "Identity",
+		path:       m.local.path,
+		entries:    append([]domain.Entry(nil), m.local.entries...),
+		cursor:     m.local.cursor,
+		offset:     m.local.offset,
+		showHidden: true,
+		selected:   map[string]bool{},
+	}
+	m.prependPaneParent(&m.connectIdentityPane, m.localFS)
+	m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	m.connectIdentityBrowse = true
+	m.setStatus("browse to an identity file")
+}
+
+func (m *Model) navigateConnectIdentityParent() tea.Cmd {
+	parent := m.localFS.Parent(m.connectIdentityPane.path)
+	if parent == m.connectIdentityPane.path {
+		m.setStatus("already at filesystem root")
+		return nil
+	}
+	m.setStatus("browsing " + parent)
+	return m.navigateTo(paneIdentity, parent)
+}
+
+// chooseConnectIdentityEntry handles the highlighted local entry while the
+// Identity browser is open. Directories are opened; files are copied into the
+// field and return the user to the form.
+func (m *Model) chooseConnectIdentityEntry() tea.Cmd {
+	if !m.connectIdentityBrowse {
+		return nil
+	}
+	entry, found := m.connectIdentityPane.current()
+	if !found {
+		m.setError("highlight a local key file first")
+		return nil
+	}
+	if isParentDirEntry(entry) {
+		return m.navigateConnectIdentityParent()
+	}
+	if entry.IsDir() {
+		dirPath := m.localFS.Child(m.connectIdentityPane.path, entry.Name)
+		m.setStatus("browsing " + dirPath)
+		return m.navigateTo(paneIdentity, dirPath)
+	}
+	path := m.localFS.Child(m.connectIdentityPane.path, entry.Name)
+	m.connectForm.identity = path
+	m.connectCursor = len([]rune(path))
+	m.connectForm.fresh[connectFieldIdentity] = false
+	m.connectIdentityBrowse = false
+	m.setStatus("identity file " + path)
+	return nil
+}
+
+func (m *Model) handleConnectIdentityBrowseKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "q":
+		m.connectIdentityBrowse = false
+		m.setStatus("identity browse cancelled")
+	case "up", "k":
+		m.connectIdentityPane.cursor--
+		m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	case "down", "j":
+		m.connectIdentityPane.cursor++
+		m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	case "pgup":
+		m.connectIdentityPane.cursor -= 10
+		m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	case "pgdown":
+		m.connectIdentityPane.cursor += 10
+		m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	case "home":
+		m.connectIdentityPane.cursor = 0
+		m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	case "end":
+		m.connectIdentityPane.cursor = len(m.connectIdentityPane.entries) - 1
+		m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
+	case "backspace", "h":
+		return m.navigateConnectIdentityParent()
+	case "enter", "ctrl+b", "l":
+		return m.chooseConnectIdentityEntry()
+	}
+	return nil
+}
+
 // targetFromForm validates the form's Protocol/Host/Port/Username/Path fields
 // and builds the target they describe. On a validation failure it sets the
 // form's error and returns ok=false.
@@ -641,8 +736,12 @@ func (m Model) forgetCredentialCmd(target session.Target) tea.Cmd {
 // whatthedock's form editing: arrows/tab move between fields, h/l cycle the
 // picker or move the caret in free text, and ctrl/alt+enter connects.
 func (m *Model) handleConnectKey(msg tea.KeyMsg) tea.Cmd {
+	if m.connectIdentityBrowse {
+		return m.handleConnectIdentityBrowseKey(msg)
+	}
 	switch msg.String() {
 	case "esc", "q":
+		m.connectIdentityBrowse = false
 		m.overlay = overlayNone
 		m.setStatus("cancelled")
 	case "up":
@@ -713,6 +812,8 @@ func (m *Model) handleConnectKey(msg tea.KeyMsg) tea.Cmd {
 			m.connectCursor = 0
 			m.connectForm.fresh[m.connectField] = false
 		}
+	case "ctrl+b":
+		m.openConnectIdentityBrowser()
 	default:
 		if len(msg.Runes) > 0 && !connectChoiceField(m.connectField) {
 			m.editConnectField(string(msg.Runes))

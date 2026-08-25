@@ -185,3 +185,53 @@ func TestOverlayOpenBlocksQuit(t *testing.T) {
 		t.Fatalf("q with an overlay open left it at %v, want it closed rather than falling through to quit", model.overlay)
 	}
 }
+
+func TestCtrlKOpensCommandPalette(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlK})
+
+	if model.overlay != overlayCommandPalette {
+		t.Fatalf("overlay = %v after ctrl+k, want command palette", model.overlay)
+	}
+	plain := strings.ToLower(model.View())
+	if !strings.Contains(plain, "command palette") || !strings.Contains(plain, "refresh") {
+		t.Fatalf("command palette view missing expected content:\n%s", plain)
+	}
+}
+
+func TestCommandPaletteFiltersCommands(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlK})
+
+	model = press(t, model, runes("theme"))
+
+	commands := model.filteredPaletteCommands()
+	if len(commands) != 1 || commands[0].id != commandTheme {
+		t.Fatalf("filtered commands = %+v, want only Theme picker", commands)
+	}
+}
+
+func TestCommandPaletteRunsSelectedCommand(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlK})
+	model = press(t, model, runes("settings"))
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlaySettings {
+		t.Fatalf("overlay after running Settings = %v, want settings", model.overlay)
+	}
+}
+
+func TestCommandPaletteBrowseIdentityOpensPicker(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlK})
+	model = press(t, model, runes("identity"))
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayConnect || !model.connectIdentityBrowse || model.connectField != connectFieldIdentity {
+		t.Fatalf("identity command left overlay=%v browse=%v field=%v, want connect identity browser", model.overlay, model.connectIdentityBrowse, model.connectField)
+	}
+}

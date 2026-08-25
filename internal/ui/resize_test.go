@@ -17,7 +17,7 @@ import (
 // smoke test for sizes no realistic layout math was written against.
 func TestViewSurvivesTinyTerminals(t *testing.T) {
 	sizes := [][2]int{{0, 0}, {1, 1}, {2, 2}, {5, 3}, {10, 5}, {20, 8}, {1, 30}, {100, 1}}
-	overlays := []overlayMode{overlayNone, overlayHelp, overlayConnect, overlayConflict, overlayTheme, overlayPreflight, overlaySettings, overlayHostKey}
+	overlays := []overlayMode{overlayNone, overlayHelp, overlayConnect, overlayConflict, overlayTheme, overlayPreflight, overlaySettings, overlayHostKey, overlayCommandPalette}
 
 	for _, size := range sizes {
 		for _, overlay := range overlays {
