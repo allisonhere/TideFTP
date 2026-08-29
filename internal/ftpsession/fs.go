@@ -74,6 +74,57 @@ func (f *FS) Child(current, name string) string { return vfs.ChildRemote(current
 
 func (f *FS) Parent(current string) string { return vfs.ParentRemote(current) }
 
+func (f *FS) Mkdir(ctx context.Context, dirPath string) error {
+	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		return conn.MakeDir(vfs.CleanRemote(dirPath))
+	})
+}
+
+func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
+	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		return conn.Rename(vfs.CleanRemote(oldPath), vfs.CleanRemote(newPath))
+	})
+}
+
+func (f *FS) Remove(ctx context.Context, targetPath string) error {
+	targetPath = vfs.CleanRemote(targetPath)
+	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		if err := conn.Delete(targetPath); err == nil {
+			return nil
+		}
+		return conn.RemoveDir(targetPath)
+	})
+}
+
+func (f *FS) withConn(ctx context.Context, fn func(*ftp.ServerConn) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	conn, err := f.pool.get(ctx)
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- fn(conn)
+	}()
+	select {
+	case <-ctx.Done():
+		go func() {
+			<-done
+			f.pool.discard(conn)
+		}()
+		return ctx.Err()
+	case err := <-done:
+		if err != nil {
+			f.pool.discard(conn)
+			return err
+		}
+		f.pool.put(conn)
+		return nil
+	}
+}
+
 // convertEntries maps an FTP listing to the app's entries. LIST includes "."
 // and ".." on most servers; the UI navigates with backspace and would show
 // them as ordinary rows, so they are dropped.

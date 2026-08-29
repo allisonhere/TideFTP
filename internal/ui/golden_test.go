@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ var updateGolden = flag.Bool("update", false, "update golden files")
 // or terminal color profiles.
 func assertGolden(t *testing.T, name, got string) {
 	t.Helper()
+	got = trimGoldenLinePadding(got)
 	path := filepath.Join("testdata", name+".golden")
 	if *updateGolden {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
@@ -38,10 +40,19 @@ func assertGolden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("read golden %s: %v (run `go test ./internal/ui/... -run %s -update` to create it)", path, err, t.Name())
 	}
-	if got != string(want) {
+	wantText := trimGoldenLinePadding(string(want))
+	if got != wantText {
 		t.Errorf("%s does not match %s — run `go test ./internal/ui/... -run %s -update` to review and accept the change\n\n--- got ---\n%s\n--- want ---\n%s",
-			t.Name(), path, t.Name(), got, string(want))
+			t.Name(), path, t.Name(), got, wantText)
 	}
+}
+
+func trimGoldenLinePadding(value string) string {
+	lines := strings.Split(value, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // goldenModel builds a fully deterministic connected model: fixed local and

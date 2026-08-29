@@ -172,17 +172,33 @@ func TestSixOpensTheStatsTab(t *testing.T) {
 	}
 }
 
-// TestOverlayOpenBlocksQuit confirms q closes an open overlay rather than
-// falling through to the top-level quit binding: if it fell through, the
-// overlay would still be open (only the overlay-close branch clears it).
+// TestOverlayOpenBlocksQuit confirms q on a confirmation-style overlay closes
+// it rather than falling through to the top-level quit binding.
 func TestOverlayOpenBlocksQuit(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
-	model.overlay = overlayHelp
+	model.overlay = overlayPreflight
 
 	model = press(t, model, runes("q"))
 
 	if model.overlay != overlayNone {
 		t.Fatalf("q with an overlay open left it at %v, want it closed rather than falling through to quit", model.overlay)
+	}
+}
+
+// TestHelpOverlaySwallowsQuitKey confirms q in the help search field is typed
+// into the query (so terms like "quit" are searchable) and never falls through
+// to the top-level quit binding.
+func TestHelpOverlaySwallowsQuitKey(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, runes("?"))
+
+	model = press(t, model, runes("q"))
+
+	if model.overlay != overlayHelp {
+		t.Fatalf("q in help left overlay=%v, want it still open", model.overlay)
+	}
+	if model.helpQuery != "q" {
+		t.Fatalf("helpQuery = %q, want \"q\"", model.helpQuery)
 	}
 }
 
@@ -233,5 +249,59 @@ func TestCommandPaletteBrowseIdentityOpensPicker(t *testing.T) {
 
 	if model.overlay != overlayConnect || !model.connectIdentityBrowse || model.connectField != connectFieldIdentity {
 		t.Fatalf("identity command left overlay=%v browse=%v field=%v, want connect identity browser", model.overlay, model.connectIdentityBrowse, model.connectField)
+	}
+}
+
+func TestHelpSearchFiltersRows(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, runes("?"))
+
+	model = press(t, model, runes("rename"))
+
+	if model.overlay != overlayHelp {
+		t.Fatalf("overlay = %v, want help", model.overlay)
+	}
+	entries := model.filteredHelpEntries()
+	if len(entries) != 1 || entries[0].key != "f2" || entries[0].label != "rename item" {
+		t.Fatalf("filtered help entries = %+v, want only rename item", entries)
+	}
+	if !strings.Contains(strings.ToLower(model.View()), "rename item") {
+		t.Fatalf("help search should render rename row")
+	}
+}
+
+func TestHelpSearchAcceptsReservedLetters(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, runes("?"))
+
+	for _, r := range "queue" { // q, u, e — none may be swallowed as commands
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if model.overlay != overlayHelp {
+		t.Fatalf("overlay = %v, want help still open", model.overlay)
+	}
+	if model.helpQuery != "queue" {
+		t.Fatalf("helpQuery = %q, want \"queue\"", model.helpQuery)
+	}
+	entries := model.filteredHelpEntries()
+	if len(entries) != 1 || entries[0].key != "x" {
+		t.Fatalf("filtered entries = %+v, want only the queue-pane row", entries)
+	}
+}
+
+func TestHelpOverlayScrolls(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.height = 18
+	model = press(t, model, runes("?"))
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyPgDown})
+
+	if model.helpOffset == 0 {
+		t.Fatalf("help offset did not move after pgdown")
+	}
+	plain := strings.ToLower(model.View())
+	if !strings.Contains(plain, "rows") {
+		t.Fatalf("help view should show scroll position:\n%s", plain)
 	}
 }

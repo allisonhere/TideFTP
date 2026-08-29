@@ -913,6 +913,137 @@ func TestLocalPaneParentDirectoryRowIsNotSelectable(t *testing.T) {
 	}
 }
 
+func TestFileActionCreatesFolderInFocusedPane(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model.focus = focusLocal
+	model.local.path = "/public_html"
+
+	model = press(t, model, runes("n"))
+	model = press(t, model, runes("drafts"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayNone {
+		t.Fatalf("overlay = %v after mkdir, want none", model.overlay)
+	}
+	found := false
+	for _, entry := range model.local.entries {
+		if entry.Name == "drafts" && entry.IsDir() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("local entries after mkdir = %+v, want drafts directory", model.local.entries)
+	}
+}
+
+// typeKeys presses each rune as its own KeyMsg, the way a real terminal
+// delivers typing (runes("...") sends one batched message and hides key
+// handlers that special-case single letters).
+func typeKeys(t *testing.T, model Model, text string) Model {
+	t.Helper()
+	for _, r := range text {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return model
+}
+
+func TestFileActionNamePromptAcceptsReservedLetters(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+
+	model = press(t, model, runes("n"))
+	model = typeKeys(t, model, "notes-query") // n, q and y all land in the name
+
+	if model.overlay != overlayFileAction || model.fileAction == nil {
+		t.Fatalf("prompt was dismissed while typing; overlay=%v", model.overlay)
+	}
+	if model.fileAction.text != "notes-query" {
+		t.Fatalf("fileAction.text = %q, want \"notes-query\"", model.fileAction.text)
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	found := false
+	for _, entry := range model.local.entries {
+		if entry.Name == "notes-query" && entry.IsDir() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("entries after mkdir = %+v, want notes-query directory", model.local.entries)
+	}
+}
+
+func TestFileActionRejectsNameWithPathSeparator(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+
+	model = press(t, model, runes("n"))
+	model = typeKeys(t, model, "../escape")
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayFileAction {
+		t.Fatalf("overlay = %v, want prompt to stay open on invalid name", model.overlay)
+	}
+	if _, err := local.List(context.Background(), "/escape", false); err == nil {
+		t.Fatalf("mkdir created a directory outside the pane path")
+	}
+}
+
+func TestFileActionRenamesHighlightedItem(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	for i, entry := range model.local.entries {
+		if entry.Name == "robots.txt" {
+			model.local.cursor = i
+		}
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyF2})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+	model = press(t, model, runes("humans.txt"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	found := false
+	for _, entry := range model.local.entries {
+		if entry.Name == "humans.txt" {
+			found = true
+		}
+		if entry.Name == "robots.txt" {
+			t.Fatalf("old name still present after rename: %+v", model.local.entries)
+		}
+	}
+	if !found {
+		t.Fatalf("local entries after rename = %+v, want humans.txt", model.local.entries)
+	}
+}
+
+func TestFileActionDeletesSelectedItemsAfterConfirm(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	model.local.selected = map[string]bool{"robots.txt": true}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDelete})
+	if model.overlay != overlayFileAction {
+		t.Fatalf("overlay = %v after delete, want file action confirmation", model.overlay)
+	}
+	model = press(t, model, runes("y"))
+
+	for _, entry := range model.local.entries {
+		if entry.Name == "robots.txt" {
+			t.Fatalf("deleted file still present: %+v", model.local.entries)
+		}
+	}
+}
+
 func TestPaneStaysUsableWhileLoading(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusRemote

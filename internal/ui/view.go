@@ -422,41 +422,46 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		keyRow := func(key, label string) string {
 			return renderer.RenderSoftRow(tideui.SoftRow{Text: key, Suffix: label}, 64)
 		}
+		query := m.helpQuery
+		if query == "" {
+			query = "|"
+		} else {
+			query += "|"
+		}
+		entries := helpDisplayRows(m.filteredHelpEntries())
+		visible := m.helpVisibleRows()
+		offset := min(max(0, m.helpOffset), max(0, len(entries)-visible))
 		content := []string{
 			renderer.Styles.DetailTitle.Render("Keyboard"),
+			renderer.Styles.DetailMeta.Width(64).Render("Search  " + query),
 			"",
-			renderer.Styles.DetailMeta.Render("Navigate"),
-			keyRow("tab / shift+tab", "switch panes"),
-			keyRow("up/down, k/j", "move cursor"),
-			keyRow("pgup / pgdown", "page up / down"),
-			keyRow("enter", "open directory"),
-			keyRow("backspace / h", "parent directory"),
-			"",
-			renderer.Styles.DetailMeta.Render("Act"),
-			keyRow("space", "toggle selection"),
-			keyRow("ctrl+a", "select all"),
-			keyRow("esc", "clear selection / cancel"),
-			keyRow("u", "upload"),
-			keyRow("d", "download"),
-			keyRow("r", "refresh"),
-			keyRow("x", "cancel active transfer (queue pane) / all"),
-			keyRow("R", "retry selected failed transfer"),
-			keyRow("+/-", "more/fewer parallel transfers"),
-			keyRow(".", "toggle hidden files"),
-			"",
-			renderer.Styles.DetailMeta.Render("View"),
-			keyRow("c", "connect / disconnect"),
-			keyRow("t", "theme picker"),
-			keyRow(",", "settings"),
-			keyRow("i", "toggle icons"),
-			keyRow("shift+left/right", "resize file panes"),
-			keyRow("shift+up/down", "resize transfer pane"),
-			keyRow("ctrl+0", "reset layout"),
-			keyRow("1-5", "bottom tabs"),
-			keyRow("q / ctrl+c", "quit"),
-			"",
-			renderer.RenderSoftHints(64, tideui.SoftHint{Key: "esc", Label: "close"}),
 		}
+		if len(entries) == 0 {
+			content = append(content, renderer.Styles.DetailMeta.Width(64).Render("No matching help"))
+		} else {
+			end := min(len(entries), offset+visible)
+			for _, row := range entries[offset:end] {
+				switch {
+				case row.section == "" && row.key == "":
+					content = append(content, "")
+				case row.key == "":
+					content = append(content, renderer.Styles.DetailMeta.Render(row.section))
+				default:
+					content = append(content, keyRow(row.key, row.label))
+				}
+			}
+		}
+		scroll := fmt.Sprintf("%d-%d/%d", min(len(entries), offset+1), min(len(entries), offset+visible), len(entries))
+		if len(entries) == 0 {
+			scroll = "0/0"
+		}
+		content = append(content, "",
+			renderer.Styles.DetailMeta.Width(64).Render("Rows  "+scroll),
+			renderer.RenderSoftHints(64,
+				tideui.SoftHint{Key: "type", Label: "search"},
+				tideui.SoftHint{Key: "up/down", Label: "scroll"},
+				tideui.SoftHint{Key: "ctrl+u", Label: "clear"},
+				tideui.SoftHint{Key: "esc", Label: "close"}))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "help", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(content, "\n"))})
 		return &overlay
 	case overlayConnect:
@@ -616,6 +621,46 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			tideui.SoftHint{Key: "esc", Label: "close"},
 		))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "command palette", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlayFileAction:
+		if m.fileAction == nil {
+			return nil
+		}
+		width := min(64, max(42, m.width-8))
+		contentWidth := width - 4
+		prompt := m.fileAction
+		rows := []string{}
+		title := fileActionLabel(prompt.kind)
+		if prompt.kind == fileActionDelete {
+			names := make([]string, 0, min(5, len(prompt.entries)))
+			for i, entry := range prompt.entries {
+				if i >= 5 {
+					break
+				}
+				names = append(names, entry.Name)
+			}
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(contentWidth).Render(fmt.Sprintf("Delete %d item(s)?", len(prompt.entries))),
+				renderer.Styles.DetailMeta.Width(contentWidth).Render(strings.Join(names, ", ")),
+				"",
+				renderer.RenderSoftHints(contentWidth,
+					tideui.SoftHint{Key: "y/enter", Label: "delete"},
+					tideui.SoftHint{Key: "esc/n", Label: "cancel"}),
+			)
+		} else {
+			value := prompt.text
+			runes := []rune(value)
+			cur := min(max(prompt.cursor, 0), len(runes))
+			value = string(append(runes[:cur], append([]rune{'|'}, runes[cur:]...)...))
+			rows = append(rows,
+				renderer.Styles.DetailMeta.Width(contentWidth).Render("Name  "+value),
+				"",
+				renderer.RenderSoftHints(contentWidth,
+					tideui.SoftHint{Key: "enter", Label: "save"},
+					tideui.SoftHint{Key: "esc", Label: "cancel"}),
+			)
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: title, Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlaySettings:
 		width := min(60, max(36, m.width-8))

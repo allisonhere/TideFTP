@@ -116,6 +116,114 @@ func (r *Remote) Parent(current string) string {
 	return parent
 }
 
+func (r *Remote) Mkdir(ctx context.Context, dirPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dirPath = clean(dirPath)
+	if _, ok := r.entries[dirPath]; ok {
+		return fmt.Errorf("already exists: %s", dirPath)
+	}
+	parent := path.Dir(dirPath)
+	name := path.Base(dirPath)
+	children, ok := r.entries[parent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", parent)
+	}
+	now := time.Now()
+	r.entries[parent] = append(children, dir(name, now))
+	r.entries[dirPath] = []domain.Entry{}
+	return nil
+}
+
+func (r *Remote) Rename(ctx context.Context, oldPath, newPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	oldPath, newPath = clean(oldPath), clean(newPath)
+	if oldPath == newPath {
+		return nil
+	}
+	oldParent, newParent := path.Dir(oldPath), path.Dir(newPath)
+	oldName, newName := path.Base(oldPath), path.Base(newPath)
+	children, ok := r.entries[oldParent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", oldParent)
+	}
+	idx := -1
+	for i, entry := range children {
+		if entry.Name == oldName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("no such item: %s", oldPath)
+	}
+	dstSiblings, ok := r.entries[newParent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", newParent)
+	}
+	for _, entry := range dstSiblings {
+		if entry.Name == newName {
+			return fmt.Errorf("already exists: %s", newPath)
+		}
+	}
+	entry := children[idx]
+	// Build a fresh slice rather than append(children[:idx], ...), which would
+	// clobber the backing array shared with any listing already handed out.
+	remaining := make([]domain.Entry, 0, len(children)-1)
+	remaining = append(remaining, children[:idx]...)
+	remaining = append(remaining, children[idx+1:]...)
+	r.entries[oldParent] = remaining
+	entry.Name = newName
+	r.entries[newParent] = append(r.entries[newParent], entry)
+	if entry.IsDir() {
+		moved := map[string][]domain.Entry{}
+		for dirPath, entries := range r.entries {
+			if dirPath == oldPath || strings.HasPrefix(dirPath, oldPath+"/") {
+				moved[newPath+strings.TrimPrefix(dirPath, oldPath)] = entries
+				delete(r.entries, dirPath)
+			}
+		}
+		for dirPath, entries := range moved {
+			r.entries[dirPath] = entries
+		}
+	}
+	return nil
+}
+
+func (r *Remote) Remove(ctx context.Context, targetPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	targetPath = clean(targetPath)
+	parent, name := path.Dir(targetPath), path.Base(targetPath)
+	children, ok := r.entries[parent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", parent)
+	}
+	idx := -1
+	for i, entry := range children {
+		if entry.Name == name {
+			if entry.IsDir() && len(r.entries[targetPath]) > 0 {
+				return fmt.Errorf("directory not empty: %s", targetPath)
+			}
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("no such item: %s", targetPath)
+	}
+	remaining := make([]domain.Entry, 0, len(children)-1)
+	remaining = append(remaining, children[:idx]...)
+	remaining = append(remaining, children[idx+1:]...)
+	r.entries[parent] = remaining
+	delete(r.entries, targetPath)
+	return nil
+}
+
 func clean(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "/"

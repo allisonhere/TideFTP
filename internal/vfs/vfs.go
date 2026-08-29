@@ -30,6 +30,12 @@ type FS interface {
 	// Parent resolves the parent of current, returning current unchanged at
 	// the root. Pure path math, like Child.
 	Parent(current string) string
+	// Mkdir creates one directory at dirPath.
+	Mkdir(ctx context.Context, dirPath string) error
+	// Rename moves oldPath to newPath.
+	Rename(ctx context.Context, oldPath, newPath string) error
+	// Remove deletes the file or empty directory at targetPath.
+	Remove(ctx context.Context, targetPath string) error
 }
 
 // Remote paths are always slash-separated, whatever the client's own OS is,

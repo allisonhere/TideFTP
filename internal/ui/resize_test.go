@@ -17,7 +17,7 @@ import (
 // smoke test for sizes no realistic layout math was written against.
 func TestViewSurvivesTinyTerminals(t *testing.T) {
 	sizes := [][2]int{{0, 0}, {1, 1}, {2, 2}, {5, 3}, {10, 5}, {20, 8}, {1, 30}, {100, 1}}
-	overlays := []overlayMode{overlayNone, overlayHelp, overlayConnect, overlayConflict, overlayTheme, overlayPreflight, overlaySettings, overlayHostKey, overlayCommandPalette}
+	overlays := []overlayMode{overlayNone, overlayHelp, overlayConnect, overlayConflict, overlayTheme, overlayPreflight, overlaySettings, overlayHostKey, overlayCommandPalette, overlayFileAction}
 
 	for _, size := range sizes {
 		for _, overlay := range overlays {
@@ -39,6 +39,9 @@ func TestViewSurvivesTinyTerminals(t *testing.T) {
 					target: testTarget,
 					err:    &session.UntrustedHostKeyError{Address: testTarget.Address(), Algorithm: "ssh-ed25519", Fingerprint: "SHA256:Example"},
 				}
+			}
+			if overlay == overlayFileAction {
+				model.fileAction = &fileActionPrompt{kind: fileActionMkdir}
 			}
 
 			func() {

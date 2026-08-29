@@ -24,8 +24,11 @@ var _ vfs.FS = (*conflictFS)(nil)
 func (f *conflictFS) List(_ context.Context, dir string, _ bool) ([]domain.Entry, error) {
 	return f.entries[dir], nil
 }
-func (f *conflictFS) Child(current, name string) string { return path.Join(current, name) }
-func (f *conflictFS) Parent(current string) string      { return path.Dir(current) }
+func (f *conflictFS) Child(current, name string) string            { return path.Join(current, name) }
+func (f *conflictFS) Parent(current string) string                 { return path.Dir(current) }
+func (f *conflictFS) Mkdir(context.Context, string) error          { return nil }
+func (f *conflictFS) Rename(context.Context, string, string) error { return nil }
+func (f *conflictFS) Remove(context.Context, string) error         { return nil }
 
 // conflictModel builds a connected model uploading from a single local file
 // entry, with dst seeded so the remote directory the upload targets (the

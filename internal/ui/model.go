@@ -50,6 +50,7 @@ const (
 	overlaySettings
 	overlayHostKey
 	overlayCommandPalette
+	overlayFileAction
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -137,6 +138,29 @@ type listingMsg struct {
 	err     error
 }
 
+type fileActionKind int
+
+const (
+	fileActionMkdir fileActionKind = iota
+	fileActionRename
+	fileActionDelete
+)
+
+type fileActionPrompt struct {
+	kind    fileActionKind
+	pane    paneID
+	text    string
+	cursor  int
+	oldName string
+	entries []domain.Entry
+}
+
+type fileActionMsg struct {
+	kind fileActionKind
+	pane paneID
+	err  error
+}
+
 type filePane struct {
 	title      string
 	path       string
@@ -207,6 +231,9 @@ type Model struct {
 	connectIdentityPane   filePane
 	commandQuery          string
 	commandCursor         int
+	fileAction            *fileActionPrompt
+	helpQuery             string
+	helpOffset            int
 
 	conn     session.Conn
 	remoteFS vfs.FS
@@ -475,6 +502,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyListing(msg)
 		m.settleBottomOffset(wasAtBottom)
 		return m, nil
+	case fileActionMsg:
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("%s: %v", fileActionLabel(msg.kind), msg.err))
+		} else {
+			m.setStatus(fileActionDoneLabel(msg.kind))
+		}
+		// Refresh even on error: a delete of several items can fail partway
+		// through, so the pane may be stale either way. Drop the selection,
+		// whose names no longer describe what is on screen.
+		if pane := m.filePaneByID(msg.pane); pane != nil {
+			pane.selected = map[string]bool{}
+		}
+		return m, m.requestListing(msg.pane, m.filePaneByID(msg.pane).path, listingRefresh)
 	case storedCredentialMsg:
 		if msg.token != m.connectForm.credToken {
 			return m, nil // superseded by a later profile selection
@@ -578,6 +618,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayCommandPalette {
 		return m, m.handleCommandPaletteKey(msg)
 	}
+	if m.overlay == overlayFileAction {
+		return m, m.handleFileActionKey(msg)
+	}
+	if m.overlay == overlayHelp {
+		return m, m.handleHelpKey(msg)
+	}
 	if m.overlay == overlayConflict {
 		return m, m.handleConflictKey(msg)
 	}
@@ -640,6 +686,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.activateCursor()
 	case "backspace", "h":
 		cmd = m.parentDir()
+	case "n":
+		m.openMkdirPrompt()
+	case "f2":
+		m.openRenamePrompt()
+	case "delete":
+		m.openDeletePrompt()
 	case " ":
 		m.toggleSelection()
 	case "esc":
@@ -679,7 +731,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.overlay = overlaySettings
 		m.settingsCursor = 0
 	case "?":
-		m.overlay = overlayHelp
+		m.openHelpOverlay()
 	case "shift+left":
 		m.fileSplit.Shrink()
 		m.setStatus("local pane narrower")

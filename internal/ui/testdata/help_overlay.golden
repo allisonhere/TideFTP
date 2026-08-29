@@ -1,10 +1,12 @@
-   TideFTP    ╭─ tideftp · help ─────────────────────────────────────────────────────╮ split 50/50  
-╭─────────────│                                                                      │─────────────╮
-│Local        │   Keyboard                                                           │ /public_html│
-│mode        s│                                                                      │     name    │
-│  ▸ drwxr-xr-│  Navigate                                                            │:30 uploads  │
-│    -rw-r--r-│    tab / shift+tab                                   switch panes    │:30 index.htm│
-│    -rw-r--r-│    up/down, k/j                                       move cursor    │             │
+   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50
+╭─────────────╭─ tideftp · help ─────────────────────────────────────────────────────╮─────────────╮
+│Local        │                                                                      │ /public_html│
+│mode        s│   Keyboard                                                           │     name    │
+│  ▸ drwxr-xr-│  Search  |                                                           │:30 uploads  │
+│    -rw-r--r-│                                                                      │:30 index.htm│
+│    -rw-r--r-│  Navigate                                                            │             │
+│             │    tab / shift+tab                                   switch panes    │             │
+│             │    up/down, k/j                                       move cursor    │             │
 │             │    pgup / pgdown                                   page up / down    │             │
 │             │    enter                                           open directory    │             │
 │             │    backspace / h                                 parent directory    │             │
@@ -16,15 +18,13 @@
 │             │    u                                                       upload    │             │
 │             │    d                                                     download    │             │
 │             │    r                                                      refresh    │             │
-│             │    x                    cancel active transfer (queue pane) / all    │             │
-│             │    R                               retry selected failed transfer    │             │
-│             │    +/-                              more/fewer parallel transfers    │             │
-╰─────────────│    .                                          toggle hidden files    │─────────────╯
-╭─────────────│                                                                      │─────────────╮
-│Transfers    │  View                                                                │        queue│
-│  1 Queue (2x│    c                                         connect / disconnect    │             │
-│↑ [========= │    t                                                 theme picker    │ transferring│
-│↓ [          │    ,                                                     settings    │    0% queued│
-│             │    i                                                 toggle icons    │             │
-╰─────────────│    shift+left/right                             resize file panes    │─────────────╯
-   ready   tab│    shift+up/down                             resize transfer pane    │e  shift+arr… 
+│             │    n                                                   new folder    │             │
+╰─────────────│    f2                                                 rename item    │─────────────╯
+╭─────────────│    delete                           delete selected / highlighted    │─────────────╮
+│Transfers    │    x                    cancel active transfer (queue pane) / all    │        queue│
+│  1 Queue (2x│                                                                      │             │
+│↑ [========= │  Rows  1-18/33                                                       │ transferring│
+│↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
+│             │                                                                      │             │
+╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯
+   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

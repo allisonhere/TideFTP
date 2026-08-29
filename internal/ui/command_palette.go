@@ -24,6 +24,9 @@ const (
 	commandCancelTransfers
 	commandResetLayout
 	commandHelp
+	commandNewFolder
+	commandRename
+	commandDelete
 )
 
 type paletteCommand struct {
@@ -43,6 +46,7 @@ func (m Model) paletteCommands() []paletteCommand {
 	commands := []paletteCommand{
 		{id: commandConnect, title: "Connect", hint: "open connection form"},
 		{id: commandRefresh, title: "Refresh", hint: "reload visible panes"},
+		{id: commandNewFolder, title: "New folder", hint: "create folder in focused pane"},
 		{id: commandToggleHidden, title: "Toggle hidden files", hint: "show or hide dotfiles"},
 		{id: commandTheme, title: "Theme picker", hint: "choose color theme"},
 		{id: commandSettings, title: "Settings", hint: "open app settings"},
@@ -63,6 +67,12 @@ func (m Model) paletteCommands() []paletteCommand {
 	}
 	if hasCancelableTransfer(m.transfers) {
 		commands = append(commands, paletteCommand{id: commandCancelTransfers, title: "Cancel active transfers", hint: "stop current work"})
+	}
+	if pane := m.focusedFilePane(); pane != nil && len(pane.actionEntries()) > 0 {
+		commands = append(commands,
+			paletteCommand{id: commandRename, title: "Rename item", hint: "rename highlighted item"},
+			paletteCommand{id: commandDelete, title: "Delete item(s)", hint: "delete selection or highlight"},
+		)
 	}
 	return commands
 }
@@ -106,10 +116,10 @@ func (m *Model) handleCommandPaletteKey(msg tea.KeyMsg) tea.Cmd {
 	case "esc", "ctrl+k":
 		m.overlay = overlayNone
 		m.setStatus("command palette closed")
-	case "up", "k":
+	case "up":
 		m.commandCursor--
 		m.clampCommandCursor()
-	case "down", "j":
+	case "down":
 		m.commandCursor++
 		m.clampCommandCursor()
 	case "home":
@@ -182,7 +192,13 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		m.setStatus("layout reset")
 		return m.persist()
 	case commandHelp:
-		m.overlay = overlayHelp
+		m.openHelpOverlay()
+	case commandNewFolder:
+		m.openMkdirPrompt()
+	case commandRename:
+		m.openRenamePrompt()
+	case commandDelete:
+		m.openDeletePrompt()
 	}
 	return nil
 }

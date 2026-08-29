@@ -81,6 +81,31 @@ func (f *FS) Child(current, name string) string { return vfs.ChildRemote(current
 
 func (f *FS) Parent(current string) string { return vfs.ParentRemote(current) }
 
+func (f *FS) Mkdir(ctx context.Context, dirPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.client.Mkdir(vfs.CleanRemote(dirPath))
+}
+
+func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.client.Rename(vfs.CleanRemote(oldPath), vfs.CleanRemote(newPath))
+}
+
+func (f *FS) Remove(ctx context.Context, targetPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	targetPath = vfs.CleanRemote(targetPath)
+	if err := f.client.Remove(targetPath); err == nil {
+		return nil
+	}
+	return f.client.RemoveDirectory(targetPath)
+}
+
 func entryKind(mode os.FileMode) domain.EntryKind {
 	switch {
 	case mode.IsDir():

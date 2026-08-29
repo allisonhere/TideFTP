@@ -70,3 +70,24 @@ func (FS) Child(current, name string) string { return filepath.Join(current, nam
 // Parent returns current unchanged at the filesystem root, which is how the UI
 // knows there is nowhere further up to go.
 func (FS) Parent(current string) string { return filepath.Dir(current) }
+
+func (FS) Mkdir(ctx context.Context, dirPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Mkdir(dirPath, 0o755)
+}
+
+func (FS) Rename(ctx context.Context, oldPath, newPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Rename(oldPath, newPath)
+}
+
+func (FS) Remove(ctx context.Context, targetPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Remove(targetPath)
+}
