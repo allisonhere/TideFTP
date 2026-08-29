@@ -58,6 +58,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 		Shadow:      false,
 		ShowIcons:   false,
 		MaxParallel: 4,
+		Editor:      "nvim",
 		Layout:      Layout{FileSplit: 0.63, BottomSplit: 0.21},
 		Profiles: []Profile{
 			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob"},

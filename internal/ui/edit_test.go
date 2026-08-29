@@ -196,6 +196,20 @@ func TestEditRejectsABinaryFile(t *testing.T) {
 	}
 }
 
+func TestResolveEditorHonoursTheConfiguredCommand(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
+	argv, err := resolveEditor("true")
+	if err != nil || len(argv) != 1 || filepath.Base(argv[0]) != "true" {
+		t.Fatalf("resolveEditor(\"true\") = %v, %v; want the resolved path to true", argv, err)
+	}
+
+	if _, err := resolveEditor("tideftp-bogus-editor-xyz"); err == nil || !strings.Contains(err.Error(), "tideftp-bogus-editor-xyz") {
+		t.Fatalf("resolveEditor of a missing command = %v, want an error naming it", err)
+	}
+}
+
 func TestEditReportsWhenNoEditorIsAvailable(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "tideftp-no-such-editor-xyz")

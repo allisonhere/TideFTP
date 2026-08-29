@@ -20,7 +20,7 @@
 │             │    r                                                      refresh    │             │
 │             │    n                                                   new folder    │             │
 ╰─────────────│    f2                                                 rename item    │─────────────╯
-╭─────────────│    e                                         edit file in $EDITOR    │─────────────╮
+╭─────────────│    e                                     edit file in your editor    │─────────────╮
 │Transfers    │    delete                           delete selected / highlighted    │        queue│
 │  1 Queue (2x│                                                                      │             │
 │↑ [========= │  Rows  1-18/34                                                       │ transferring│

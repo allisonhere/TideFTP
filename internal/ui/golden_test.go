@@ -118,6 +118,8 @@ func TestGoldenSettingsOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlaySettings
 	model.settingsCursor = 0
+	// Pin the Editor row: its "auto (…)" label is whatever this machine has.
+	model.editorSetting = "vi"
 	assertGolden(t, "settings_overlay", ansi.Strip(model.View()))
 }
 

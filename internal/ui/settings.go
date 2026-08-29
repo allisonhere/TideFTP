@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
+	"slices"
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,6 +20,7 @@ const (
 	settingsFieldShadow
 	settingsFieldIcons
 	settingsFieldMaxParallel
+	settingsFieldEditor
 	settingsFieldCount
 )
 
@@ -25,6 +28,27 @@ const (
 // Icons). Density has its own two values, since "off"/"on" would not read
 // as compact/comfortable.
 var settingsToggleChoices = []string{"off", "on"}
+
+// editorCandidates are the editors the Editor row cycles through, if found on
+// PATH. probe is the binary to look for; command is what actually runs, so a
+// GUI editor can carry the flag that makes it block.
+var editorCandidates = []struct{ probe, command string }{
+	{"nano", "nano"}, {"vim", "vim"}, {"nvim", "nvim"}, {"vi", "vi"},
+	{"micro", "micro"}, {"hx", "hx"}, {"helix", "helix"}, {"emacs", "emacs"},
+	{"kak", "kak"}, {"code", "code -w"}, {"subl", "subl -w"}, {"zed", "zed -w"},
+}
+
+// editorChoices is the Editor row's cycle order: "auto" plus every candidate
+// present on PATH.
+func editorChoices() []string {
+	choices := []string{"auto"}
+	for _, c := range editorCandidates {
+		if _, err := exec.LookPath(c.probe); err == nil {
+			choices = append(choices, c.command)
+		}
+	}
+	return choices
+}
 
 func settingsFieldLabel(field settingsField) string {
 	switch field {
@@ -38,6 +62,8 @@ func settingsFieldLabel(field settingsField) string {
 		return "Icons"
 	case settingsFieldMaxParallel:
 		return "Max Parallel"
+	case settingsFieldEditor:
+		return "Editor"
 	}
 	return ""
 }
@@ -54,6 +80,14 @@ func (m Model) settingsFieldValue(field settingsField) string {
 		return settingsToggleChoices[boolToIndex(m.showIcons)]
 	case settingsFieldMaxParallel:
 		return strconv.Itoa(m.maxParallel)
+	case settingsFieldEditor:
+		if m.editorSetting == "" {
+			if got := detectedEditor(); got != "" {
+				return "auto (" + got + ")"
+			}
+			return "auto (none found)"
+		}
+		return m.editorSetting
 	}
 	return ""
 }
@@ -105,6 +139,18 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 		m.showIcons = !m.showIcons
 	case settingsFieldMaxParallel:
 		return m.adjustMaxParallel(direction)
+	case settingsFieldEditor:
+		choices := editorChoices()
+		cur := slices.Index(choices, m.editorSetting)
+		if m.editorSetting == "" || cur < 0 {
+			cur = 0
+		}
+		next := ((cur+direction)%len(choices) + len(choices)) % len(choices)
+		if next == 0 {
+			m.editorSetting = ""
+		} else {
+			m.editorSetting = choices[next]
+		}
 	}
 	m.setStatus(fmt.Sprintf("%s: %s", settingsFieldLabel(field), m.settingsFieldValue(field)))
 	return m.persist()

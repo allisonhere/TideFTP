@@ -241,6 +241,7 @@ type Model struct {
 	commandCursor         int
 	fileAction            *fileActionPrompt
 	pendingEdit           *pendingEdit
+	editorSetting         string
 	helpQuery             string
 	helpOffset            int
 
@@ -387,6 +388,7 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		density:        density,
 		shadow:         cfg.Shadow,
 		showIcons:      cfg.ShowIcons,
+		editorSetting:  cfg.Editor,
 		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
 		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
 		save:           save,
@@ -418,6 +420,7 @@ func (m Model) snapshotConfig() config.Config {
 		Shadow:      m.shadow,
 		ShowIcons:   m.showIcons,
 		MaxParallel: m.maxParallel,
+		Editor:      m.editorSetting,
 		Layout: config.Layout{
 			FileSplit:   m.fileSplit.Value(),
 			BottomSplit: m.bottomSplit.Value(),
@@ -558,7 +561,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setError(fmt.Sprintf("edit %s: %v", msg.name, msg.err))
 			return m, nil
 		}
-		editor, err := editorCommand(msg.tmpPath)
+		editor, err := editorCommand(m.editorSetting, msg.tmpPath)
 		if err != nil {
 			os.Remove(msg.tmpPath)
 			m.setError(err.Error())

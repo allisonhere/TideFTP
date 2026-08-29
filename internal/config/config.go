@@ -18,13 +18,17 @@ import (
 // Default, and Load layers a TOML file over those defaults, so a partial or
 // hand-edited file is fine.
 type Config struct {
-	Theme       string    `toml:"theme"`
-	Density     string    `toml:"density"`
-	Shadow      bool      `toml:"shadow"`
-	ShowIcons   bool      `toml:"show_icons"`
-	MaxParallel int       `toml:"max_parallel"`
-	Layout      Layout    `toml:"layout"`
-	Profiles    []Profile `toml:"profiles"`
+	Theme       string `toml:"theme"`
+	Density     string `toml:"density"`
+	Shadow      bool   `toml:"shadow"`
+	ShowIcons   bool   `toml:"show_icons"`
+	MaxParallel int    `toml:"max_parallel"`
+	// Editor is the command the `e` action opens files with. Empty means
+	// auto: $VISUAL, $EDITOR, git's core.editor, then a common editor on
+	// PATH. A value may carry flags, e.g. "code -w".
+	Editor   string    `toml:"editor,omitempty"`
+	Layout   Layout    `toml:"layout"`
+	Profiles []Profile `toml:"profiles"`
 }
 
 // Layout records the pane split ratios as fractions of the terminal. The UI

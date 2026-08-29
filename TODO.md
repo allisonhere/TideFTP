@@ -5,8 +5,10 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 ## Tier 1 — makes it a daily driver
 
 - [x] **Edit a file in place** — `e` on a file row checks it out to a temp copy,
-      opens `$EDITOR`, and writes it back if the contents changed. Both panes.
+      opens an editor, and writes it back if the contents changed. Both panes.
       5 MiB cap, refuses binaries. `vfs.FS` gained `ReadFile`/`WriteFile`.
+      Editor picked in Settings (`auto` = $VISUAL/$EDITOR/`git core.editor`/PATH)
+      or `editor` in `config.toml`.
 - [ ] **Filter / search within a pane** — type to narrow the visible listing
       (glob or substring), like the help overlay's search. Essential for large dirs.
 - [ ] **Directory sync / mirror** — walk both trees, transfer only what differs by

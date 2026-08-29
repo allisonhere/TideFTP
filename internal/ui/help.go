@@ -26,7 +26,7 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "r", label: "refresh"},
 	{section: "Act", key: "n", label: "new folder"},
 	{section: "Act", key: "f2", label: "rename item"},
-	{section: "Act", key: "e", label: "edit file in $EDITOR"},
+	{section: "Act", key: "e", label: "edit file in your editor"},
 	{section: "Act", key: "delete", label: "delete selected / highlighted"},
 	{section: "Act", key: "x", label: "cancel active transfer (queue pane) / all"},
 	{section: "Act", key: "R", label: "retry selected failed transfer"},

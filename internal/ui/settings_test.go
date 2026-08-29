@@ -116,6 +116,37 @@ func TestSettingsMaxParallelRespectsDirectionAndClamps(t *testing.T) {
 	}
 }
 
+func TestSettingsEditorCyclesAndPersists(t *testing.T) {
+	var saved []config.Config
+	save := func(c config.Config) error { saved = append(saved, c); return nil }
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil)
+	model.width, model.height = 120, 36
+
+	model = press(t, model, runes(","))
+	for model.settingsCursor != int(settingsFieldEditor) {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	choices := editorChoices()
+	if len(choices) < 2 {
+		t.Skip("no editors on PATH to cycle to")
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRight})
+	if model.editorSetting != choices[1] {
+		t.Fatalf("editorSetting after one cycle = %q, want %q", model.editorSetting, choices[1])
+	}
+	if len(saved) == 0 || saved[len(saved)-1].Editor != choices[1] {
+		t.Fatalf("cycling the Editor row did not persist: saved = %+v", saved)
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyLeft})
+	if model.editorSetting != "" {
+		t.Fatalf("editorSetting after cycling back = %q, want \"\" (auto)", model.editorSetting)
+	}
+}
+
 func TestSettingsThemeCyclesLiveWithoutLeavingSettings(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	themes := appThemes()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,7 +79,7 @@ func (m *Model) startEdit() tea.Cmd {
 		m.setError(fmt.Sprintf("%s is too large to edit (%d bytes)", entry.Name, entry.Size))
 		return nil
 	}
-	if _, err := editorArgv(); err != nil {
+	if _, err := resolveEditor(m.editorSetting); err != nil {
 		m.setError(err.Error())
 		return nil
 	}
@@ -149,11 +150,19 @@ func editSaveCmd(fs vfs.FS, edit pendingEdit) tea.Cmd {
 // "editor" is the Debian alternatives symlink; the rest are common installs.
 var editorFallbacks = []string{"editor", "nano", "vim", "nvim", "vi", "micro", "hx", "emacs"}
 
-// editorArgv resolves the editor command prefix: $VISUAL, then $EDITOR (either
-// may carry flags, e.g. "code -w"), then the first fallback found on PATH. It
-// returns an error when nothing usable is found, so startEdit can report that
-// before checking a file out.
-func editorArgv() ([]string, error) {
+// resolveEditor works out which editor command to run, in priority order:
+// the configured setting, then $VISUAL, $EDITOR, git's core.editor, then the
+// first fallback found on PATH. Each candidate that carries flags (e.g.
+// "code -w") keeps them. It returns an error when nothing usable is found so
+// startEdit can report that before checking a file out.
+func resolveEditor(configured string) ([]string, error) {
+	if spec := strings.TrimSpace(configured); spec != "" {
+		fields := strings.Fields(spec)
+		if _, err := exec.LookPath(fields[0]); err != nil {
+			return nil, fmt.Errorf("configured editor %q is not on PATH", fields[0])
+		}
+		return fields, nil
+	}
 	for _, env := range []string{"VISUAL", "EDITOR"} {
 		spec := strings.TrimSpace(os.Getenv(env))
 		if spec == "" {
@@ -165,17 +174,46 @@ func editorArgv() ([]string, error) {
 		}
 		return fields, nil
 	}
+	if spec := gitCoreEditor(); spec != "" {
+		fields := strings.Fields(spec)
+		if _, err := exec.LookPath(fields[0]); err == nil {
+			return fields, nil
+		}
+	}
 	for _, name := range editorFallbacks {
 		if path, err := exec.LookPath(name); err == nil {
 			return []string{path}, nil
 		}
 	}
-	return nil, fmt.Errorf("no editor found — set $EDITOR (tried %s)", strings.Join(editorFallbacks, ", "))
+	return nil, fmt.Errorf("no editor found — set one in Settings or $EDITOR (tried %s)", strings.Join(editorFallbacks, ", "))
+}
+
+// gitCoreEditor returns `git config --get core.editor`, or "" if git is not
+// installed or the setting is unset.
+func gitCoreEditor() string {
+	if _, err := exec.LookPath("git"); err != nil {
+		return ""
+	}
+	out, err := exec.Command("git", "config", "--get", "core.editor").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// detectedEditor is the basename of what an empty (auto) setting resolves to
+// right now — for the Settings row label only. Empty if nothing resolves.
+func detectedEditor() string {
+	argv, err := resolveEditor("")
+	if err != nil || len(argv) == 0 {
+		return ""
+	}
+	return filepath.Base(argv[0])
 }
 
 // editorCommand builds the editor invocation for tmpPath.
-func editorCommand(tmpPath string) (*exec.Cmd, error) {
-	argv, err := editorArgv()
+func editorCommand(configured, tmpPath string) (*exec.Cmd, error) {
+	argv, err := resolveEditor(configured)
 	if err != nil {
 		return nil, err
 	}

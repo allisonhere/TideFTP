@@ -64,7 +64,10 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `Esc`: clear selection or close overlay
 - `u`: upload selected/local cursor item
 - `d`: download selected/remote cursor item
-- `e`: edit the highlighted file in `$EDITOR` (writes it back if you change it)
+- `e`: edit the highlighted file in an editor (writes it back if you change it).
+  The editor is the **Editor** row in Settings (`,`) — `auto` resolves `$VISUAL`,
+  `$EDITOR`, `git config core.editor`, then a common editor on `PATH`. Set
+  `editor` in `config.toml` to anything, including flags, e.g. `editor = "code -w"`
 - `x`: cancel active transfers
 - `o`: conflict prompt (demo)
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
