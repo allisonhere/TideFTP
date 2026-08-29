@@ -7,6 +7,7 @@ package localfs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -81,6 +82,12 @@ func (FS) Mkdir(ctx context.Context, dirPath string) error {
 func (FS) Rename(ctx context.Context, oldPath, newPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// os.Rename silently replaces an existing destination on Unix. Every vfs
+	// backend refuses instead, so a rename never destroys a file the user
+	// forgot was there; overwriting is a decision for a future confirm step.
+	if _, err := os.Lstat(newPath); err == nil {
+		return fmt.Errorf("already exists: %s", newPath)
 	}
 	return os.Rename(oldPath, newPath)
 }

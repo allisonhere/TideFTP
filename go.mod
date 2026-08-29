@@ -12,6 +12,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.11
 	github.com/zalando/go-keyring v0.2.8
+	goftp.io/server/v2 v2.0.3
 	golang.org/x/crypto v0.55.0
 )
 

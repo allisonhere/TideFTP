@@ -92,6 +92,48 @@ func TestListHonoursContextCancellation(t *testing.T) {
 	}
 }
 
+func TestMkdirRenameRemove(t *testing.T) {
+	root := tempTree(t)
+	fs := New()
+	ctx := context.Background()
+
+	if err := fs.Mkdir(ctx, filepath.Join(root, "reports")); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "reports")); err != nil || !info.IsDir() {
+		t.Fatalf("Stat(reports) = %v, %v; want a directory", info, err)
+	}
+
+	if err := fs.Rename(ctx, filepath.Join(root, "beta.txt"), filepath.Join(root, "delta.txt")); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "beta.txt")); !os.IsNotExist(err) {
+		t.Fatalf("old name still present after rename: %v", err)
+	}
+
+	if err := fs.Remove(ctx, filepath.Join(root, "delta.txt")); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "delta.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file not removed: %v", err)
+	}
+}
+
+// TestRenameRefusesToOverwrite pins the cross-backend contract: a rename onto
+// an existing name is refused rather than silently replacing it (os.Rename's
+// own default on Unix).
+func TestRenameRefusesToOverwrite(t *testing.T) {
+	root := tempTree(t)
+
+	err := New().Rename(context.Background(), filepath.Join(root, "beta.txt"), filepath.Join(root, "gamma.data"))
+	if err == nil {
+		t.Fatalf("rename onto an existing file succeeded; want it refused")
+	}
+	if body, _ := os.ReadFile(filepath.Join(root, "gamma.data")); string(body) != "gamma" {
+		t.Fatalf("gamma.data = %q, want it left untouched", body)
+	}
+}
+
 func TestChildAndParent(t *testing.T) {
 	fs := New()
 	if got := fs.Child("/home/allie", "Projects"); got != "/home/allie/Projects" {

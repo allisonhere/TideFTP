@@ -3,6 +3,7 @@ package ftpsession
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -81,9 +82,35 @@ func (f *FS) Mkdir(ctx context.Context, dirPath string) error {
 }
 
 func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
+	oldPath, newPath = vfs.CleanRemote(oldPath), vfs.CleanRemote(newPath)
 	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
-		return conn.Rename(vfs.CleanRemote(oldPath), vfs.CleanRemote(newPath))
+		// FTP servers disagree on whether RNFR/RNTO onto an existing name
+		// overwrites or fails. Check first so every backend refuses alike.
+		if ftpPathExists(conn, newPath) {
+			return fmt.Errorf("already exists: %s", newPath)
+		}
+		return conn.Rename(oldPath, newPath)
 	})
+}
+
+// ftpPathExists reports whether name resolves to a file or directory. It
+// prefers MLST (one round trip, exact path) and falls back to scanning the
+// parent listing for servers that do not support it.
+func ftpPathExists(conn *ftp.ServerConn, name string) bool {
+	if entry, err := conn.GetEntry(name); err == nil && entry != nil {
+		return true
+	}
+	entries, err := conn.List(path.Dir(name))
+	if err != nil {
+		return false
+	}
+	base := path.Base(name)
+	for _, entry := range entries {
+		if entry.Name == base {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *FS) Remove(ctx context.Context, targetPath string) error {

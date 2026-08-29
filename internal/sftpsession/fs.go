@@ -92,7 +92,14 @@ func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return f.client.Rename(vfs.CleanRemote(oldPath), vfs.CleanRemote(newPath))
+	oldPath, newPath = vfs.CleanRemote(oldPath), vfs.CleanRemote(newPath)
+	// pkg/sftp's Rename already fails on an existing target, but check first
+	// so the error is the same "already exists" every backend returns rather
+	// than a raw SFTP status string.
+	if _, err := f.client.Lstat(newPath); err == nil {
+		return fmt.Errorf("already exists: %s", newPath)
+	}
+	return f.client.Rename(oldPath, newPath)
 }
 
 func (f *FS) Remove(ctx context.Context, targetPath string) error {
