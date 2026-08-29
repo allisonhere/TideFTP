@@ -434,6 +434,7 @@ func profilesFromConfig(profiles []config.Profile) []session.Target {
 		targets[i] = session.Target{
 			Name: p.Name, Protocol: p.Protocol, Host: p.Host,
 			Port: p.Port, User: p.User, StartPath: p.StartPath,
+			HostKeyPolicy: session.NormalizeHostKeyPolicy(p.HostKeyPolicy),
 		}
 	}
 	return targets
@@ -450,6 +451,7 @@ func profilesToConfig(targets []session.Target) []config.Profile {
 		profiles[i] = config.Profile{
 			Name: t.Name, Protocol: t.Protocol, Host: t.Host,
 			Port: t.Port, User: t.User, StartPath: t.StartPath,
+			HostKeyPolicy: session.NormalizeHostKeyPolicy(t.HostKeyPolicy),
 		}
 	}
 	return profiles

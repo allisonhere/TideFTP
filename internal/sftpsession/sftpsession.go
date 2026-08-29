@@ -105,11 +105,27 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	if err != nil {
 		return nil, err
 	}
+	policy := session.NormalizeHostKeyPolicy(target.HostKeyPolicy)
 	hostKeys, hostKeysPath, err := d.hostKeyCallback(creds.KnownHostsPath)
 	if err != nil {
-		return nil, err
+		if policy != session.HostKeyOff {
+			return nil, err
+		}
+		hostKeys, hostKeysPath = nil, ""
 	}
-	trustedCallback := trustingCallback(hostKeys, creds.TrustedHostKey)
+	var trustedCallback ssh.HostKeyCallback
+	switch policy {
+	case session.HostKeyOff:
+		// No verification at all: the user has explicitly opted out for this
+		// profile. Nothing is remembered.
+		trustedCallback = ssh.InsecureIgnoreHostKey()
+	case session.HostKeyStrict:
+		// Only hosts already in known_hosts are accepted; an unknown one is a
+		// hard failure with no ask/accept-once path.
+		trustedCallback = hostKeys
+	default:
+		trustedCallback = trustingCallback(hostKeys, creds.TrustedHostKey)
+	}
 
 	timeout := d.cfg.Timeout
 	if timeout <= 0 {
@@ -141,8 +157,10 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	// Restrict negotiation to the host key types actually pinned for this
 	// host, or the server offers whichever type the client prefers and a
 	// known host fails as a "key mismatch".
-	if algorithms := pinnedHostKeyAlgorithms(hostKeys, address); len(algorithms) > 0 {
-		clientConfig.HostKeyAlgorithms = algorithms
+	if hostKeys != nil {
+		if algorithms := pinnedHostKeyAlgorithms(hostKeys, address); len(algorithms) > 0 {
+			clientConfig.HostKeyAlgorithms = algorithms
+		}
 	}
 
 	clientConn, channels, requests, err := ssh.NewClientConn(conn, address, clientConfig)

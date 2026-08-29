@@ -27,6 +27,7 @@ const (
 	connectFieldIdentity
 	connectFieldKeyPassphrase
 	connectFieldKnownHosts
+	connectFieldHostKeyPolicy
 	connectFieldFTPSVerify
 	connectFieldFTPSCA
 	connectFieldPath
@@ -46,6 +47,32 @@ var connectFTPSVerifyChoices = []string{"verify", "insecure"}
 
 // connectRememberChoices is the Remember picker's cycle order.
 var connectRememberChoices = []string{"no", "yes"}
+
+// connectHostKeyPolicyChoices is the SFTP Host Keys picker's cycle order.
+// "ask" is index 0 and maps to the empty (default) policy.
+var connectHostKeyPolicyChoices = []string{"ask", "strict", "off"}
+
+func hostKeyPolicyIndex(policy string) int {
+	switch session.NormalizeHostKeyPolicy(policy) {
+	case session.HostKeyStrict:
+		return 1
+	case session.HostKeyOff:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func hostKeyPolicyValue(index int) string {
+	switch index {
+	case 1:
+		return session.HostKeyStrict
+	case 2:
+		return session.HostKeyOff
+	default:
+		return session.HostKeyAsk
+	}
+}
 
 const connectIdentityBrowserHeight = 10
 
@@ -73,6 +100,7 @@ type connectFormValue struct {
 	identity      string
 	keyPassphrase string
 	knownHosts    string
+	hostKeyPolicy int
 	ftpsVerify    int
 	ftpsCA        string
 	path          string
@@ -119,6 +147,8 @@ func (m Model) connectFieldVisible(field connectField) bool {
 	case connectFieldKeyPassphrase:
 		return protocol == "sftp" && m.connectAuthMode() != "password"
 	case connectFieldKnownHosts:
+		return protocol == "sftp"
+	case connectFieldHostKeyPolicy:
 		return protocol == "sftp"
 	case connectFieldFTPSVerify:
 		return protocol == "ftps"
@@ -220,6 +250,7 @@ func (m *Model) loadConnectProfile() tea.Cmd {
 	}
 	m.connectForm.username = p.User
 	m.connectForm.path = p.StartPath
+	m.connectForm.hostKeyPolicy = hostKeyPolicyIndex(p.HostKeyPolicy)
 	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
 	return m.beginCredentialLookup(p)
 }
@@ -249,12 +280,13 @@ func (m *Model) openConnectForm() tea.Cmd {
 		src = m.targets[0]
 	}
 	m.connectForm = connectFormValue{
-		profile:  m.profileIndexFor(src),
-		name:     src.Name,
-		protocol: protocolIndex(src.Protocol),
-		host:     src.Host,
-		username: src.User,
-		path:     src.StartPath,
+		profile:       m.profileIndexFor(src),
+		name:          src.Name,
+		protocol:      protocolIndex(src.Protocol),
+		host:          src.Host,
+		username:      src.User,
+		path:          src.StartPath,
+		hostKeyPolicy: hostKeyPolicyIndex(src.HostKeyPolicy),
 	}
 	if src.Port != 0 {
 		m.connectForm.port = strconv.Itoa(src.Port)
@@ -293,6 +325,8 @@ func connectFieldLabel(field connectField) string {
 		return "Key Passphrase"
 	case connectFieldKnownHosts:
 		return "Known Hosts"
+	case connectFieldHostKeyPolicy:
+		return "Host Keys"
 	case connectFieldFTPSVerify:
 		return "Verify"
 	case connectFieldFTPSCA:
@@ -333,6 +367,8 @@ func (m Model) connectFieldValue(field connectField) string {
 		return m.connectForm.keyPassphrase
 	case connectFieldKnownHosts:
 		return m.connectForm.knownHosts
+	case connectFieldHostKeyPolicy:
+		return connectHostKeyPolicyChoices[m.connectForm.hostKeyPolicy]
 	case connectFieldFTPSVerify:
 		return connectFTPSVerifyChoices[m.connectForm.ftpsVerify]
 	case connectFieldFTPSCA:
@@ -372,7 +408,7 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 // than free text.
 func connectChoiceField(field connectField) bool {
 	switch field {
-	case connectFieldProfile, connectFieldProtocol, connectFieldAuth, connectFieldRemember, connectFieldFTPSVerify:
+	case connectFieldProfile, connectFieldProtocol, connectFieldAuth, connectFieldRemember, connectFieldHostKeyPolicy, connectFieldFTPSVerify:
 		return true
 	default:
 		return false
@@ -440,6 +476,9 @@ func (m *Model) cycleConnectChoice(delta int) tea.Cmd {
 	case connectFieldFTPSVerify:
 		n := len(connectFTPSVerifyChoices)
 		m.connectForm.ftpsVerify = (m.connectForm.ftpsVerify + delta + n) % n
+	case connectFieldHostKeyPolicy:
+		n := len(connectHostKeyPolicyChoices)
+		m.connectForm.hostKeyPolicy = (m.connectForm.hostKeyPolicy + delta + n) % n
 	case connectFieldRemember:
 		m.connectForm.remember = !m.connectForm.remember
 	}
@@ -599,12 +638,13 @@ func (m *Model) targetFromForm() (session.Target, bool) {
 		port = n
 	}
 	return session.Target{
-		Name:      strings.TrimSpace(m.connectForm.name),
-		Protocol:  connectProtocols[m.connectForm.protocol],
-		Host:      host,
-		Port:      port,
-		User:      strings.TrimSpace(m.connectForm.username),
-		StartPath: strings.TrimSpace(m.connectForm.path),
+		Name:          strings.TrimSpace(m.connectForm.name),
+		Protocol:      connectProtocols[m.connectForm.protocol],
+		Host:          host,
+		Port:          port,
+		User:          strings.TrimSpace(m.connectForm.username),
+		StartPath:     strings.TrimSpace(m.connectForm.path),
+		HostKeyPolicy: hostKeyPolicyValue(m.connectForm.hostKeyPolicy),
 	}, true
 }
 

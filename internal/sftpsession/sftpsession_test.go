@@ -99,6 +99,46 @@ func TestDialWithAPassphraseProtectedKey(t *testing.T) {
 	}
 }
 
+func TestDialStrictPolicyRejectsAnUnknownHostWithoutPrompting(t *testing.T) {
+	server := startTestServer(t)
+	dialer := New(Config{
+		KnownHostsPath: server.emptyKnownHostsFile(t),
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+	target := targetFor(server)
+	target.HostKeyPolicy = session.HostKeyStrict
+
+	_, err := dialer.Dial(context.Background(), target, session.Credentials{})
+	if err == nil {
+		t.Fatalf("strict policy accepted a host with no known_hosts entry")
+	}
+	var ask *session.UntrustedHostKeyError
+	if errors.As(err, &ask) {
+		t.Fatalf("strict policy raised the accept-once prompt instead of failing: %v", err)
+	}
+}
+
+func TestDialOffPolicyAcceptsAnUnknownHost(t *testing.T) {
+	server := startTestServer(t)
+	dialer := New(Config{
+		KnownHostsPath: server.emptyKnownHostsFile(t),
+		IdentityFiles:  []string{server.clientPK},
+		Timeout:        10 * time.Second,
+	})
+	target := targetFor(server)
+	target.HostKeyPolicy = session.HostKeyOff
+
+	conn, err := dialer.Dial(context.Background(), target, session.Credentials{})
+	if err != nil {
+		t.Fatalf("off policy rejected an unknown host: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if conn.FS() == nil {
+		t.Fatalf("connection with host-key checking off exposed no FS")
+	}
+}
+
 func TestDialRejectsAMismatchedHostKey(t *testing.T) {
 	server := startTestServer(t)
 	dialer := New(Config{

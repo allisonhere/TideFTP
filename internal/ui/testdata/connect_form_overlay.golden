@@ -16,14 +16,14 @@
 │          │    Identity                                                                │          │
 │          │    Key Passphrase                                                          │          │
 │          │    Known Hosts                                                             │          │
+│          │    Host Keys                                                          ask  │          │
 │          │    Path                                                      /public_html  │          │
 │          │                                                                            │          │
-│          │    tab next   h/l change   ctrl/alt+enter connect   ctrl+u clear   esc ca  │          │
-╰──────────│    ctrl+s save profile   ctrl+x delete profile                             │──────────╯
-╭──────────│    ctrl+d disconnect                                                       │──────────╮
-│Transfers │                                                                            │     queue│
-│  1 Queue ╰────────────────────────────────────────────────────────────────────────────╯          │
-│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main…        50% transferring│
+╰──────────│    tab next   h/l change   ctrl/alt+enter connect   ctrl+u clear   esc ca  │──────────╯
+╭──────────│    ctrl+s save profile   ctrl+x delete profile                             │──────────╮
+│Transfers │    ctrl+d disconnect                                                       │     queue│
+│  1 Queue │                                                                            │          │
+│↑ [=======╰────────────────────────────────────────────────────────────────────────────╯ansferring│
 │↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -61,6 +61,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 		Layout:      Layout{FileSplit: 0.63, BottomSplit: 0.21},
 		Profiles: []Profile{
 			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob"},
+			{Name: "locked-down", Protocol: "sftp", Host: "secure.example.com", Port: 22, User: "ops", StartPath: "/srv", HostKeyPolicy: "strict"},
 		},
 	}
 	if err := Save(path, want); err != nil {

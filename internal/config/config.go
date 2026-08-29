@@ -44,6 +44,9 @@ type Profile struct {
 	Port      int    `toml:"port"`
 	User      string `toml:"user"`
 	StartPath string `toml:"start_path"`
+	// HostKeyPolicy is SFTP-only: "" (ask), "strict", or "off". Omitted from
+	// the file when it is the ask default.
+	HostKeyPolicy string `toml:"host_key_policy,omitempty"`
 }
 
 // SaveFunc persists a Config. It is a seam so callers — the UI — never have

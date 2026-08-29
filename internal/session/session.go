@@ -28,6 +28,28 @@ type Target struct {
 	Port      int
 	User      string
 	StartPath string
+	// HostKeyPolicy is SFTP-only and one of "", "strict", or "off" ("" means
+	// ask). "strict" fails on any host not already in known_hosts, with no
+	// prompt; "off" skips host-key verification entirely. Empty is the
+	// default ask-once-then-remember behaviour. It persists with the profile.
+	HostKeyPolicy string
+}
+
+// Host-key verification policies for Target.HostKeyPolicy.
+const (
+	HostKeyAsk    = "" // prompt once for an unknown host, then remember
+	HostKeyStrict = "strict"
+	HostKeyOff    = "off"
+)
+
+// NormalizeHostKeyPolicy maps any unrecognised value to the ask default.
+func NormalizeHostKeyPolicy(value string) string {
+	switch value {
+	case HostKeyStrict, HostKeyOff:
+		return value
+	default:
+		return HostKeyAsk
+	}
 }
 
 // DefaultPort is the port for a protocol when a Target does not name one.
