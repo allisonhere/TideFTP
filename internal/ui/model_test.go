@@ -1553,12 +1553,12 @@ func TestConnectFormFieldCursorWraps(t *testing.T) {
 	for i := 0; i < visible; i++ {
 		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	}
-	if model.connectField != connectFieldProfile {
-		t.Fatalf("after %d downs, field = %d, want profile (%d)", visible, model.connectField, connectFieldProfile)
+	if model.connectField != connectFieldName {
+		t.Fatalf("after %d downs, field = %d, want name (%d)", visible, model.connectField, connectFieldName)
 	}
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
 	if model.connectField != connectFieldPath {
-		t.Fatalf("after one up from profile, field = %d, want path (%d)", model.connectField, connectFieldPath)
+		t.Fatalf("after one up from name, field = %d, want path (%d)", model.connectField, connectFieldPath)
 	}
 }
 
@@ -1567,8 +1567,7 @@ func TestConnectFormConnectsFromFields(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, dialer)
 	model = press(t, model, runes("c"))
 
-	// Down past Profile and Name to Host, clear it, type a new host.
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	// Form opens on Name; down past Protocol to Host, clear it, type a new host.
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -1621,7 +1620,7 @@ func TestConnectFormSavesProfile(t *testing.T) {
 	}
 }
 
-func TestConnectFormCyclingProfileLoadsItsFields(t *testing.T) {
+func TestServerListEditLoadsProfileIntoForm(t *testing.T) {
 	other := session.Target{Name: "other", Protocol: "ftp", Host: "other.example.com", Port: 2121, User: "otheruser", StartPath: "/incoming"}
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
@@ -1630,16 +1629,17 @@ func TestConnectFormCyclingProfileLoadsItsFields(t *testing.T) {
 	model.profiles = []session.Target{other}
 
 	model = press(t, model, runes("c"))
-	if model.connectForm.profile != 0 {
-		t.Fatalf("profile field = %d before cycling, want 0 (new)", model.connectForm.profile)
+	if model.overlay != overlayServerList {
+		t.Fatalf("c with a saved profile left overlay=%v, want the server list", model.overlay)
 	}
-	model = press(t, model, runes("l"))
 
-	if model.connectForm.profile != 1 {
-		t.Fatalf("profile field = %d after cycling, want 1", model.connectForm.profile)
+	model = press(t, model, runes("e"))
+
+	if model.overlay != overlayConnect {
+		t.Fatalf("e on a profile left overlay=%v, want the connect form", model.overlay)
 	}
 	if model.connectForm.host != other.Host || model.connectForm.username != other.User || model.connectForm.path != other.StartPath {
-		t.Fatalf("cycling to a saved profile did not load its fields: form = %+v", model.connectForm)
+		t.Fatalf("editing a saved profile did not load its fields: form = %+v", model.connectForm)
 	}
 	if model.connectForm.name != other.Name {
 		t.Fatalf("name = %q, want %q", model.connectForm.name, other.Name)
@@ -1649,13 +1649,81 @@ func TestConnectFormCyclingProfileLoadsItsFields(t *testing.T) {
 	}
 }
 
+func TestServerKeyFallsThroughToFormWhenNoProfiles(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+
+	model = press(t, model, runes("c"))
+
+	if model.overlay != overlayConnect {
+		t.Fatalf("c with no saved profiles left overlay=%v, want the connect form directly", model.overlay)
+	}
+}
+
+func TestServerListEnterConnectsToSftpProfileDirectly(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model.width, model.height = 120, 36
+	model.profiles = []session.Target{testTarget} // sftp
+
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayNone {
+		t.Fatalf("enter on an sftp profile left overlay=%v, want it dialing with no form", model.overlay)
+	}
+	if !model.connected() {
+		t.Fatalf("enter on an sftp profile did not establish a connection (state=%v)", model.state)
+	}
+	if model.target.Host != testTarget.Host {
+		t.Fatalf("target = %+v, want the picked profile", model.target)
+	}
+}
+
+func TestServerListEnterFallsBackToFormForPasswordProfile(t *testing.T) {
+	ftpProfile := session.Target{Name: "nas", Protocol: "ftp", Host: "nas.local", Port: 21, User: "bob", StartPath: "/"}
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil) // nil credstore
+	model.width, model.height = 120, 36
+	model.profiles = []session.Target{ftpProfile}
+
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayConnect {
+		t.Fatalf("enter on a password profile with no stored password left overlay=%v, want the form", model.overlay)
+	}
+	if model.connectField != connectFieldPassword {
+		t.Fatalf("form focus = %d, want the Password field (%d)", model.connectField, connectFieldPassword)
+	}
+	if model.connectForm.host != ftpProfile.Host {
+		t.Fatalf("form host = %q, want it prefilled from the profile", model.connectForm.host)
+	}
+	if model.target.Host == ftpProfile.Host {
+		t.Fatalf("target switched to the ftp profile — it should not dial until the password is entered")
+	}
+}
+
+func TestServerListNewRowOpensBlankForm(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model.width, model.height = 120, 36
+	model.profiles = []session.Target{testTarget}
+
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // onto the "New connection" row
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayConnect {
+		t.Fatalf("the New row left overlay=%v, want the connect form", model.overlay)
+	}
+}
+
 func TestConnectFormTypedNameIsSavedVerbatim(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
 	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
 
-	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
+	model = press(t, model, runes("c")) // opens on Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
 	model = press(t, model, runes("Home NAS"))
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -1665,10 +1733,6 @@ func TestConnectFormTypedNameIsSavedVerbatim(t *testing.T) {
 	}
 	if got := model.profiles[0].Name; got != "Home NAS" {
 		t.Fatalf("saved profile name = %q, want the typed name", got)
-	}
-	choices := model.connectProfileChoices()
-	if len(choices) != 2 || choices[1] != "Home NAS" {
-		t.Fatalf("profile choices = %v, want the typed name to be offered", choices)
 	}
 }
 
@@ -1682,17 +1746,14 @@ func TestConnectFormDeletesProfile(t *testing.T) {
 	model.profiles = []session.Target{testTarget}
 
 	model = press(t, model, runes("c"))
-	if model.connectForm.profile != 1 {
-		t.Fatalf("profile field = %d, want 1 (matching testTarget)", model.connectForm.profile)
+	if model.overlay != overlayServerList {
+		t.Fatalf("c left overlay=%v, want the server list", model.overlay)
 	}
 
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlX})
+	model = press(t, model, runes("d"))
 
 	if len(model.profiles) != 0 {
 		t.Fatalf("profiles = %d after delete, want 0", len(model.profiles))
-	}
-	if model.connectForm.profile != 0 {
-		t.Fatalf("profile field = %d after delete, want 0 (new)", model.connectForm.profile)
 	}
 	if len(saved) != 1 || len(saved[0].Profiles) != 0 {
 		t.Fatalf("delete was not persisted: saved = %+v", saved)
@@ -1723,7 +1784,6 @@ func TestNewModelLoadsProfilesFromConfig(t *testing.T) {
 func TestConnectFormFirstKeystrokeReplacesPrefilledText(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host, prefilled "test.local"
 
@@ -1744,7 +1804,6 @@ func TestConnectFormFirstKeystrokeReplacesPrefilledText(t *testing.T) {
 func TestConnectFormBackspaceOnPrefilledTextDoesNotArmReplace(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host, prefilled "test.local"
 
@@ -1760,7 +1819,6 @@ func TestConnectFormBackspaceOnPrefilledTextDoesNotArmReplace(t *testing.T) {
 func TestConnectFieldDisplayInsertsCaret(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host
 	if got := model.connectFieldDisplay(connectFieldHost); got != "test.local|" {
@@ -1771,7 +1829,6 @@ func TestConnectFieldDisplayInsertsCaret(t *testing.T) {
 func TestConnectFormRejectsEmptyHost(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Protocol
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Host
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -1792,7 +1849,7 @@ func TestConnectFormRendersFields(t *testing.T) {
 
 	plain := ansi.Strip(model.View())
 	for _, want := range []string{
-		"connect", "Profile", "Name", "Protocol", "Host", "Port", "Username",
+		"connect", "Name", "Protocol", "Host", "Port", "Username",
 		"Auth", "Identity", "Known Hosts", "Path", "sftp",
 	} {
 		if !strings.Contains(plain, want) {

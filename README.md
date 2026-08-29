@@ -66,7 +66,7 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `d`: download selected/remote cursor item
 - `x`: cancel active transfers
 - `o`: conflict prompt (demo)
-- `c`: connect / disconnect (opens the connect form)
+- `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)
 - `.`: toggle hidden files

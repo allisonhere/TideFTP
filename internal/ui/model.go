@@ -51,6 +51,7 @@ const (
 	overlayHostKey
 	overlayCommandPalette
 	overlayFileAction
+	overlayServerList
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -235,6 +236,7 @@ type Model struct {
 	connectCursor         int
 	connectIdentityBrowse bool
 	connectIdentityPane   filePane
+	serverListCursor      int
 	commandQuery          string
 	commandCursor         int
 	fileAction            *fileActionPrompt
@@ -550,6 +552,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markConnectFieldsFresh(connectFieldPassword)
 		}
 		return m, nil
+	case serverConnectMsg:
+		if msg.found {
+			m.overlay = overlayNone
+			return m, m.connect(msg.target, session.Credentials{Password: msg.password})
+		}
+		cmd := m.openConnectFormFor(msg.target, connectFieldPassword)
+		m.setStatus("enter password for " + msg.target.Label())
+		return m, cmd
 	case credentialSyncMsg:
 		// Success says nothing new: the "saved profile"/"deleted profile"
 		// status set synchronously already covers it, and this must not
@@ -641,6 +651,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	}
 	if m.overlay == overlayFileAction {
 		return m, m.handleFileActionKey(msg)
+	}
+	if m.overlay == overlayServerList {
+		return m, m.handleServerListKey(msg)
 	}
 	if m.overlay == overlayHelp {
 		return m, m.handleHelpKey(msg)
@@ -744,7 +757,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "r":
 		cmd = m.refresh()
 	case "c":
-		cmd = m.openConnectForm()
+		cmd = m.openServerList()
 	case "t":
 		m.overlay = overlayTheme
 		m.themePicker.Open(m.theme.Name)

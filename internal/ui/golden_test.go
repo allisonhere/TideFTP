@@ -104,6 +104,16 @@ func TestGoldenConnectFormOverlay(t *testing.T) {
 	assertGolden(t, "connect_form_overlay", ansi.Strip(model.View()))
 }
 
+func TestGoldenServerListOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.profiles = []session.Target{
+		{Name: "prod web", Protocol: "sftp", Host: "web1.example.com", Port: 22, User: "deploy", StartPath: "/srv/www"},
+		{Name: "backups", Protocol: "ftp", Host: "nas.local", Port: 21, User: "bob", StartPath: "/"},
+	}
+	model = press(t, model, runes("c"))
+	assertGolden(t, "server_list_overlay", ansi.Strip(model.View()))
+}
+
 func TestGoldenSettingsOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlaySettings

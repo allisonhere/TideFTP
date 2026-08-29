@@ -44,7 +44,7 @@ func (m *Model) openCommandPalette() {
 
 func (m Model) paletteCommands() []paletteCommand {
 	commands := []paletteCommand{
-		{id: commandConnect, title: "Connect", hint: "open connection form"},
+		{id: commandConnect, title: "Connect", hint: "pick a saved server or add one"},
 		{id: commandRefresh, title: "Refresh", hint: "reload visible panes"},
 		{id: commandNewFolder, title: "New folder", hint: "create folder in focused pane"},
 		{id: commandToggleHidden, title: "Toggle hidden files", hint: "show or hide dotfiles"},
@@ -158,7 +158,7 @@ func (m *Model) handleCommandPaletteKey(msg tea.KeyMsg) tea.Cmd {
 func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 	switch id {
 	case commandConnect:
-		return m.openConnectForm()
+		return m.openServerList()
 	case commandDisconnect:
 		if m.conn != nil {
 			return m.disconnect()

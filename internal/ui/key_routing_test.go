@@ -89,8 +89,7 @@ func TestTransferRowFallsBackToStatusLabelWhenMessageIsEmpty(t *testing.T) {
 
 func TestConnectFormCursorMovesWithinAFreeTextField(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
-	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name (free text)
+	model = press(t, model, runes("c")) // opens on Name (free text)
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
 	model = press(t, model, runes("hello"))
 	if model.connectCursor != 5 {
@@ -111,8 +110,7 @@ func TestConnectFormCursorMovesWithinAFreeTextField(t *testing.T) {
 
 func TestConnectFormDeleteRemovesTheCharacterAfterTheCursor(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
-	model = press(t, model, runes("c"))
-	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown}) // Name
+	model = press(t, model, runes("c")) // opens on Name
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
 	model = press(t, model, runes("hello"))
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyHome})

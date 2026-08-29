@@ -59,12 +59,14 @@ func TestConnectFormReopeningPrefillsARememberedPassword(t *testing.T) {
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlS})
 
 	// Close and reopen: the form starts from scratch, and the password must
-	// come back from the credstore rather than needing to be retyped.
+	// come back from the credstore rather than needing to be retyped. With a
+	// saved profile now present, c opens the server list; e edits it.
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyEsc})
 	if model.overlay != overlayNone {
 		t.Fatalf("esc did not close the form")
 	}
 	model = press(t, model, runes("c"))
+	model = press(t, model, runes("e"))
 
 	if model.connectForm.password != "s3cret" {
 		t.Fatalf("password on reopen = %q, want the remembered one", model.connectForm.password)

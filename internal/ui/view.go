@@ -488,7 +488,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		rows := make([]string, 0, 10)
 		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("Status  "+m.connectionSummary()))
 		rows = append(rows, "")
-		for field := connectFieldProfile; field < connectFieldCount; field++ {
+		for field := connectField(0); field < connectFieldCount; field++ {
 			if !m.connectFieldVisible(field) {
 				continue
 			}
@@ -621,6 +621,32 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			tideui.SoftHint{Key: "esc", Label: "close"},
 		))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "command palette", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlayServerList:
+		width := min(72, max(48, m.width-8))
+		contentWidth := width - 4
+		rows := make([]string, 0, len(m.profiles)+4)
+		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("Saved servers"), "")
+		for i, p := range m.profiles {
+			suffix := p.Protocol + " · " + p.User + "@" + p.Address()
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
+				Text:     p.Label(),
+				Suffix:   suffix,
+				Selected: i == m.serverListCursor,
+			}, contentWidth))
+		}
+		rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
+			Text:     "＋ New connection…",
+			Selected: m.serverListCursor >= len(m.profiles),
+		}, contentWidth))
+		rows = append(rows, "", renderer.RenderSoftHints(contentWidth,
+			tideui.SoftHint{Key: "enter", Label: "connect"},
+			tideui.SoftHint{Key: "e", Label: "edit"},
+			tideui.SoftHint{Key: "n", Label: "new"},
+			tideui.SoftHint{Key: "d", Label: "delete"},
+			tideui.SoftHint{Key: "esc", Label: "close"},
+		))
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlayFileAction:
 		if m.fileAction == nil {

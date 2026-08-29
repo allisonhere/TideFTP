@@ -15,8 +15,7 @@ import (
 type connectField int
 
 const (
-	connectFieldProfile connectField = iota
-	connectFieldName
+	connectFieldName connectField = iota
 	connectFieldProtocol
 	connectFieldHost
 	connectFieldPort
@@ -77,9 +76,9 @@ func hostKeyPolicyValue(index int) string {
 const connectIdentityBrowserHeight = 10
 
 // connectFormValue holds the connect form's field values. Protocol is an index
-// into connectProtocols, profile is an index into the model's profile choices
-// (0 is "new", the rest are saved profiles); the remaining fields, including
-// name, are free text.
+// into connectProtocols; the remaining fields, including name, are free text.
+// Which saved profile (if any) is being edited is not tracked here — the
+// server list owns that, and ctrl+x matches by targetKey.
 //
 // fresh marks a free-text field as still showing what it was prefilled with —
 // from the current target or a loaded profile — rather than something the
@@ -88,7 +87,6 @@ const connectIdentityBrowserHeight = 10
 // whole text before typing over it would; any other edit (backspace, delete,
 // ctrl+u) marks it not fresh, so typing again only ever inserts.
 type connectFormValue struct {
-	profile       int
 	name          string
 	protocol      int
 	host          string
@@ -183,21 +181,6 @@ func (m Model) credentialsFromForm() session.Credentials {
 	return creds
 }
 
-// connectProfileNew is the label shown when the Profile field points at no
-// saved profile — the form's values are not tied to one.
-const connectProfileNew = "(new)"
-
-// connectProfileChoices lists the Profile field's cycle order: "(new)" first,
-// then each saved profile by its label.
-func (m Model) connectProfileChoices() []string {
-	choices := make([]string, 0, len(m.profiles)+1)
-	choices = append(choices, connectProfileNew)
-	for _, p := range m.profiles {
-		choices = append(choices, p.Label())
-	}
-	return choices
-}
-
 // profileKey identifies which saved profile a target belongs to: protocol,
 // host, port, and user together name an account on a server. StartPath and
 // Name can change without it becoming a different profile.
@@ -219,40 +202,16 @@ func credentialKey(t session.Target) string {
 	return fmt.Sprintf("%s|%s|%d|%s", k.protocol, k.host, k.port, k.user)
 }
 
-// profileIndexFor returns the Profile field index (1-based; 0 is "new") of
-// the saved profile matching target's key, or 0 if there is none.
-func (m Model) profileIndexFor(target session.Target) int {
+// profileIndexOf returns the index of the saved profile matching target's key
+// (protocol/host/port/user), or -1 if there is none.
+func (m Model) profileIndexOf(target session.Target) int {
 	key := targetKey(target)
 	for i, p := range m.profiles {
 		if targetKey(p) == key {
-			return i + 1
+			return i
 		}
 	}
-	return 0
-}
-
-// loadConnectProfile fills the form's Protocol/Host/Port/Username/Path from
-// the saved profile at the Profile field's current selection, and looks up
-// whatever password is stored for it. It is a no-op when the selection is
-// "(new)" — Password/Remember are left as they were, the same as every
-// other field when cycling to "(new)".
-func (m *Model) loadConnectProfile() tea.Cmd {
-	if m.connectForm.profile == 0 {
-		return nil
-	}
-	p := m.profiles[m.connectForm.profile-1]
-	m.connectForm.name = p.Name
-	m.connectForm.protocol = protocolIndex(p.Protocol)
-	m.connectForm.host = p.Host
-	m.connectForm.port = ""
-	if p.Port != 0 {
-		m.connectForm.port = strconv.Itoa(p.Port)
-	}
-	m.connectForm.username = p.User
-	m.connectForm.path = p.StartPath
-	m.connectForm.hostKeyPolicy = hostKeyPolicyIndex(p.HostKeyPolicy)
-	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
-	return m.beginCredentialLookup(p)
+	return -1
 }
 
 // markConnectFieldsFresh flags the given fields as showing a prefilled value
@@ -272,15 +231,21 @@ func protocolIndex(protocol string) int {
 	return 0
 }
 
-// openConnectForm shows the connect form, prefilled from the current target
-// (or the first known one) so it is never blank.
+// openConnectForm shows the connect form prefilled from the current target
+// (or the first known one) so it is never blank, focused on the first field.
 func (m *Model) openConnectForm() tea.Cmd {
 	src := m.target
 	if src.Host == "" && len(m.targets) > 0 {
 		src = m.targets[0]
 	}
+	return m.openConnectFormFor(src, connectFieldName)
+}
+
+// openConnectFormFor shows the connect form prefilled from src, with focus on
+// the given field. The server list uses it to edit a specific saved profile,
+// or to drop into the Password field when a direct connect needs one.
+func (m *Model) openConnectFormFor(src session.Target, focus connectField) tea.Cmd {
 	m.connectForm = connectFormValue{
-		profile:       m.profileIndexFor(src),
 		name:          src.Name,
 		protocol:      protocolIndex(src.Protocol),
 		host:          src.Host,
@@ -292,7 +257,7 @@ func (m *Model) openConnectForm() tea.Cmd {
 		m.connectForm.port = strconv.Itoa(src.Port)
 	}
 	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
-	m.connectField = connectFieldProfile
+	m.connectField = focus
 	m.connectCursor = 0
 	m.connectIdentityBrowse = false
 	m.overlay = overlayConnect
@@ -301,8 +266,6 @@ func (m *Model) openConnectForm() tea.Cmd {
 
 func connectFieldLabel(field connectField) string {
 	switch field {
-	case connectFieldProfile:
-		return "Profile"
 	case connectFieldName:
 		return "Name"
 	case connectFieldProtocol:
@@ -339,12 +302,6 @@ func connectFieldLabel(field connectField) string {
 
 func (m Model) connectFieldValue(field connectField) string {
 	switch field {
-	case connectFieldProfile:
-		choices := m.connectProfileChoices()
-		if m.connectForm.profile < len(choices) {
-			return choices[m.connectForm.profile]
-		}
-		return connectProfileNew
 	case connectFieldName:
 		return m.connectForm.name
 	case connectFieldProtocol:
@@ -408,7 +365,7 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 // than free text.
 func connectChoiceField(field connectField) bool {
 	switch field {
-	case connectFieldProfile, connectFieldProtocol, connectFieldAuth, connectFieldRemember, connectFieldHostKeyPolicy, connectFieldFTPSVerify:
+	case connectFieldProtocol, connectFieldAuth, connectFieldRemember, connectFieldHostKeyPolicy, connectFieldFTPSVerify:
 		return true
 	default:
 		return false
@@ -463,10 +420,6 @@ func (m *Model) moveConnectCursor(delta int) {
 
 func (m *Model) cycleConnectChoice(delta int) tea.Cmd {
 	switch m.connectField {
-	case connectFieldProfile:
-		n := len(m.profiles) + 1
-		m.connectForm.profile = (m.connectForm.profile + delta + n) % n
-		return m.loadConnectProfile()
 	case connectFieldProtocol:
 		n := len(connectProtocols)
 		m.connectForm.protocol = (m.connectForm.protocol + delta + n) % n
@@ -684,31 +637,40 @@ func (m *Model) upsertProfile(target session.Target) int {
 	return len(m.profiles) - 1
 }
 
-// saveConnectProfile validates the form and saves it as a profile, updating
-// the Profile field to point at it. Validation failures behave like connect's.
+// saveConnectProfile validates the form and saves it as a profile.
+// Validation failures behave like connect's.
 func (m *Model) saveConnectProfile() tea.Cmd {
 	target, ok := m.targetFromForm()
 	if !ok {
 		return nil
 	}
-	idx := m.upsertProfile(target)
-	m.connectForm.profile = idx + 1
+	m.upsertProfile(target)
 	m.setStatus("saved profile " + target.Label())
 	return tea.Batch(m.persist(), m.rememberCredentialCmd(target))
 }
 
-// deleteConnectProfile removes the profile the Profile field currently points
-// at. It is a no-op when the selection is "(new)".
+// deleteConnectProfile removes the saved profile whose identity matches the
+// form's current values. It is what ctrl+x does in the form; the server list
+// deletes by index through deleteProfileAt directly.
 func (m *Model) deleteConnectProfile() tea.Cmd {
-	if m.connectForm.profile == 0 {
+	target, ok := m.targetFromForm()
+	if !ok {
 		return nil
 	}
-	idx := m.connectForm.profile - 1
+	idx := m.profileIndexOf(target)
+	if idx < 0 {
+		m.setError("no saved profile matches these settings")
+		return nil
+	}
+	return m.deleteProfileAt(idx)
+}
+
+// deleteProfileAt removes profile idx, persists, and forgets its stored
+// password. Callers guarantee idx is in range.
+func (m *Model) deleteProfileAt(idx int) tea.Cmd {
 	target := m.profiles[idx]
-	name := target.Label()
 	m.profiles = append(m.profiles[:idx], m.profiles[idx+1:]...)
-	m.connectForm.profile = 0
-	m.setStatus("deleted profile " + name)
+	m.setStatus("deleted profile " + target.Label())
 	return tea.Batch(m.persist(), m.forgetCredentialCmd(target))
 }
 

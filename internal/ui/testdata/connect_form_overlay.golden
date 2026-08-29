@@ -6,8 +6,7 @@
 │    -rw-r-│                                                                            │ index.htm│
 │    -rw-r-│  Status  test  test.local:22                                               │          │
 │          │                                                                            │          │
-│          │  ▌ Profile                                                          (new)  │          │
-│          │    Name                                                              test  │          │
+│          │  ▌ Name                                                             |test  │          │
 │          │    Protocol                                                          sftp  │          │
 │          │    Host                                                        test.local  │          │
 │          │    Port                                                                    │          │
@@ -19,11 +18,12 @@
 │          │    Host Keys                                                          ask  │          │
 │          │    Path                                                      /public_html  │          │
 │          │                                                                            │          │
-╰──────────│    tab next   h/l change   ctrl/alt+enter connect   ctrl+u clear   esc ca  │──────────╯
-╭──────────│    ctrl+s save profile   ctrl+x delete profile                             │──────────╮
-│Transfers │    ctrl+d disconnect                                                       │     queue│
-│  1 Queue │                                                                            │          │
-│↑ [=======╰────────────────────────────────────────────────────────────────────────────╯ansferring│
+│          │    tab next   h/l change   ctrl/alt+enter connect   ctrl+u clear   esc ca  │          │
+╰──────────│    ctrl+s save profile   ctrl+x delete profile                             │──────────╯
+╭──────────│    ctrl+d disconnect                                                       │──────────╮
+│Transfers │                                                                            │     queue│
+│  1 Queue ╰────────────────────────────────────────────────────────────────────────────╯          │
+│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main…        50% transferring│
 │↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
