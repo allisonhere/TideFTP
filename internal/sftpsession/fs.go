@@ -97,7 +97,7 @@ func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
 	// so the error is the same "already exists" every backend returns rather
 	// than a raw SFTP status string.
 	if _, err := f.client.Lstat(newPath); err == nil {
-		return fmt.Errorf("already exists: %s", newPath)
+		return fmt.Errorf("%w: %s", vfs.ErrExists, newPath)
 	}
 	return f.client.Rename(oldPath, newPath)
 }

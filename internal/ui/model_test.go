@@ -1024,6 +1024,75 @@ func TestFileActionRenamesHighlightedItem(t *testing.T) {
 	}
 }
 
+func TestFileActionRenameOntoExistingNameConfirmsThenOverwrites(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	for i, entry := range model.local.entries {
+		if entry.Name == "robots.txt" {
+			model.local.cursor = i
+		}
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyF2})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+	model = press(t, model, runes("app.css")) // app.css already exists in /public_html
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayFileAction || model.fileAction == nil || model.fileAction.kind != fileActionRenameForce {
+		t.Fatalf("overlay=%v fileAction=%+v, want a replace confirmation", model.overlay, model.fileAction)
+	}
+
+	model = press(t, model, runes("y"))
+
+	if model.overlay != overlayNone {
+		t.Fatalf("overlay = %v after confirming replace, want none", model.overlay)
+	}
+	appCSS := 0
+	for _, entry := range model.local.entries {
+		switch entry.Name {
+		case "robots.txt":
+			t.Fatalf("source name still present after replace: %+v", model.local.entries)
+		case "app.css":
+			appCSS++
+		}
+	}
+	if appCSS != 1 {
+		t.Fatalf("app.css appears %d times after replace, want exactly 1", appCSS)
+	}
+}
+
+func TestFileActionRenameOntoExistingNameCanBeCancelled(t *testing.T) {
+	local := fakefs.NewRemote()
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	for i, entry := range model.local.entries {
+		if entry.Name == "robots.txt" {
+			model.local.cursor = i
+		}
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyF2})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlU})
+	model = press(t, model, runes("app.css"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if model.overlay != overlayNone {
+		t.Fatalf("overlay = %v after cancelling replace, want none", model.overlay)
+	}
+	var sawRobots, sawApp bool
+	for _, entry := range model.local.entries {
+		sawRobots = sawRobots || entry.Name == "robots.txt"
+		sawApp = sawApp || entry.Name == "app.css"
+	}
+	if !sawRobots || !sawApp {
+		t.Fatalf("entries after cancel = %+v, want both robots.txt and app.css untouched", model.local.entries)
+	}
+}
+
 func TestFileActionDeletesSelectedItemsAfterConfirm(t *testing.T) {
 	local := fakefs.NewRemote()
 	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())

@@ -631,7 +631,16 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		prompt := m.fileAction
 		rows := []string{}
 		title := fileActionLabel(prompt.kind)
-		if prompt.kind == fileActionDelete {
+		if prompt.kind == fileActionRenameForce {
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(contentWidth).Render(fmt.Sprintf("Replace %q?", prompt.text)),
+				renderer.Styles.DetailMeta.Width(contentWidth).Render("the existing item is deleted, then "+prompt.oldName+" is renamed"),
+				"",
+				renderer.RenderSoftHints(contentWidth,
+					tideui.SoftHint{Key: "y/enter", Label: "replace"},
+					tideui.SoftHint{Key: "esc/n", Label: "cancel"}),
+			)
+		} else if prompt.kind == fileActionDelete {
 			names := make([]string, 0, min(5, len(prompt.entries)))
 			for i, entry := range prompt.entries {
 				if i >= 5 {

@@ -87,7 +87,7 @@ func (FS) Rename(ctx context.Context, oldPath, newPath string) error {
 	// backend refuses instead, so a rename never destroys a file the user
 	// forgot was there; overwriting is a decision for a future confirm step.
 	if _, err := os.Lstat(newPath); err == nil {
-		return fmt.Errorf("already exists: %s", newPath)
+		return fmt.Errorf("%w: %s", vfs.ErrExists, newPath)
 	}
 	return os.Rename(oldPath, newPath)
 }

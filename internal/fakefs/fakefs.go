@@ -122,7 +122,7 @@ func (r *Remote) Mkdir(ctx context.Context, dirPath string) error {
 	}
 	dirPath = clean(dirPath)
 	if _, ok := r.entries[dirPath]; ok {
-		return fmt.Errorf("already exists: %s", dirPath)
+		return fmt.Errorf("%w: %s", vfs.ErrExists, dirPath)
 	}
 	parent := path.Dir(dirPath)
 	name := path.Base(dirPath)
@@ -166,7 +166,7 @@ func (r *Remote) Rename(ctx context.Context, oldPath, newPath string) error {
 	}
 	for _, entry := range dstSiblings {
 		if entry.Name == newName {
-			return fmt.Errorf("already exists: %s", newPath)
+			return fmt.Errorf("%w: %s", vfs.ErrExists, newPath)
 		}
 	}
 	entry := children[idx]

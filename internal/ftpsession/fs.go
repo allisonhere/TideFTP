@@ -87,7 +87,7 @@ func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
 		// FTP servers disagree on whether RNFR/RNTO onto an existing name
 		// overwrites or fails. Check first so every backend refuses alike.
 		if ftpPathExists(conn, newPath) {
-			return fmt.Errorf("already exists: %s", newPath)
+			return fmt.Errorf("%w: %s", vfs.ErrExists, newPath)
 		}
 		return conn.Rename(oldPath, newPath)
 	})

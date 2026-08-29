@@ -14,11 +14,17 @@ package vfs
 
 import (
 	"context"
+	"errors"
 	"path"
 	"strings"
 
 	"tideftp/internal/domain"
 )
+
+// ErrExists is wrapped by Mkdir and Rename when the destination path is
+// already taken. The UI checks for it with errors.Is to offer an overwrite
+// confirmation rather than just surfacing the message.
+var ErrExists = errors.New("already exists")
 
 type FS interface {
 	// List returns the entries in dirPath, omitting hidden ones unless

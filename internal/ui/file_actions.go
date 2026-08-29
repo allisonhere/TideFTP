@@ -16,6 +16,8 @@ func fileActionLabel(kind fileActionKind) string {
 		return "new folder"
 	case fileActionRename:
 		return "rename"
+	case fileActionRenameForce:
+		return "replace"
 	case fileActionDelete:
 		return "delete"
 	default:
@@ -27,13 +29,19 @@ func fileActionDoneLabel(kind fileActionKind) string {
 	switch kind {
 	case fileActionMkdir:
 		return "folder created"
-	case fileActionRename:
+	case fileActionRename, fileActionRenameForce:
 		return "renamed"
 	case fileActionDelete:
 		return "deleted"
 	default:
 		return "done"
 	}
+}
+
+// fileActionIsConfirm reports whether kind is a yes/no confirmation rather
+// than a text-entry prompt.
+func fileActionIsConfirm(kind fileActionKind) bool {
+	return kind == fileActionDelete || kind == fileActionRenameForce
 }
 
 func (m *Model) focusedMutablePane() (paneID, *filePane, bool) {
@@ -96,11 +104,11 @@ func (m *Model) handleFileActionKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	prompt := m.fileAction
 
-	// The delete prompt is a yes/no confirmation, so single letters are
+	// A confirmation prompt (delete, or replace-on-rename) takes yes/no
 	// shortcuts. The mkdir/rename prompts are text fields: only esc and enter
 	// are reserved, everything else edits the name (so a folder called
 	// "notes" or "query" can actually be typed).
-	if prompt.kind == fileActionDelete {
+	if fileActionIsConfirm(prompt.kind) {
 		switch msg.String() {
 		case "esc", "q", "n":
 			m.fileAction = nil
@@ -193,11 +201,16 @@ func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 		defer cancel()
 		var err error
+		newName := strings.TrimSpace(prompt.text)
 		switch prompt.kind {
 		case fileActionMkdir:
-			err = fs.Mkdir(ctx, fs.Child(base, strings.TrimSpace(prompt.text)))
+			err = fs.Mkdir(ctx, fs.Child(base, newName))
 		case fileActionRename:
-			err = fs.Rename(ctx, fs.Child(base, prompt.oldName), fs.Child(base, strings.TrimSpace(prompt.text)))
+			err = fs.Rename(ctx, fs.Child(base, prompt.oldName), fs.Child(base, newName))
+		case fileActionRenameForce:
+			if err = fs.Remove(ctx, fs.Child(base, newName)); err == nil {
+				err = fs.Rename(ctx, fs.Child(base, prompt.oldName), fs.Child(base, newName))
+			}
 		case fileActionDelete:
 			for _, entry := range prompt.entries {
 				if isParentDirEntry(entry) {
@@ -208,6 +221,6 @@ func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 				}
 			}
 		}
-		return fileActionMsg{kind: prompt.kind, pane: prompt.pane, err: err}
+		return fileActionMsg{kind: prompt.kind, pane: prompt.pane, err: err, oldName: prompt.oldName, newName: newName}
 	}
 }

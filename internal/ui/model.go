@@ -144,6 +144,10 @@ const (
 	fileActionMkdir fileActionKind = iota
 	fileActionRename
 	fileActionDelete
+	// fileActionRenameForce is a rename that has already been refused once
+	// because the target name is taken; confirming it deletes that target
+	// first. It is only ever reached from the fileActionMsg handler.
+	fileActionRenameForce
 )
 
 type fileActionPrompt struct {
@@ -156,9 +160,11 @@ type fileActionPrompt struct {
 }
 
 type fileActionMsg struct {
-	kind fileActionKind
-	pane paneID
-	err  error
+	kind    fileActionKind
+	pane    paneID
+	err     error
+	oldName string // rename: the source name, carried through to a force retry
+	newName string // rename: the target name
 }
 
 type filePane struct {
@@ -503,6 +509,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settleBottomOffset(wasAtBottom)
 		return m, nil
 	case fileActionMsg:
+		// A rename refused only because the target name is taken becomes an
+		// overwrite confirmation rather than a dead-end error.
+		if msg.err != nil && msg.kind == fileActionRename && errors.Is(msg.err, vfs.ErrExists) {
+			m.fileAction = &fileActionPrompt{
+				kind:    fileActionRenameForce,
+				pane:    msg.pane,
+				oldName: msg.oldName,
+				text:    msg.newName,
+			}
+			m.overlay = overlayFileAction
+			m.setStatus(fmt.Sprintf("%q exists — replace it?", msg.newName))
+			return m, nil
+		}
 		if msg.err != nil {
 			m.setError(fmt.Sprintf("%s: %v", fileActionLabel(msg.kind), msg.err))
 		} else {
