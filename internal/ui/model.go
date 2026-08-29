@@ -558,9 +558,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setError(fmt.Sprintf("edit %s: %v", msg.name, msg.err))
 			return m, nil
 		}
+		editor, err := editorCommand(msg.tmpPath)
+		if err != nil {
+			os.Remove(msg.tmpPath)
+			m.setError(err.Error())
+			return m, nil
+		}
 		m.pendingEdit = &pendingEdit{pane: msg.pane, path: msg.path, name: msg.name, tmpPath: msg.tmpPath, sum: msg.sum}
 		m.setStatus("editing " + msg.name)
-		return m, tea.ExecProcess(editorCommand(msg.tmpPath), func(err error) tea.Msg {
+		return m, tea.ExecProcess(editor, func(err error) tea.Msg {
 			return editorClosedMsg{err: err}
 		})
 	case editorClosedMsg:

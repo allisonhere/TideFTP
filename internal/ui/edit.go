@@ -78,6 +78,10 @@ func (m *Model) startEdit() tea.Cmd {
 		m.setError(fmt.Sprintf("%s is too large to edit (%d bytes)", entry.Name, entry.Size))
 		return nil
 	}
+	if _, err := editorArgv(); err != nil {
+		m.setError(err.Error())
+		return nil
+	}
 	fs := m.fsByID(paneID)
 	path := fs.Child(pane.path, entry.Name)
 	m.setStatus("opening " + entry.Name + "…")
@@ -141,19 +145,41 @@ func editSaveCmd(fs vfs.FS, edit pendingEdit) tea.Cmd {
 	}
 }
 
-// editorCommand builds the editor invocation for tmpPath, honouring $VISUAL
-// then $EDITOR (which may carry flags, e.g. "code -w"), falling back to vi.
-func editorCommand(tmpPath string) *exec.Cmd {
-	spec := strings.TrimSpace(os.Getenv("VISUAL"))
-	if spec == "" {
-		spec = strings.TrimSpace(os.Getenv("EDITOR"))
+// editorFallbacks are tried, in order, when neither $VISUAL nor $EDITOR is set.
+// "editor" is the Debian alternatives symlink; the rest are common installs.
+var editorFallbacks = []string{"editor", "nano", "vim", "nvim", "vi", "micro", "hx", "emacs"}
+
+// editorArgv resolves the editor command prefix: $VISUAL, then $EDITOR (either
+// may carry flags, e.g. "code -w"), then the first fallback found on PATH. It
+// returns an error when nothing usable is found, so startEdit can report that
+// before checking a file out.
+func editorArgv() ([]string, error) {
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		spec := strings.TrimSpace(os.Getenv(env))
+		if spec == "" {
+			continue
+		}
+		fields := strings.Fields(spec)
+		if _, err := exec.LookPath(fields[0]); err != nil {
+			return nil, fmt.Errorf("$%s is %q, which is not on PATH", env, fields[0])
+		}
+		return fields, nil
 	}
-	if spec == "" {
-		spec = "vi"
+	for _, name := range editorFallbacks {
+		if path, err := exec.LookPath(name); err == nil {
+			return []string{path}, nil
+		}
 	}
-	fields := strings.Fields(spec)
-	args := append(fields[1:], tmpPath)
-	return exec.Command(fields[0], args...)
+	return nil, fmt.Errorf("no editor found — set $EDITOR (tried %s)", strings.Join(editorFallbacks, ", "))
+}
+
+// editorCommand builds the editor invocation for tmpPath.
+func editorCommand(tmpPath string) (*exec.Cmd, error) {
+	argv, err := editorArgv()
+	if err != nil {
+		return nil, err
+	}
+	return exec.Command(argv[0], append(argv[1:], tmpPath)...), nil
 }
 
 // looksBinary reports whether the first 8 KB contains a NUL byte.

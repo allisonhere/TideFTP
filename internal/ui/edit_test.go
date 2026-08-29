@@ -12,6 +12,16 @@ import (
 	"tideftp/internal/localfs"
 )
 
+// stubEditor points $EDITOR at a program that is always on PATH and exits 0,
+// so editor resolution is deterministic regardless of what the test box has
+// installed. The editor never actually runs under the test harness anyway —
+// tea.ExecProcess's execMsg is inert — but startEdit checks PATH up front.
+func stubEditor(t *testing.T) {
+	t.Helper()
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "true")
+}
+
 // deliverEditorClosed simulates the editor exiting cleanly and runs whatever
 // the model does next (read the temp file back, write it if changed).
 func deliverEditorClosed(t *testing.T, model Model) Model {
@@ -21,6 +31,7 @@ func deliverEditorClosed(t *testing.T, model Model) Model {
 }
 
 func TestEditChecksOutTheHighlightedFile(t *testing.T) {
+	stubEditor(t)
 	remote := fakefs.NewRemote()
 	model := loadedModelOver(t, localfs.New(), remote, newScriptedEngine())
 	model.focus = focusRemote
@@ -51,6 +62,7 @@ func TestEditChecksOutTheHighlightedFile(t *testing.T) {
 }
 
 func TestEditWritesChangedContentsBack(t *testing.T) {
+	stubEditor(t)
 	remote := fakefs.NewRemote()
 	model := loadedModelOver(t, localfs.New(), remote, newScriptedEngine())
 	model.focus = focusRemote
@@ -81,6 +93,7 @@ func TestEditWritesChangedContentsBack(t *testing.T) {
 }
 
 func TestEditSkipsWriteWhenUnchanged(t *testing.T) {
+	stubEditor(t)
 	remote := fakefs.NewRemote()
 	before, _ := remote.ReadFile(t.Context(), "/public_html/robots.txt")
 
@@ -107,6 +120,7 @@ func TestEditSkipsWriteWhenUnchanged(t *testing.T) {
 }
 
 func TestEditRejectsADirectory(t *testing.T) {
+	stubEditor(t)
 	remote := fakefs.NewRemote()
 	model := loadedModelOver(t, localfs.New(), remote, newScriptedEngine())
 	model.focus = focusRemote
@@ -128,6 +142,7 @@ func TestEditRejectsADirectory(t *testing.T) {
 }
 
 func TestEditRejectsRemoteWhenNotConnected(t *testing.T) {
+	stubEditor(t)
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
 	model := NewModel(localfs.New(), dialer, nil, config.Default(), nil, nil)
 	model.width, model.height = 120, 36
@@ -143,6 +158,7 @@ func TestEditRejectsRemoteWhenNotConnected(t *testing.T) {
 }
 
 func TestEditRejectsAnOversizeFile(t *testing.T) {
+	stubEditor(t)
 	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), newScriptedEngine())
 	model.focus = focusLocal
 	model.local.entries = []domain.Entry{{Name: "huge.log", Kind: domain.EntryFile, Size: editMaxBytes + 1}}
@@ -156,6 +172,7 @@ func TestEditRejectsAnOversizeFile(t *testing.T) {
 }
 
 func TestEditRejectsABinaryFile(t *testing.T) {
+	stubEditor(t)
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "data.bin")
 	if err := os.WriteFile(bin, []byte{'a', 'b', 0x00, 'c'}, 0o644); err != nil {
@@ -176,5 +193,29 @@ func TestEditRejectsABinaryFile(t *testing.T) {
 	}
 	if !model.statusErr {
 		t.Fatalf("editing a binary file did not raise an error; status=%q", model.status)
+	}
+}
+
+func TestEditReportsWhenNoEditorIsAvailable(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "tideftp-no-such-editor-xyz")
+
+	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/public_html"))
+	for i, e := range model.remote.entries {
+		if e.Name == "robots.txt" {
+			model.remote.cursor = i
+		}
+	}
+
+	model = press(t, model, runes("e"))
+
+	if model.pendingEdit != nil {
+		os.Remove(model.pendingEdit.tmpPath)
+		t.Fatalf("a file was checked out even though no editor is available")
+	}
+	if !model.statusErr || !strings.Contains(model.status, "PATH") {
+		t.Fatalf("status = %q (err=%v), want a not-on-PATH editor error", model.status, model.statusErr)
 	}
 }
