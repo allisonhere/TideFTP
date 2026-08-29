@@ -99,6 +99,32 @@ func TestDialWithAPassphraseProtectedKey(t *testing.T) {
 	}
 }
 
+func TestFSReadFileWriteFileRoundTrip(t *testing.T) {
+	server := startTestServer(t)
+	server.writeFile(t, "nginx.conf", []byte("worker_processes 1;\n"))
+	fs := connect(t, server).FS()
+	ctx := context.Background()
+
+	got, err := fs.ReadFile(ctx, server.path("nginx.conf"))
+	if err != nil || string(got) != "worker_processes 1;\n" {
+		t.Fatalf("ReadFile = %q, %v", got, err)
+	}
+
+	if err := fs.WriteFile(ctx, server.path("nginx.conf"), []byte("worker_processes auto;\n")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if body, _ := os.ReadFile(server.path("nginx.conf")); string(body) != "worker_processes auto;\n" {
+		t.Fatalf("on-disk file = %q, want the written body", body)
+	}
+
+	if err := fs.WriteFile(ctx, server.path("brand-new.txt"), []byte("hello\n")); err != nil {
+		t.Fatalf("WriteFile (create): %v", err)
+	}
+	if body, err := fs.ReadFile(ctx, server.path("brand-new.txt")); err != nil || string(body) != "hello\n" {
+		t.Fatalf("ReadFile of created file = %q, %v", body, err)
+	}
+}
+
 func TestDialStrictPolicyRejectsAnUnknownHostWithoutPrompting(t *testing.T) {
 	server := startTestServer(t)
 	dialer := New(Config{

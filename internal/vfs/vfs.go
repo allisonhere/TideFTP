@@ -42,6 +42,12 @@ type FS interface {
 	Rename(ctx context.Context, oldPath, newPath string) error
 	// Remove deletes the file or empty directory at targetPath.
 	Remove(ctx context.Context, targetPath string) error
+	// ReadFile returns the whole contents of the file at path. Callers keep
+	// it to small files (the edit/preview flows cap the size themselves).
+	ReadFile(ctx context.Context, path string) ([]byte, error)
+	// WriteFile replaces the contents of the file at path, creating it if it
+	// does not exist. An existing file keeps its permissions.
+	WriteFile(ctx context.Context, path string, data []byte) error
 }
 
 // Remote paths are always slash-separated, whatever the client's own OS is,

@@ -1,8 +1,10 @@
 package ftpsession
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"sort"
 	"strings"
@@ -120,6 +122,28 @@ func (f *FS) Remove(ctx context.Context, targetPath string) error {
 			return nil
 		}
 		return conn.RemoveDir(targetPath)
+	})
+}
+
+func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	path = vfs.CleanRemote(path)
+	var data []byte
+	err := f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		resp, err := conn.Retr(path)
+		if err != nil {
+			return err
+		}
+		defer resp.Close()
+		data, err = io.ReadAll(resp)
+		return err
+	})
+	return data, err
+}
+
+func (f *FS) WriteFile(ctx context.Context, path string, data []byte) error {
+	path = vfs.CleanRemote(path)
+	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		return conn.Stor(path, bytes.NewReader(data))
 	})
 }
 

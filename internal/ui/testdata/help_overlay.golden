@@ -20,10 +20,10 @@
 │             │    r                                                      refresh    │             │
 │             │    n                                                   new folder    │             │
 ╰─────────────│    f2                                                 rename item    │─────────────╯
-╭─────────────│    delete                           delete selected / highlighted    │─────────────╮
-│Transfers    │    x                    cancel active transfer (queue pane) / all    │        queue│
+╭─────────────│    e                                         edit file in $EDITOR    │─────────────╮
+│Transfers    │    delete                           delete selected / highlighted    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/33                                                       │ transferring│
+│↑ [========= │  Rows  1-18/34                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

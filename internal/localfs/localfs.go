@@ -98,3 +98,18 @@ func (FS) Remove(ctx context.Context, targetPath string) error {
 	}
 	return os.Remove(targetPath)
 }
+
+func (FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+func (FS) WriteFile(ctx context.Context, path string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// perm applies only when creating; an existing file keeps its mode.
+	return os.WriteFile(path, data, 0o644)
+}

@@ -4,9 +4,9 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 
 ## Tier 1 — makes it a daily driver
 
-- [ ] **Edit a remote file in place** — `e` on a file row: local files open `$EDITOR`
-      directly; remote files download to a temp file, open `$EDITOR`, and upload
-      back on save if changed. Size-capped, refuses binaries. *(in progress)*
+- [x] **Edit a file in place** — `e` on a file row checks it out to a temp copy,
+      opens `$EDITOR`, and writes it back if the contents changed. Both panes.
+      5 MiB cap, refuses binaries. `vfs.FS` gained `ReadFile`/`WriteFile`.
 - [ ] **Filter / search within a pane** — type to narrow the visible listing
       (glob or substring), like the help overlay's search. Essential for large dirs.
 - [ ] **Directory sync / mirror** — walk both trees, transfer only what differs by

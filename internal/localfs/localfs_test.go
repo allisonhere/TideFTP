@@ -119,6 +119,33 @@ func TestMkdirRenameRemove(t *testing.T) {
 	}
 }
 
+func TestReadFileAndWriteFileRoundTrip(t *testing.T) {
+	root := tempTree(t)
+	fs := New()
+	ctx := context.Background()
+
+	body := []byte("first line\nsecond line\n")
+	if err := fs.WriteFile(ctx, filepath.Join(root, "beta.txt"), body); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := fs.ReadFile(ctx, filepath.Join(root, "beta.txt"))
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("ReadFile = %q, %v; want %q", got, err, body)
+	}
+
+	// WriteFile creates a file that did not exist.
+	if err := fs.WriteFile(ctx, filepath.Join(root, "new.conf"), []byte("k=v\n")); err != nil {
+		t.Fatalf("WriteFile (create): %v", err)
+	}
+	if got, err := fs.ReadFile(ctx, filepath.Join(root, "new.conf")); err != nil || string(got) != "k=v\n" {
+		t.Fatalf("ReadFile after create = %q, %v", got, err)
+	}
+
+	if _, err := fs.ReadFile(ctx, filepath.Join(root, "nope.txt")); err == nil {
+		t.Fatalf("ReadFile of a missing file returned no error")
+	}
+}
+
 // TestRenameRefusesToOverwrite pins the cross-backend contract: a rename onto
 // an existing name is refused rather than silently replacing it (os.Rename's
 // own default on Unix).

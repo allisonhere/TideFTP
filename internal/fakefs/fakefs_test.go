@@ -144,3 +144,37 @@ func TestRemoveRefusesANonEmptyDirectory(t *testing.T) {
 		t.Fatalf("robots.txt still present after Remove")
 	}
 }
+
+func TestReadFileWriteFileRoundTrip(t *testing.T) {
+	r := NewRemote()
+	ctx := context.Background()
+
+	// A seeded file reads back its fixture content.
+	if got, err := r.ReadFile(ctx, "/public_html/robots.txt"); err != nil || len(got) == 0 {
+		t.Fatalf("ReadFile(robots.txt) = %q, %v; want the seeded body", got, err)
+	}
+
+	body := []byte("User-agent: *\nDisallow: /private\n")
+	if err := r.WriteFile(ctx, "/public_html/robots.txt", body); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := r.ReadFile(ctx, "/public_html/robots.txt")
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("ReadFile after write = %q, %v; want %q", got, err, body)
+	}
+
+	// WriteFile creates a file and lists it.
+	if err := r.WriteFile(ctx, "/public_html/notes.md", []byte("hi\n")); err != nil {
+		t.Fatalf("WriteFile (create): %v", err)
+	}
+	if !has(listNames(t, r, "/public_html"), "notes.md") {
+		t.Fatalf("/public_html = %v, want it to include the created notes.md", listNames(t, r, "/public_html"))
+	}
+
+	if _, err := r.ReadFile(ctx, "/public_html/missing"); err == nil {
+		t.Fatalf("ReadFile of a missing file returned no error")
+	}
+	if _, err := r.ReadFile(ctx, "/public_html"); err == nil {
+		t.Fatalf("ReadFile of a directory returned no error")
+	}
+}

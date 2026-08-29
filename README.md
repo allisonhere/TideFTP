@@ -64,6 +64,7 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `Esc`: clear selection or close overlay
 - `u`: upload selected/local cursor item
 - `d`: download selected/remote cursor item
+- `e`: edit the highlighted file in `$EDITOR` (writes it back if you change it)
 - `x`: cancel active transfers
 - `o`: conflict prompt (demo)
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)

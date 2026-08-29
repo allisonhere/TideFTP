@@ -16,6 +16,9 @@ var _ vfs.FS = (*Remote)(nil)
 
 type Remote struct {
 	entries map[string][]domain.Entry
+	// contents holds file bodies for ReadFile/WriteFile, keyed by clean path.
+	// A listed file with no entry here reads as empty.
+	contents map[string][]byte
 	// latency stands in for network round-trip time. Zero in tests; the app
 	// sets a small one so the panes' loading state is visible in real use.
 	latency time.Duration
@@ -28,7 +31,11 @@ func NewRemote() *Remote { return NewRemoteWithLatency(0) }
 // given duration so the UI's loading path gets exercised by hand.
 func NewRemoteWithLatency(latency time.Duration) *Remote {
 	now := time.Now()
-	return &Remote{latency: latency, entries: map[string][]domain.Entry{
+	return &Remote{latency: latency, contents: map[string][]byte{
+		"/welcome.txt":              []byte("Welcome to the fake server.\n"),
+		"/public_html/robots.txt":   []byte("User-agent: *\nDisallow:\n"),
+		"/releases/deploy-notes.md": []byte("# Deploy notes\n\n- push the build\n- restart\n"),
+	}, entries: map[string][]domain.Entry{
 		"/": {
 			dir("public_html", now.Add(-72*time.Hour)),
 			dir("releases", now.Add(-24*time.Hour)),
@@ -222,6 +229,57 @@ func (r *Remote) Remove(ctx context.Context, targetPath string) error {
 	r.entries[parent] = remaining
 	delete(r.entries, targetPath)
 	return nil
+}
+
+func (r *Remote) ReadFile(ctx context.Context, filePath string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	filePath = clean(filePath)
+	if !r.isFile(filePath) {
+		return nil, fmt.Errorf("no such file: %s", filePath)
+	}
+	body := r.contents[filePath]
+	out := make([]byte, len(body))
+	copy(out, body)
+	return out, nil
+}
+
+func (r *Remote) WriteFile(ctx context.Context, filePath string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	filePath = clean(filePath)
+	parent, name := path.Dir(filePath), path.Base(filePath)
+	children, ok := r.entries[parent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", parent)
+	}
+	if _, isDir := r.entries[filePath]; isDir {
+		return fmt.Errorf("is a directory: %s", filePath)
+	}
+	stored := make([]byte, len(data))
+	copy(stored, data)
+	if r.contents == nil {
+		r.contents = map[string][]byte{}
+	}
+	r.contents[filePath] = stored
+	if !r.isFile(filePath) {
+		r.entries[parent] = append(children, file(name, int64(len(stored)), time.Now()))
+	}
+	return nil
+}
+
+// isFile reports whether filePath is listed as a non-directory entry in its
+// parent.
+func (r *Remote) isFile(filePath string) bool {
+	parent, name := path.Dir(filePath), path.Base(filePath)
+	for _, entry := range r.entries[parent] {
+		if entry.Name == name {
+			return !entry.IsDir()
+		}
+	}
+	return false
 }
 
 func clean(value string) string {

@@ -118,6 +118,32 @@ func TestFSRemoveDeletesFilesAndEmptyDirs(t *testing.T) {
 	}
 }
 
+func TestFSReadFileWriteFileRoundTrip(t *testing.T) {
+	server := startFTPServer(t)
+	server.writeFile(t, "app.conf", []byte("debug = false\n"))
+	fs := server.connect(t).FS()
+	ctx := ftpCtx(t)
+
+	got, err := fs.ReadFile(ctx, "/app.conf")
+	if err != nil || string(got) != "debug = false\n" {
+		t.Fatalf("ReadFile = %q, %v", got, err)
+	}
+
+	if err := fs.WriteFile(ctx, "/app.conf", []byte("debug = true\n")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if body, _ := os.ReadFile(server.path("app.conf")); string(body) != "debug = true\n" {
+		t.Fatalf("on-disk app.conf = %q, want the written body", body)
+	}
+
+	if err := fs.WriteFile(ctx, "/fresh.txt", []byte("new\n")); err != nil {
+		t.Fatalf("WriteFile (create): %v", err)
+	}
+	if body, err := fs.ReadFile(ctx, "/fresh.txt"); err != nil || string(body) != "new\n" {
+		t.Fatalf("ReadFile of created file = %q, %v", body, err)
+	}
+}
+
 func TestEngineUploadAndDownloadRoundTrip(t *testing.T) {
 	server := startFTPServer(t)
 	conn := server.connect(t)

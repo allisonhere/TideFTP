@@ -240,6 +240,7 @@ type Model struct {
 	commandQuery          string
 	commandCursor         int
 	fileAction            *fileActionPrompt
+	pendingEdit           *pendingEdit
 	helpQuery             string
 	helpOffset            int
 
@@ -552,6 +553,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markConnectFieldsFresh(connectFieldPassword)
 		}
 		return m, nil
+	case editPreparedMsg:
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("edit %s: %v", msg.name, msg.err))
+			return m, nil
+		}
+		m.pendingEdit = &pendingEdit{pane: msg.pane, path: msg.path, name: msg.name, tmpPath: msg.tmpPath, sum: msg.sum}
+		m.setStatus("editing " + msg.name)
+		return m, tea.ExecProcess(editorCommand(msg.tmpPath), func(err error) tea.Msg {
+			return editorClosedMsg{err: err}
+		})
+	case editorClosedMsg:
+		edit := m.pendingEdit
+		m.pendingEdit = nil
+		if edit == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			os.Remove(edit.tmpPath)
+			m.setError(fmt.Sprintf("editor: %v", msg.err))
+			return m, nil
+		}
+		return m, editSaveCmd(m.fsByID(edit.pane), *edit)
+	case editSavedMsg:
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("save %s: %v", msg.name, msg.err))
+			return m, nil
+		}
+		if !msg.changed {
+			m.setStatus(msg.name + " unchanged")
+			return m, nil
+		}
+		m.setStatus("saved " + msg.name)
+		return m, m.requestListing(msg.pane, m.filePaneByID(msg.pane).path, listingRefresh)
 	case serverConnectMsg:
 		if msg.found {
 			m.overlay = overlayNone
@@ -746,6 +780,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.queueUpload()
 	case "d":
 		cmd = m.queueDownload()
+	case "e":
+		cmd = m.startEdit()
 	case "x":
 		m.cancelActiveTransfers()
 	case "R":

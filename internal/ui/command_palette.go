@@ -27,6 +27,7 @@ const (
 	commandNewFolder
 	commandRename
 	commandDelete
+	commandEditFile
 )
 
 type paletteCommand struct {
@@ -73,6 +74,9 @@ func (m Model) paletteCommands() []paletteCommand {
 			paletteCommand{id: commandRename, title: "Rename item", hint: "rename highlighted item"},
 			paletteCommand{id: commandDelete, title: "Delete item(s)", hint: "delete selection or highlight"},
 		)
+		if entry, ok := pane.current(); ok && !entry.IsDir() && !isParentDirEntry(entry) {
+			commands = append(commands, paletteCommand{id: commandEditFile, title: "Edit file", hint: "open in $EDITOR"})
+		}
 	}
 	return commands
 }
@@ -199,6 +203,8 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		m.openRenamePrompt()
 	case commandDelete:
 		m.openDeletePrompt()
+	case commandEditFile:
+		return m.startEdit()
 	}
 	return nil
 }

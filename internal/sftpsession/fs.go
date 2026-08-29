@@ -3,6 +3,7 @@ package sftpsession
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -111,6 +112,33 @@ func (f *FS) Remove(ctx context.Context, targetPath string) error {
 		return nil
 	}
 	return f.client.RemoveDirectory(targetPath)
+}
+
+func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	file, err := f.client.Open(vfs.CleanRemote(path))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
+}
+
+func (f *FS) WriteFile(ctx context.Context, path string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	file, err := f.client.Create(vfs.CleanRemote(path))
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func entryKind(mode os.FileMode) domain.EntryKind {
