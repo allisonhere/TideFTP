@@ -1,11 +1,10 @@
-   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50  
+   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
 │Local                       /home/allie/projects││Remote                              /public_html│
 │mode        size        modified        name    ││mode        size        modified        name    │
-│  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
-│    -rw-r-╭─ tideftp · connect ────────────────────────────────────────────────────────╮ index.htm│
-│    -rw-r-│                                                                            │          │
-│          │  Status  test  test.local:22                                               │          │
+│  ▸ drwxr-╭─ tideftp · connect ────────────────────────────────────────────────────────╮ uploads  │
+│    -rw-r-│                                                                            │ index.htm│
+│    -rw-r-│  Status  test  test.local:22                                               │          │
 │          │                                                                            │          │
 │          │  ▌ Profile                                                          (new)  │          │
 │          │    Name                                                              test  │          │
@@ -15,6 +14,7 @@
 │          │    Username                                                         allie  │          │
 │          │    Auth                                                         agent/key  │          │
 │          │    Identity                                                                │          │
+│          │    Key Passphrase                                                          │          │
 │          │    Known Hosts                                                             │          │
 │          │    Path                                                      /public_html  │          │
 │          │                                                                            │          │
@@ -27,4 +27,4 @@
 │↓ [                  ]  /public_html/index.html -> /home/allie/projects/i…               0% queued│
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr… 
+   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

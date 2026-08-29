@@ -207,9 +207,16 @@ func (d *Dialer) authMethods(creds session.Credentials) ([]ssh.AuthMethod, error
 		if err != nil {
 			var passphraseErr *ssh.PassphraseMissingError
 			if errors.As(err, &passphraseErr) {
-				return nil, fmt.Errorf("%s is passphrase-protected; use an ssh agent until password entry exists", path)
+				if creds.KeyPassphrase == "" {
+					return nil, fmt.Errorf("%s is passphrase-protected; enter its passphrase in the connect form or use an ssh agent", path)
+				}
+				signer, err = ssh.ParsePrivateKeyWithPassphrase(raw, []byte(creds.KeyPassphrase))
+				if err != nil {
+					return nil, fmt.Errorf("decrypt %s: %w", path, err)
+				}
+			} else {
+				return nil, fmt.Errorf("parse %s: %w", path, err)
 			}
-			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 		methods = append(methods, ssh.PublicKeys(signer))
 	}

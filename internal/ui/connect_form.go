@@ -25,6 +25,7 @@ const (
 	connectFieldPassword
 	connectFieldRemember
 	connectFieldIdentity
+	connectFieldKeyPassphrase
 	connectFieldKnownHosts
 	connectFieldFTPSVerify
 	connectFieldFTPSCA
@@ -60,21 +61,22 @@ const connectIdentityBrowserHeight = 10
 // whole text before typing over it would; any other edit (backspace, delete,
 // ctrl+u) marks it not fresh, so typing again only ever inserts.
 type connectFormValue struct {
-	profile    int
-	name       string
-	protocol   int
-	host       string
-	port       string
-	username   string
-	auth       int
-	password   string
-	remember   bool
-	identity   string
-	knownHosts string
-	ftpsVerify int
-	ftpsCA     string
-	path       string
-	fresh      [connectFieldCount]bool
+	profile       int
+	name          string
+	protocol      int
+	host          string
+	port          string
+	username      string
+	auth          int
+	password      string
+	remember      bool
+	identity      string
+	keyPassphrase string
+	knownHosts    string
+	ftpsVerify    int
+	ftpsCA        string
+	path          string
+	fresh         [connectFieldCount]bool
 
 	// credToken guards an in-flight credstore lookup (see
 	// beginCredentialLookup): a reply whose token no longer matches this one
@@ -114,6 +116,8 @@ func (m Model) connectFieldVisible(field connectField) bool {
 		return m.connectAuthMode() == "password" && m.creds != nil
 	case connectFieldIdentity:
 		return protocol == "sftp" && m.connectAuthMode() != "password"
+	case connectFieldKeyPassphrase:
+		return protocol == "sftp" && m.connectAuthMode() != "password"
 	case connectFieldKnownHosts:
 		return protocol == "sftp"
 	case connectFieldFTPSVerify:
@@ -139,6 +143,7 @@ func (m Model) credentialsFromForm() session.Credentials {
 	}
 	if protocol == "sftp" {
 		creds.IdentityFile = strings.TrimSpace(m.connectForm.identity)
+		creds.KeyPassphrase = m.connectForm.keyPassphrase
 		creds.KnownHostsPath = strings.TrimSpace(m.connectForm.knownHosts)
 	}
 	if protocol == "ftps" {
@@ -284,6 +289,8 @@ func connectFieldLabel(field connectField) string {
 		return "Remember"
 	case connectFieldIdentity:
 		return "Identity"
+	case connectFieldKeyPassphrase:
+		return "Key Passphrase"
 	case connectFieldKnownHosts:
 		return "Known Hosts"
 	case connectFieldFTPSVerify:
@@ -322,6 +329,8 @@ func (m Model) connectFieldValue(field connectField) string {
 		return connectRememberChoices[boolToIndex(m.connectForm.remember)]
 	case connectFieldIdentity:
 		return m.connectForm.identity
+	case connectFieldKeyPassphrase:
+		return m.connectForm.keyPassphrase
 	case connectFieldKnownHosts:
 		return m.connectForm.knownHosts
 	case connectFieldFTPSVerify:
@@ -348,6 +357,8 @@ func (m *Model) setConnectFieldValue(field connectField, value string) {
 		m.connectForm.password = value
 	case connectFieldIdentity:
 		m.connectForm.identity = value
+	case connectFieldKeyPassphrase:
+		m.connectForm.keyPassphrase = value
 	case connectFieldKnownHosts:
 		m.connectForm.knownHosts = value
 	case connectFieldFTPSCA:
@@ -382,7 +393,7 @@ func boolToIndex(b bool) int {
 // it is shown even while unfocused whenever the auth mode calls for one.
 func (m Model) connectFieldDisplay(field connectField) string {
 	value := m.connectFieldValue(field)
-	if field == connectFieldPassword {
+	if field == connectFieldPassword || field == connectFieldKeyPassphrase {
 		value = strings.Repeat("•", len([]rune(value)))
 	}
 	if field == m.connectField && !connectChoiceField(field) {

@@ -3,12 +3,15 @@ package sftpsession
 import (
 	"bytes"
 	"context"
+	"encoding/pem"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"tideftp/internal/domain"
 	"tideftp/internal/session"
@@ -55,6 +58,44 @@ func TestDialWithAKeyFile(t *testing.T) {
 
 	if conn.FS() == nil || conn.Engine() == nil {
 		t.Fatalf("a live connection must expose both an FS and an engine")
+	}
+}
+
+func TestDialWithAPassphraseProtectedKey(t *testing.T) {
+	server := startTestServer(t)
+
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(server.clientKey, "encrypted test key", []byte("hunter2"))
+	if err != nil {
+		t.Fatalf("marshal encrypted key: %v", err)
+	}
+	encPath := filepath.Join(t.TempDir(), "id_ed25519_enc")
+	if err := os.WriteFile(encPath, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatalf("write encrypted key: %v", err)
+	}
+
+	dialer := New(Config{KnownHostsPath: server.knownHostsFile(t), Timeout: 10 * time.Second})
+	target := targetFor(server)
+
+	// Without the passphrase the encrypted key is unusable and Dial says so.
+	_, err = dialer.Dial(context.Background(), target, session.Credentials{IdentityFile: encPath})
+	if err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("Dial without passphrase = %v, want an error mentioning the passphrase", err)
+	}
+
+	// With it, the key decrypts and the connection comes up.
+	conn, err := dialer.Dial(context.Background(), target, session.Credentials{IdentityFile: encPath, KeyPassphrase: "hunter2"})
+	if err != nil {
+		t.Fatalf("Dial with passphrase: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if conn.FS() == nil {
+		t.Fatalf("connection with a decrypted key exposed no FS")
+	}
+
+	// A wrong passphrase fails cleanly rather than hanging or panicking.
+	_, err = dialer.Dial(context.Background(), target, session.Credentials{IdentityFile: encPath, KeyPassphrase: "wrong"})
+	if err == nil {
+		t.Fatalf("Dial with the wrong passphrase succeeded")
 	}
 }
 

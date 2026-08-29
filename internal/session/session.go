@@ -89,6 +89,11 @@ type Credentials struct {
 	// agent — the same as the --identity flag does at startup, but for one
 	// attempt. Empty defers to however the Dialer was already configured.
 	IdentityFile string
+	// KeyPassphrase is SFTP-specific: the passphrase for an encrypted private
+	// key. It is only consulted when parsing a key file that turns out to be
+	// passphrase-protected, and is never stored — the connect form prompts
+	// for it each attempt.
+	KeyPassphrase string
 	// KnownHostsPath is SFTP-specific: it overrides the Dialer's configured
 	// known_hosts file for this attempt. Empty defers to however the Dialer
 	// was already configured.

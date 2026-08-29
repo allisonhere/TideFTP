@@ -22,10 +22,11 @@ import (
 // half, so the adapter can be tested against genuine protocol traffic without
 // an external sshd or a container.
 type testServer struct {
-	addr     string
-	root     string
-	hostKey  ssh.PublicKey
-	clientPK string // path to the client's private key
+	addr      string
+	root      string
+	hostKey   ssh.PublicKey
+	clientPK  string             // path to the client's (unencrypted) private key
+	clientKey ed25519.PrivateKey // the same key, for writing encrypted copies in tests
 
 	listener net.Listener
 	wg       sync.WaitGroup
@@ -67,11 +68,12 @@ func startTestServer(t *testing.T) *testServer {
 		t.Fatalf("listen: %v", err)
 	}
 	server := &testServer{
-		addr:     listener.Addr().String(),
-		root:     root,
-		hostKey:  hostPub,
-		clientPK: keyPath,
-		listener: listener,
+		addr:      listener.Addr().String(),
+		root:      root,
+		hostKey:   hostPub,
+		clientPK:  keyPath,
+		clientKey: clientPriv,
+		listener:  listener,
 	}
 
 	server.wg.Add(1)
