@@ -32,15 +32,36 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 
 ## Tier 3 — polish
 
-- [ ] **File preview** — `v` for a text / hexdump peek without a full download.
-- [ ] **Post-transfer checksum verify.**
-- [ ] **Per-file and overall ETA** in the transfer pane (Stats has throughput only).
-- [ ] **Copy path to clipboard.**
-- [ ] **Auto-reconnect** on a dropped connection (drop detection exists; redial does not).
+- [x] **File preview** — `v` peeks at the first 128 KB as text or as a hexdump
+      (`x` toggles), never downloading the whole file. `vfs.FS` gained `Open`,
+      a streaming reader, for this and for the checksum verify below.
+      Syntax-highlighted via chroma's lexers only: the colours are this
+      package's (`internal/ui/highlight.go`), run through `readableOn`, on the
+      panel's own background — a bundled chroma theme would ignore the active
+      TideFTP theme and paint its own surface.
+- [x] **Post-transfer checksum verify** — the **Verify** setting
+      (`verify_checksums`, off by default) streams both ends of a completed
+      transfer through SHA-256; a mismatch demotes the row to Failed, where
+      `R` retries it. A verify that cannot run leaves the row Done and
+      "unverified" — not being able to check is not the same as finding a
+      difference.
+- [x] **Per-file and overall ETA** — running rows show throughput and time
+      remaining; the transfer pane header carries an ETA for the whole queue.
+      Estimated from each transfer's average rate since it started, which
+      needs no timer of its own: progress events already redraw the pane.
+- [x] **Copy path to clipboard** — `y` copies the selection's full paths.
+      OSC 52 over SSH (so the paths reach the user's own clipboard, not the
+      server's), a local helper otherwise.
+- [x] **Auto-reconnect** — the **Reconnect** setting (`auto_reconnect`, on by
+      default) redials after an unrequested drop, backing off 2/4/8/15/30s,
+      and returns to the directory the drop interrupted. Transfers the drop
+      killed are still Failed; nothing is resumed automatically.
 
 ## Smaller / opportunistic
 
 - [ ] `--host-key-policy` startup flag (form + persistence already done).
-- [ ] Normalise trailing whitespace in the golden files (`-update` churns 7 of them).
+- [x] Normalise trailing whitespace in the golden files — `-update` already
+      wrote trimmed files (see `assertGolden`); regenerating them for the Tier 3
+      work committed the trim, so the churn is gone.
 - [ ] Symlink handling (follow vs show; create).
 - [ ] `!` to run a shell command in the local pane's directory.

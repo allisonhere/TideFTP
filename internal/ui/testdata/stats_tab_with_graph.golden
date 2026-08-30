@@ -1,4 +1,4 @@
-   TideFTP    test  test.local:22                                0 queued  tide-night  split 50/50  
+   TideFTP    test  test.local:22                                0 queued  tide-night  split 50/50
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
 │Local                       /home/allie/projects││Remote                              /public_html│
 │mode        size        modified        name    ││mode        size        modified        name    │
@@ -43,4 +43,4 @@
 │⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⠎⠀⠀⠘│
 │Done 1 · Failed 1 · Avg 9.8 KB/s (97.7 KB files) · sftp 1/0 99.7 KB · ftp 0/1 512 B               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr… 
+   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

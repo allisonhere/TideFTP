@@ -21,9 +21,9 @@
 │             │    n                                                   new folder    │             │
 ╰─────────────│    f2                                                 rename item    │─────────────╯
 ╭─────────────│    e                                     edit file in your editor    │─────────────╮
-│Transfers    │    delete                           delete selected / highlighted    │        queue│
+│Transfers    │    v                                   preview file (text or hex)    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/34                                                       │ transferring│
+│↑ [========= │  Rows  1-18/36                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

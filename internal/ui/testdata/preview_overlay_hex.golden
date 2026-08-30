@@ -7,24 +7,24 @@
 │    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
+│      ╭─ tideftp · preview · tideftp ──────────────────────────────────────────────────────╮      │
+│      │                                                                                    │      │
+│      │  hex · /releases/2026-08-ship/tideftp · first 24 B of 6.5 MB                       │      │
+│      │                                                                                    │      │
+│      │  00000000  7f 45 4c 46 02 01 01 00  00 00 00 00 00 00 00 00  |.ELF............|    │      │
+│      │  00000010  02 00 3e 00 01 00 00 00                           |..>.....|            │      │
+│      │                                                                                    │      │
+│      │  Lines  1-2/2 (head only)                                                          │      │
+│      │    up/down scroll   x text/hex   esc close                                         │      │
+│      │                                                                                    │      │
+│      ╰────────────────────────────────────────────────────────────────────────────────────╯      │
 │                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│Transfers                                                                                    stats│
-│ 1 Queue (2x)   2 Active   3 Failed   4 History   5 Log    6 Stats                                │
-│Active 1 · Queued 1 · ↕ 4.1 MB/s · 149.0 KB of 178.0 KB (84%)                                     │
-│⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⡠⠒⠒⢄│
-│Done 2 · Failed 1 · Avg 9.8 KB/s (73.2 KB files) · sftp 1/0 99.7 KB · ftp 1/1 49.3 KB             │
+│Transfers                                                                                    queue│
+│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │
+│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main.go      50% transferring│
+│↓ [                  ]  /public_html/index.html -> /home/allie/projects/index.html       0% queued│
+│                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

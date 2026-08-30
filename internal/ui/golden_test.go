@@ -123,6 +123,25 @@ func TestGoldenSettingsOverlay(t *testing.T) {
 	assertGolden(t, "settings_overlay", ansi.Strip(model.View()))
 }
 
+func TestGoldenPreviewOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.overlay = overlayPreview
+	body := []byte("# Deploy notes\n\n- push the build\n- restart the service\n- tail the log\n")
+	preview := newPreviewState("deploy-notes.md", "/releases/deploy-notes.md", int64(len(body)), body, false)
+	model.preview = &preview
+	assertGolden(t, "preview_overlay", ansi.Strip(model.View()))
+}
+
+func TestGoldenPreviewOverlayHex(t *testing.T) {
+	model := goldenModel(t)
+	model.overlay = overlayPreview
+	body := []byte{0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00}
+	preview := newPreviewState("tideftp", "/releases/2026-08-ship/tideftp", 6812440, body, true)
+	model.preview = &preview
+	assertGolden(t, "preview_overlay_hex", ansi.Strip(model.View()))
+}
+
 func TestGoldenConflictOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlayConflict

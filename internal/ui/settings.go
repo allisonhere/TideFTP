@@ -21,12 +21,14 @@ const (
 	settingsFieldIcons
 	settingsFieldMaxParallel
 	settingsFieldEditor
+	settingsFieldVerify
+	settingsFieldReconnect
 	settingsFieldCount
 )
 
 // settingsToggleChoices is the cycle order for every on/off row (Shadow,
-// Icons). Density has its own two values, since "off"/"on" would not read
-// as compact/comfortable.
+// Icons, Verify, Reconnect). Density has its own two values, since "off"/"on" would
+// not read as compact/comfortable.
 var settingsToggleChoices = []string{"off", "on"}
 
 // editorCandidates are the editors the Editor row cycles through, if found on
@@ -64,6 +66,10 @@ func settingsFieldLabel(field settingsField) string {
 		return "Max Parallel"
 	case settingsFieldEditor:
 		return "Editor"
+	case settingsFieldVerify:
+		return "Verify"
+	case settingsFieldReconnect:
+		return "Reconnect"
 	}
 	return ""
 }
@@ -88,6 +94,10 @@ func (m Model) settingsFieldValue(field settingsField) string {
 			return "auto (none found)"
 		}
 		return m.editorSetting
+	case settingsFieldVerify:
+		return settingsToggleChoices[boolToIndex(m.verifyChecksums)]
+	case settingsFieldReconnect:
+		return settingsToggleChoices[boolToIndex(m.autoReconnect)]
 	}
 	return ""
 }
@@ -150,6 +160,13 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 			m.editorSetting = ""
 		} else {
 			m.editorSetting = choices[next]
+		}
+	case settingsFieldVerify:
+		m.verifyChecksums = !m.verifyChecksums
+	case settingsFieldReconnect:
+		m.autoReconnect = !m.autoReconnect
+		if !m.autoReconnect {
+			m.cancelReconnect()
 		}
 	}
 	m.setStatus(fmt.Sprintf("%s: %s", settingsFieldLabel(field), m.settingsFieldValue(field)))

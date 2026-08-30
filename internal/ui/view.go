@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/lipgloss"
@@ -30,7 +31,7 @@ func (m Model) View() string {
 	top := lipgloss.JoinHorizontal(lipgloss.Top, local, remote)
 
 	bottomTitle := "Transfers"
-	bottomHint := m.bottomTabLabel()
+	bottomHint := m.bottomPaneHint(time.Now())
 	bottom := m.renderPane(renderer, bottomTitle, bottomHint, m.renderBottomPane(renderer, m.width-2, bottomHeight-3), m.width, bottomHeight, m.focus == focusQueue)
 	main := lipgloss.JoinVertical(lipgloss.Left, top, bottom)
 	status := m.renderStatus(renderer)
@@ -212,9 +213,12 @@ func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int) []
 	all := m.bottomTabTransfers()
 	rows := make([]string, 0, limit)
 	end := min(len(all), m.bottomOffset+limit)
+	// One clock reading for the whole batch, so two rows rendered in the same
+	// frame cannot disagree about what time it is.
+	now := time.Now()
 	for i := m.bottomOffset; i < end; i++ {
 		cursor := m.focus == focusQueue && i == m.bottomCursor
-		rows = append(rows, m.renderTransferRow(renderer, all[i], cursor, width))
+		rows = append(rows, m.renderTransferRow(renderer, all[i], cursor, width, now))
 	}
 	return rows
 }
@@ -365,7 +369,7 @@ func transferPalette(renderer tideui.Renderer, status domain.TransferStatus, cur
 	return bg, fg, accent
 }
 
-func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, cursor bool, width int) string {
+func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Transfer, cursor bool, width int, now time.Time) string {
 	bg, fg, statusColor := transferPalette(renderer, transfer.Status, cursor)
 
 	statusIcon := " "
@@ -389,18 +393,56 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 		segment(bg, statusColor, strings.Repeat("=", filled)) +
 		segment(bg, fg, strings.Repeat(" ", max(0, barWidth-filled))) +
 		segment(bg, fg, "]")
-	name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-48))
+
+	// The right-hand meta is built first so the path can be truncated to
+	// whatever is actually left over. It is not a fixed width — a running
+	// transfer carries a throughput and an ETA that a queued one does not —
+	// so sizing the path against a constant would either waste columns or
+	// let the two halves collide.
+	meta := fmt.Sprintf("%s %3.0f%% %s", statusIcon, transfer.Progress()*100, transferMetaLabel(transfer, now))
+	right := segment(bg, statusColor, meta)
+	// dir and the two spaces around the bar, plus the bar and its brackets.
+	const rowChrome = 2 + barWidth + 2 + 2
+	name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-rowChrome-lipgloss.Width(meta)))
 
 	left := segment(bg, statusColor, dir+" ") + bar + segment(bg, fg, "  "+name)
-	label := transfer.Message
-	if label == "" {
-		label = transferStatus(transfer.Status)
-	}
-	meta := fmt.Sprintf("%s %3.0f%% %s", statusIcon, transfer.Progress()*100, label)
-	right := segment(bg, statusColor, meta)
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
 	content := left + segment(bg, fg, strings.Repeat(" ", gap)) + right
 	return clampView(content, width, 1, bg)
+}
+
+// renderPreviewRows draws one window of the preview. A hexdump is plain text
+// on the panel's own surface; the text view paints each span its role's
+// colour (see highlight.go), always over that same background — a syntax
+// colour is a foreground here and never a surface of its own, so a preview
+// still looks like part of the panel it is in.
+func (m Model) renderPreviewRows(renderer tideui.Renderer, offset, visible, width int) []string {
+	preview := m.preview
+	bg, fg := rowSurface(renderer, renderer.Styles.DetailBody)
+	dimmed, errColor := renderer.Styles.Theme.Dimmed, renderer.Styles.Theme.Error
+
+	if preview.hex {
+		lines := preview.lines(width)
+		rows := make([]string, 0, visible)
+		for _, line := range lines[min(offset, len(lines)):min(len(lines), offset+visible)] {
+			rows = append(rows, clampView(segment(bg, fg, line), width, 1, bg))
+		}
+		return rows
+	}
+
+	rows := make([]string, 0, visible)
+	end := min(len(preview.spans), offset+visible)
+	for i := min(offset, len(preview.spans)); i < end; i++ {
+		var line strings.Builder
+		for _, span := range preview.spans[i] {
+			line.WriteString(segment(bg, roleColor(fg, dimmed, errColor, span.role, bg), span.text))
+		}
+		// clampView truncates ANSI-aware and pads the rest with the panel's
+		// background, so a short line does not leave the theme's own
+		// background showing through the gap.
+		rows = append(rows, clampView(line.String(), width, 1, bg))
+	}
+	return rows
 }
 
 func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
@@ -696,6 +738,36 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			)
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: title, Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlayPreview:
+		if m.preview == nil {
+			return nil
+		}
+		width := m.previewWidth()
+		contentWidth := width - 4
+		preview := m.preview
+		lines := preview.lines(contentWidth)
+		visible := m.previewVisibleRows()
+		offset := min(max(0, preview.offset), max(0, len(lines)-visible))
+		rows := []string{
+			renderer.Styles.DetailMeta.Width(contentWidth).Render(short(preview.summary(), contentWidth)),
+			"",
+		}
+		if len(lines) == 0 {
+			rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("(empty file)"))
+		}
+		rows = append(rows, m.renderPreviewRows(renderer, offset, visible, contentWidth)...)
+		scroll := fmt.Sprintf("%d-%d/%d", min(len(lines), offset+1), min(len(lines), offset+visible), len(lines))
+		if preview.truncated {
+			scroll += " (head only)"
+		}
+		rows = append(rows, "",
+			renderer.Styles.DetailMeta.Width(contentWidth).Render("Lines  "+scroll),
+			renderer.RenderSoftHints(contentWidth,
+				tideui.SoftHint{Key: "up/down", Label: "scroll"},
+				tideui.SoftHint{Key: "x", Label: "text/hex"},
+				tideui.SoftHint{Key: "esc", Label: "close"}))
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "preview · " + preview.name, Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlaySettings:
 		width := min(60, max(36, m.width-8))

@@ -68,17 +68,44 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   The editor is the **Editor** row in Settings (`,`) — `auto` resolves `$VISUAL`,
   `$EDITOR`, `git config core.editor`, then a common editor on `PATH`. Set
   `editor` in `config.toml` to anything, including flags, e.g. `editor = "code -w"`
+- `v`: preview the highlighted file — reads the first 128 KB and shows it as
+  syntax-highlighted text, or as a hexdump for binary content (`x` toggles,
+  `esc` closes). It never downloads the whole file. The header names the
+  language that was recognised, so a file that comes out uncoloured says why
+- `y`: copy the selection's full paths to the clipboard, one per line. Over SSH
+  this uses OSC 52 so the paths land on *your* clipboard, not the server's;
+  locally it prefers `wl-copy`/`pbcopy`/`xclip`/`xsel` and falls back to OSC 52
 - `x`: cancel active transfers
-- `o`: conflict prompt (demo)
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)
 - `.`: toggle hidden files
 - `Shift+Left` / `Shift+Right`: resize local/remote panes
 - `Shift+Up` / `Shift+Down`: resize transfer pane
-- `1`-`5`: bottom tabs
+- `1`-`6`: bottom tabs
 - `?`: help
 - `q`: quit
+
+## Transfers
+
+A running transfer's row shows its live throughput and time remaining, and the
+transfers pane header carries an ETA for everything still queued or running.
+Both are estimated from the average rate of the transfers actually in flight,
+so they settle down after the first few seconds rather than being right
+immediately.
+
+Two settings in `,` change what happens around a transfer:
+
+- **Verify** (`verify_checksums`, off by default) re-reads both ends of every
+  completed transfer and compares SHA-256 sums. A mismatch moves the transfer
+  to the Failed tab, where `R` retries it. This doubles what a transfer costs
+  in time and bytes — it is correctness you opt into, not a free check.
+- **Reconnect** (`auto_reconnect`, on by default) redials after a connection
+  drops on its own, backing off 2s, 4s, 8s, 15s, 30s before giving up, and
+  puts you back in the directory you were in. A disconnect you asked for is
+  never undone, and connecting somewhere by hand calls off a redial in
+  progress. Transfers interrupted by the drop still fail — they are not
+  resumed automatically; retry them with `R`.
 
 ## Development
 

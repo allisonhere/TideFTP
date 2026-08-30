@@ -52,6 +52,7 @@ const (
 	overlayCommandPalette
 	overlayFileAction
 	overlayServerList
+	overlayPreview
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -241,9 +242,25 @@ type Model struct {
 	commandCursor         int
 	fileAction            *fileActionPrompt
 	pendingEdit           *pendingEdit
+	preview               *previewState
 	editorSetting         string
-	helpQuery             string
-	helpOffset            int
+	// verifyChecksums re-reads both ends of every completed transfer and
+	// compares SHA-256 sums (see verify.go). Off by default: it doubles the
+	// bytes a transfer costs.
+	verifyChecksums bool
+	// autoReconnect redials after a connection drops on its own (see
+	// reconnect.go). reconnect holds the campaign in progress, nil the rest
+	// of the time, and reconnectToken retires a superseded one's timers.
+	autoReconnect  bool
+	reconnect      *reconnectState
+	reconnectToken int
+	// lastCreds are the credentials of the most recent connect attempt,
+	// kept so an auto-reconnect can redial with them. In memory only, and
+	// for the same lifetime as the connect form's own copy of a password —
+	// nothing here is ever written to disk.
+	lastCreds  session.Credentials
+	helpQuery  string
+	helpOffset int
 
 	conn     session.Conn
 	remoteFS vfs.FS
@@ -377,24 +394,26 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 			selected:   map[string]bool{},
 			showHidden: false,
 		},
-		localFS:        local,
-		dialer:         dialer,
-		targets:        targets,
-		profiles:       profilesFromConfig(cfg.Profiles),
-		state:          connDisconnected,
-		nextTransferID: 1,
-		maxParallel:    maxParallel,
-		theme:          themeByName(cfg.Theme),
-		density:        density,
-		shadow:         cfg.Shadow,
-		showIcons:      cfg.ShowIcons,
-		editorSetting:  cfg.Editor,
-		fileSplit:      tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
-		bottomSplit:    tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
-		save:           save,
-		creds:          creds,
-		logs:           []string{"redacted logs enabled"},
-		status:         "ready",
+		localFS:         local,
+		dialer:          dialer,
+		targets:         targets,
+		profiles:        profilesFromConfig(cfg.Profiles),
+		state:           connDisconnected,
+		nextTransferID:  1,
+		maxParallel:     maxParallel,
+		theme:           themeByName(cfg.Theme),
+		density:         density,
+		shadow:          cfg.Shadow,
+		showIcons:       cfg.ShowIcons,
+		editorSetting:   cfg.Editor,
+		verifyChecksums: cfg.VerifyChecksums,
+		autoReconnect:   cfg.AutoReconnect,
+		fileSplit:       tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
+		bottomSplit:     tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
+		save:            save,
+		creds:           creds,
+		logs:            []string{"redacted logs enabled"},
+		status:          "ready",
 	}
 	model.themePicker = tideui.NewThemePicker(tideui.ThemePickerOptions{
 		Themes:       appThemes(),
@@ -415,12 +434,14 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 // snapshotConfig captures the current settings for persistence.
 func (m Model) snapshotConfig() config.Config {
 	return config.Config{
-		Theme:       m.theme.Name,
-		Density:     string(m.density),
-		Shadow:      m.shadow,
-		ShowIcons:   m.showIcons,
-		MaxParallel: m.maxParallel,
-		Editor:      m.editorSetting,
+		Theme:           m.theme.Name,
+		Density:         string(m.density),
+		Shadow:          m.shadow,
+		ShowIcons:       m.showIcons,
+		MaxParallel:     m.maxParallel,
+		Editor:          m.editorSetting,
+		VerifyChecksums: m.verifyChecksums,
+		AutoReconnect:   m.autoReconnect,
 		Layout: config.Layout{
 			FileSplit:   m.fileSplit.Value(),
 			BottomSplit: m.bottomSplit.Value(),
@@ -504,13 +525,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectedMsg:
 		return m, m.applyConnected(msg)
 	case connectFailedMsg:
-		m.applyConnectFailed(msg)
-		return m, nil
+		return m, m.applyConnectFailed(msg)
 	case disconnectedMsg:
 		wasAtBottom := m.isAtBottomPane()
-		m.applyDisconnected(msg)
+		cmd := m.applyDisconnected(msg)
 		m.settleBottomOffset(wasAtBottom)
-		return m, nil
+		return m, cmd
+	case reconnectTickMsg:
+		return m, m.applyReconnectTick(msg)
 	case listingMsg:
 		wasAtBottom := m.isAtBottomPane()
 		m.applyListing(msg)
@@ -595,6 +617,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setStatus("saved " + msg.name)
 		return m, m.requestListing(msg.pane, m.filePaneByID(msg.pane).path, listingRefresh)
+	case clipboardCopiedMsg:
+		m.applyClipboardCopied(msg)
+		return m, nil
+	case previewLoadedMsg:
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("preview %s: %v", msg.name, msg.err))
+			return m, nil
+		}
+		m.openPreview(msg)
+		return m, nil
 	case serverConnectMsg:
 		if msg.found {
 			m.overlay = overlayNone
@@ -622,13 +654,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Applying an event can finish a transfer, which frees a slot for the
 		// next queued one, which is why startQueuedTransfers runs here too.
 		wasAtBottom := m.isAtBottomPane()
-		m.applyTransferEvent(msg)
+		verify := m.applyTransferEvent(msg)
 		m.startQueuedTransfers()
 		m.settleBottomOffset(wasAtBottom)
 		if !m.connected() {
-			return m, nil
+			return m, verify
 		}
-		return m, waitForTransferEvent(m.engine.Events())
+		return m, tea.Batch(verify, waitForTransferEvent(m.engine.Events()))
+	case verifyDoneMsg:
+		wasAtBottom := m.isAtBottomPane()
+		m.applyVerifyDone(msg)
+		m.settleBottomOffset(wasAtBottom)
+		return m, nil
 	case transferStreamClosed:
 		return m, nil
 	case statsTickMsg:
@@ -700,6 +737,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	}
 	if m.overlay == overlayHelp {
 		return m, m.handleHelpKey(msg)
+	}
+	if m.overlay == overlayPreview {
+		return m, m.handlePreviewKey(msg)
 	}
 	if m.overlay == overlayConflict {
 		return m, m.handleConflictKey(msg)
@@ -791,6 +831,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.queueDownload()
 	case "e":
 		cmd = m.startEdit()
+	case "v":
+		cmd = m.startPreview()
+	case "y":
+		cmd = m.copySelectedPaths()
 	case "x":
 		m.cancelActiveTransfers()
 	case "R":
@@ -902,15 +946,27 @@ func (m *Model) trustHostKey(remember bool) tea.Cmd {
 	return m.connect(prompt.target, creds)
 }
 
-// connect starts dialing target as creds, tearing down any existing
-// connection first.
+// connect starts dialing target as creds at the user's request, tearing down
+// any existing connection first. Asking for a connection by hand also calls
+// off any auto-reconnect campaign still running: the user has said where
+// they want to be, and a backoff timer set before they said it must not
+// drag them somewhere else.
 func (m *Model) connect(target session.Target, creds session.Credentials) tea.Cmd {
+	m.cancelReconnect()
+	return m.connectFor(target, creds)
+}
+
+// connectFor is the dial itself, shared by the user-driven connect above and
+// by an auto-reconnect redial, which must not cancel the campaign it is
+// part of.
+func (m *Model) connectFor(target session.Target, creds session.Credentials) tea.Cmd {
 	cmds := []tea.Cmd{}
 	if m.conn != nil {
 		cmds = append(cmds, closeConnCmd(m.conn))
 		m.clearConnection("reconnecting")
 	}
 	m.target = target
+	m.lastCreds = creds
 	m.state = connConnecting
 	m.connErr = nil
 	m.setStatus("connecting to " + target.Label())
@@ -925,6 +981,7 @@ func (m *Model) disconnect() tea.Cmd {
 		return nil
 	}
 	conn := m.conn
+	m.cancelReconnect()
 	m.setStatus("disconnecting from " + m.target.Label())
 	return closeConnCmd(conn)
 }
@@ -974,51 +1031,75 @@ func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
 
 	m.remote.reset()
 	m.remote.path = ""
+	// A reconnect returns the user to the directory they were in when the
+	// connection dropped; a fresh connect opens the target's home.
+	openPath := msg.target.Home()
+	if resume, ok := m.reconnectResumePath(); ok {
+		openPath = resume
+		m.setStatus("reconnected to " + msg.target.Label())
+	}
 	return tea.Batch(
 		waitForTransferEvent(msg.conn.Engine().Events()),
 		watchConnCmd(msg.conn),
-		m.requestListing(paneRemote, msg.target.Home(), listingNavigate),
+		m.requestListing(paneRemote, openPath, listingNavigate),
 	)
 }
 
-func (m *Model) applyConnectFailed(msg connectFailedMsg) {
+// applyConnectFailed records a connect attempt that never opened, and
+// returns the command that waits out the next backoff when the attempt was
+// part of an auto-reconnect campaign. An unknown host key ends any campaign:
+// it needs an answer from the user, and redialling behind a prompt they have
+// not answered would just raise it again.
+func (m *Model) applyConnectFailed(msg connectFailedMsg) tea.Cmd {
 	if m.state != connConnecting || msg.target != m.target {
-		return
+		return nil
 	}
 	m.state = connFailed
 	m.connErr = msg.err
 	var hostKeyErr *session.UntrustedHostKeyError
 	if errors.As(msg.err, &hostKeyErr) {
+		m.cancelReconnect()
 		m.hostKeyPrompt = &hostKeyPrompt{target: msg.target, creds: msg.creds, err: hostKeyErr}
 		m.overlay = overlayHostKey
 		m.setStatus("unknown host key for " + msg.target.Address())
-		return
+		return nil
 	}
 	m.setError(fmt.Sprintf("connect %s: %v", msg.target.Label(), msg.err))
+	return m.reconnectAfterFailure()
 }
 
 // applyDisconnected tears the connection down. Anything in flight is marked
 // failed: the bytes stopped moving whether or not the user asked them to.
-func (m *Model) applyDisconnected(msg disconnectedMsg) {
+func (m *Model) applyDisconnected(msg disconnectedMsg) tea.Cmd {
 	if msg.conn != m.conn {
 		// A previous connection finishing after we moved on. Whatever it was
 		// carrying was already failed when we moved on — see connect.
-		return
+		return nil
 	}
 	reason := "disconnected"
 	if msg.err != nil {
 		reason = msg.err.Error()
 	}
+	// Captured before clearConnection, which drops the remote pane's path,
+	// so an auto-reconnect can put the user back where they were.
+	resumePath := m.remote.path
 	m.clearConnection(reason)
-	if msg.err != nil {
-		m.state = connFailed
-		m.connErr = msg.err
-		m.setError("connection lost: " + msg.err.Error())
-	} else {
+	m.logs = append(m.logs, "connection ended: "+reason)
+	if msg.err == nil {
 		m.state = connDisconnected
 		m.setStatus("disconnected")
+		return nil
 	}
-	m.logs = append(m.logs, "connection ended: "+reason)
+	m.state = connFailed
+	m.connErr = msg.err
+	// An auto-reconnect campaign reports the drop in its own status line,
+	// together with when it will try again, so it does not need this one
+	// repeated ahead of it.
+	if cmd := m.beginReconnect(resumePath); cmd != nil {
+		return cmd
+	}
+	m.setError("connection lost: " + msg.err.Error())
+	return nil
 }
 
 // clearConnection drops every reference to the live connection, so a stale
@@ -1666,11 +1747,13 @@ func (m *Model) startQueuedTransfers() {
 
 // applyTransferEvent folds one engine event into the queue row it belongs to.
 // Events for unknown IDs are ignored: the engine may still be draining a
-// transfer the UI has already forgotten.
-func (m *Model) applyTransferEvent(event transfer.Event) {
+// transfer the UI has already forgotten. It returns a command only for the
+// one event that has follow-up work: a completion, when checksum
+// verification is switched on.
+func (m *Model) applyTransferEvent(event transfer.Event) tea.Cmd {
 	index := m.transferIndex(event.ID)
 	if index < 0 {
-		return
+		return nil
 	}
 	row := &m.transfers[index]
 	// Only clamp against a total worth trusting. A listing can report a size
@@ -1694,6 +1777,10 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 		row.Status = domain.Done
 		row.FinishedAt = time.Now()
 		row.Message = "complete"
+		if m.verifyChecksums {
+			row.Message = "verifying…"
+			return m.beginVerify(*row)
+		}
 	case transfer.Failed:
 		row.Status = domain.Failed
 		row.FinishedAt = time.Now()
@@ -1709,6 +1796,7 @@ func (m *Model) applyTransferEvent(event transfer.Event) {
 		row.Message = "canceled"
 		m.logs = append(m.logs, fmt.Sprintf("transfer %d canceled", row.ID))
 	}
+	return nil
 }
 
 // bottomTabHasRows reports whether the current bottom tab shows selectable

@@ -3,6 +3,7 @@ module tideftp
 go 1.26.6
 
 require (
+	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/allisonhere/tideui v0.2.3-0.20260823151826-81535e78c84e
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -25,6 +26,7 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/kr/fs v0.1.0 // indirect

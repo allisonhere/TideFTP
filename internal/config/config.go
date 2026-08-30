@@ -26,9 +26,16 @@ type Config struct {
 	// Editor is the command the `e` action opens files with. Empty means
 	// auto: $VISUAL, $EDITOR, git's core.editor, then a common editor on
 	// PATH. A value may carry flags, e.g. "code -w".
-	Editor   string    `toml:"editor,omitempty"`
-	Layout   Layout    `toml:"layout"`
-	Profiles []Profile `toml:"profiles"`
+	Editor string `toml:"editor,omitempty"`
+	// VerifyChecksums re-reads both ends of every completed transfer and
+	// compares SHA-256 sums. Off by default: it is correct, and it doubles
+	// what a transfer costs.
+	VerifyChecksums bool `toml:"verify_checksums"`
+	// AutoReconnect redials, with backoff, after a connection drops on its
+	// own. It never fires for a disconnect the user asked for.
+	AutoReconnect bool      `toml:"auto_reconnect"`
+	Layout        Layout    `toml:"layout"`
+	Profiles      []Profile `toml:"profiles"`
 }
 
 // Layout records the pane split ratios as fractions of the terminal. The UI
@@ -63,12 +70,13 @@ type SaveFunc func(Config) error
 // run looks identical to a run that later saved these same values.
 func Default() Config {
 	return Config{
-		Theme:       "tide-night",
-		Density:     "compact",
-		Shadow:      true,
-		ShowIcons:   true,
-		MaxParallel: 2,
-		Layout:      Layout{FileSplit: 0.5, BottomSplit: 0.28},
+		Theme:         "tide-night",
+		Density:       "compact",
+		Shadow:        true,
+		ShowIcons:     true,
+		MaxParallel:   2,
+		AutoReconnect: true,
+		Layout:        Layout{FileSplit: 0.5, BottomSplit: 0.28},
 	}
 }
 

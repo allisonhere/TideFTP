@@ -5,21 +5,21 @@
 │  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
 │    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
 │    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
-│           ╭─ tideftp · file exists ──────────────────────────────────────────────────╮           │
-│           │                                                                          │           │
-│           │  file 1 of 1: index.html — 8.0 KB here, 8.0 KB at destination            │           │
-│           │                                                                          │           │
-│           │  ▌ Overwrite                                                             │           │
-│           │    Overwrite if source newer                                             │           │
-│           │    Overwrite if different size                                           │           │
-│           │    Overwrite if different size or source newer                           │           │
-│           │    Resume                                                                │           │
-│           │    Rename                                                                │           │
-│           │    Skip                                                                  │           │
-│           │                                                                          │           │
-│           │    ↑↓ select   enter this file   a all   s all+remember   esc cancel     │           │
-│           │                                                                          │           │
-╰───────────╰──────────────────────────────────────────────────────────────────────────╯───────────╯
+│                                                ││                                                │
+│  ╭─ tideftp · preview · deploy-notes.md ──────────────────────────────────────────────────────╮  │
+│  │                                                                                            │  │
+│  │  text · markdown · /releases/deploy-notes.md · 70 B                                        │  │
+│  │                                                                                            │  │
+│  │  # Deploy notes                                                                            │  │
+│  │                                                                                            │  │
+│  │  - push the build                                                                          │  │
+│  │  - restart the service                                                                     │  │
+│  │  - tail the log                                                                            │  │
+│  │                                                                                            │  │
+│  │  Lines  1-5/5                                                                              │  │
+│  │    up/down scroll   x text/hex   esc close                                                 │  │
+│  │                                                                                            │  │
+╰──╰────────────────────────────────────────────────────────────────────────────────────────────╯──╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
 │  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │

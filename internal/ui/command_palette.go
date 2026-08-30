@@ -28,6 +28,8 @@ const (
 	commandRename
 	commandDelete
 	commandEditFile
+	commandPreviewFile
+	commandCopyPath
 )
 
 type paletteCommand struct {
@@ -74,8 +76,12 @@ func (m Model) paletteCommands() []paletteCommand {
 			paletteCommand{id: commandRename, title: "Rename item", hint: "rename highlighted item"},
 			paletteCommand{id: commandDelete, title: "Delete item(s)", hint: "delete selection or highlight"},
 		)
+		commands = append(commands, paletteCommand{id: commandCopyPath, title: "Copy path", hint: "copy selection's full path to the clipboard"})
 		if entry, ok := pane.current(); ok && !entry.IsDir() && !isParentDirEntry(entry) {
-			commands = append(commands, paletteCommand{id: commandEditFile, title: "Edit file", hint: "open in $EDITOR"})
+			commands = append(commands,
+				paletteCommand{id: commandEditFile, title: "Edit file", hint: "open in $EDITOR"},
+				paletteCommand{id: commandPreviewFile, title: "Preview file", hint: "peek at the head as text or hex"},
+			)
 		}
 	}
 	return commands
@@ -205,6 +211,10 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		m.openDeletePrompt()
 	case commandEditFile:
 		return m.startEdit()
+	case commandPreviewFile:
+		return m.startPreview()
+	case commandCopyPath:
+		return m.copySelectedPaths()
 	}
 	return nil
 }
