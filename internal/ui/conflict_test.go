@@ -2,7 +2,9 @@ package ui
 
 import (
 	"context"
+	"io"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +32,10 @@ func (f *conflictFS) Mkdir(context.Context, string) error              { return 
 func (f *conflictFS) Rename(context.Context, string, string) error     { return nil }
 func (f *conflictFS) Remove(context.Context, string) error             { return nil }
 func (f *conflictFS) ReadFile(context.Context, string) ([]byte, error) { return nil, nil }
-func (f *conflictFS) WriteFile(context.Context, string, []byte) error  { return nil }
+func (f *conflictFS) Open(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (f *conflictFS) WriteFile(context.Context, string, []byte) error { return nil }
 
 // conflictModel builds a connected model uploading from a single local file
 // entry, with dst seeded so the remote directory the upload targets (the

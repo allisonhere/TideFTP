@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/pem"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,32 @@ func TestFSReadFileWriteFileRoundTrip(t *testing.T) {
 	}
 	if body, err := fs.ReadFile(ctx, server.path("brand-new.txt")); err != nil || string(body) != "hello\n" {
 		t.Fatalf("ReadFile of created file = %q, %v", body, err)
+	}
+}
+
+func TestFSOpenStreamsWithoutBuffering(t *testing.T) {
+	server := startTestServer(t)
+	body := bytes.Repeat([]byte("chunk\n"), 2048)
+	server.writeFile(t, "stream.bin", body)
+	fs := connect(t, server).FS()
+
+	reader, err := fs.Open(context.Background(), server.path("stream.bin"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer reader.Close()
+
+	// A prefix read, the way the preview flow reads one, then the rest.
+	head := make([]byte, 32)
+	if _, err := io.ReadFull(reader, head); err != nil {
+		t.Fatalf("read head: %v", err)
+	}
+	if !bytes.Equal(head, body[:32]) {
+		t.Fatalf("head = %q, want the start of the file", head)
+	}
+	rest, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(append(head, rest...), body) {
+		t.Fatalf("streamed content did not match the file (err=%v)", err)
 	}
 }
 

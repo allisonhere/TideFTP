@@ -8,6 +8,7 @@ package localfs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,6 +105,13 @@ func (FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(path)
+}
+
+func (FS) Open(ctx context.Context, path string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return os.Open(path)
 }
 
 func (FS) WriteFile(ctx context.Context, path string, data []byte) error {

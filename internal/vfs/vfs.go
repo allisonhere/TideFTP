@@ -15,6 +15,7 @@ package vfs
 import (
 	"context"
 	"errors"
+	"io"
 	"path"
 	"strings"
 
@@ -43,8 +44,16 @@ type FS interface {
 	// Remove deletes the file or empty directory at targetPath.
 	Remove(ctx context.Context, targetPath string) error
 	// ReadFile returns the whole contents of the file at path. Callers keep
-	// it to small files (the edit/preview flows cap the size themselves).
+	// it to small files (the edit flow caps the size itself).
 	ReadFile(ctx context.Context, path string) ([]byte, error)
+	// Open returns a reader over the file at path, which the caller must
+	// Close. Unlike ReadFile it never buffers the whole file, which is the
+	// point: the preview flow reads only the first few KB of a file that
+	// may be gigabytes, and the checksum verify flow streams every byte
+	// through a hash without ever holding more than a chunk of it. ctx
+	// bounds opening the file; the returned reader's own lifetime is the
+	// caller's to manage.
+	Open(ctx context.Context, path string) (io.ReadCloser, error)
 	// WriteFile replaces the contents of the file at path, creating it if it
 	// does not exist. An existing file keeps its permissions.
 	WriteFile(ctx context.Context, path string, data []byte) error

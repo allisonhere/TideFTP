@@ -3,6 +3,7 @@ package ftpsession
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,61 @@ func TestFSReadFileWriteFileRoundTrip(t *testing.T) {
 	}
 	if body, err := fs.ReadFile(ctx, "/fresh.txt"); err != nil || string(body) != "new\n" {
 		t.Fatalf("ReadFile of created file = %q, %v", body, err)
+	}
+}
+
+// TestFSOpenStreamsAndReturnsItsConnection covers the part of Open that
+// ReadFile's shape cannot: it holds a pooled control connection for as long
+// as the reader lives, so the pool has to come back whole afterwards. A pool
+// slot leaked per preview would strand the app after a handful of them.
+func TestFSOpenStreamsAndReturnsItsConnection(t *testing.T) {
+	server := startFTPServer(t)
+	body := bytes.Repeat([]byte("payload\n"), 4096)
+	server.writeFile(t, "stream.bin", body)
+	fs := server.connect(t).FS()
+
+	// More reads than the pool can have connections, so a leaked slot shows
+	// up as a hang rather than passing unnoticed.
+	for range 6 {
+		reader, err := fs.Open(ftpCtx(t), "/stream.bin")
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		// Read only a prefix, the way a preview does, then close early —
+		// abandoning a transfer partway is the case that most easily leaves
+		// a control connection unusable.
+		head := make([]byte, 64)
+		if _, err := io.ReadFull(reader, head); err != nil {
+			t.Fatalf("read head: %v", err)
+		}
+		if !bytes.Equal(head, body[:64]) {
+			t.Fatalf("head = %q, want the start of the file", head)
+		}
+		if err := reader.Close(); err != nil {
+			t.Logf("close after a partial read reported %v, which is allowed", err)
+		}
+	}
+
+	// The pool is still usable for ordinary work.
+	if got, err := fs.List(ftpCtx(t), "/", false); err != nil || len(got) == 0 {
+		t.Fatalf("List after streaming = %v, %v; the pool did not recover", got, err)
+	}
+}
+
+func TestFSOpenReadsTheWholeFile(t *testing.T) {
+	server := startFTPServer(t)
+	body := []byte("first\nsecond\nthird\n")
+	server.writeFile(t, "whole.txt", body)
+	fs := server.connect(t).FS()
+
+	reader, err := fs.Open(ftpCtx(t), "/whole.txt")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer reader.Close()
+	got, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("Open+ReadAll = %q, %v, want the file's contents", got, err)
 	}
 }
 

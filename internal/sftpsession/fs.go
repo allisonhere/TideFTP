@@ -126,6 +126,17 @@ func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
+// Open hands back the sftp.File itself. pkg/sftp has no context-aware API,
+// so ctx only guards the call: once the handle is out, reads block for as
+// long as the server takes, and closing the handle (or the connection) is
+// what stops them.
+func (f *FS) Open(ctx context.Context, path string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.client.Open(vfs.CleanRemote(path))
+}
+
 func (f *FS) WriteFile(ctx context.Context, path string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err

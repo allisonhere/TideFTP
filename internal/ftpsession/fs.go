@@ -140,6 +140,63 @@ func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	return data, err
 }
 
+// Open borrows a control connection for the whole life of the returned
+// reader and hands it back on Close — a data transfer occupies its control
+// connection until the transfer ends, so unlike every other FS call here
+// the borrow cannot be scoped to withConn. A caller that forgets to Close
+// leaks the connection and its pool slot, which is why the vfs.FS contract
+// makes closing the caller's job in so many words.
+func (f *FS) Open(ctx context.Context, path string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path = vfs.CleanRemote(path)
+	conn, err := f.pool.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := conn.Retr(path)
+	if err != nil {
+		f.pool.discard(conn)
+		return nil, fmt.Errorf("retrieve %s: %w", path, err)
+	}
+	return &pooledReader{resp: resp, pool: f.pool, conn: conn}, nil
+}
+
+// pooledReader is Open's reader: the data connection's response, plus the
+// control connection it is running on, returned to the pool on Close. A read
+// error leaves the control stream mid-response, so the connection is
+// discarded rather than reused — the same rule withConn follows.
+type pooledReader struct {
+	resp   *ftp.Response
+	pool   *pool
+	conn   *ftp.ServerConn
+	failed bool
+	closed bool
+}
+
+func (r *pooledReader) Read(p []byte) (int, error) {
+	n, err := r.resp.Read(p)
+	if err != nil && err != io.EOF {
+		r.failed = true
+	}
+	return n, err
+}
+
+func (r *pooledReader) Close() error {
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	err := r.resp.Close()
+	if err != nil || r.failed {
+		r.pool.discard(r.conn)
+		return err
+	}
+	r.pool.put(r.conn)
+	return nil
+}
+
 func (f *FS) WriteFile(ctx context.Context, path string, data []byte) error {
 	path = vfs.CleanRemote(path)
 	return f.withConn(ctx, func(conn *ftp.ServerConn) error {

@@ -1,8 +1,10 @@
 package fakefs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"sort"
 	"strings"
@@ -243,6 +245,17 @@ func (r *Remote) ReadFile(ctx context.Context, filePath string) ([]byte, error) 
 	out := make([]byte, len(body))
 	copy(out, body)
 	return out, nil
+}
+
+// Open serves the stored body from memory. The fake has no streaming to do,
+// but it still hands back a fresh reader over a copy so a caller reading it
+// slowly cannot be affected by a WriteFile landing meanwhile.
+func (r *Remote) Open(ctx context.Context, filePath string) (io.ReadCloser, error) {
+	body, err := r.ReadFile(ctx, filePath)
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
 func (r *Remote) WriteFile(ctx context.Context, filePath string, data []byte) error {
