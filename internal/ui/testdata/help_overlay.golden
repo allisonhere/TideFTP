@@ -5,11 +5,12 @@
 │  ▸ drwxr-xr-│  Search  |                                                           │:30 uploads  │
 │    -rw-r--r-│                                                                      │:30 index.htm│
 │    -rw-r--r-│  Navigate                                                            │             │
-│             │    tab / shift+tab                                   switch panes    │             │
+│             │    tab / shift+tab                  cycle panes (incl. transfers)    │             │
+│             │    ← → / h l                            focus local / remote pane    │             │
 │             │    up/down, k/j                                       move cursor    │             │
 │             │    pgup / pgdown                                   page up / down    │             │
 │             │    enter                                           open directory    │             │
-│             │    backspace / h                                 parent directory    │             │
+│             │    backspace                                     parent directory    │             │
 │             │                                                                      │             │
 │             │  Act                                                                 │             │
 │             │    space                                         toggle selection    │             │
@@ -18,12 +19,11 @@
 │             │    u                                                       upload    │             │
 │             │    d                                                     download    │             │
 │             │    M            mirror directory (sync changed files, opt. prune)    │             │
-│             │    r                                                      refresh    │             │
-╰─────────────│    n                                                   new folder    │─────────────╯
-╭─────────────│    f2                                                 rename item    │─────────────╮
-│Transfers    │    e                                     edit file in your editor    │        queue│
+╰─────────────│    r                                                      refresh    │─────────────╯
+╭─────────────│    n                                                   new folder    │─────────────╮
+│Transfers    │    f2                                                 rename item    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/37                                                       │ transferring│
+│↑ [========= │  Rows  1-18/38                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

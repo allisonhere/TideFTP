@@ -826,8 +826,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.moveCursor(10)
 	case "enter":
 		cmd = m.activateCursor()
-	case "backspace", "h":
+	case "backspace":
 		cmd = m.parentDir()
+	case "left", "h":
+		m.focus = focusLocal
+	case "right", "l":
+		m.focus = focusRemote
 	case "n":
 		m.openMkdirPrompt()
 	case "f2":

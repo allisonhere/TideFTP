@@ -13,11 +13,12 @@ type helpEntry struct {
 }
 
 var helpEntries = []helpEntry{
-	{section: "Navigate", key: "tab / shift+tab", label: "switch panes"},
+	{section: "Navigate", key: "tab / shift+tab", label: "cycle panes (incl. transfers)"},
+	{section: "Navigate", key: "← → / h l", label: "focus local / remote pane"},
 	{section: "Navigate", key: "up/down, k/j", label: "move cursor"},
 	{section: "Navigate", key: "pgup / pgdown", label: "page up / down"},
 	{section: "Navigate", key: "enter", label: "open directory"},
-	{section: "Navigate", key: "backspace / h", label: "parent directory"},
+	{section: "Navigate", key: "backspace", label: "parent directory"},
 	{section: "Act", key: "space", label: "toggle selection"},
 	{section: "Act", key: "ctrl+a", label: "select all"},
 	{section: "Act", key: "esc", label: "clear selection / cancel"},

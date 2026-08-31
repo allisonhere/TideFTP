@@ -56,7 +56,8 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 
 ## Keys
 
-- `Tab` / `Shift+Tab`: switch panes
+- `Tab` / `Shift+Tab`: cycle panes (local, remote, transfers)
+- `←` / `→` (or `h` / `l`): focus the local / remote pane
 - `Enter`: open directory
 - `Backspace`: parent directory
 - `Space`: select item
