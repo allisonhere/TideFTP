@@ -671,10 +671,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		verify := m.applyTransferEvent(msg)
 		m.startQueuedTransfers()
 		m.settleBottomOffset(wasAtBottom)
-		if !m.connected() {
-			return m, verify
+		// When a terminal event empties the queue, re-list the panes so the
+		// files a batch just moved actually appear at their destination
+		// without the user navigating away and back. Only on drain, so a big
+		// mirror lists once at the end rather than after every file.
+		var settle tea.Cmd
+		if msg.Terminal() && !m.queueBusy() {
+			settle = m.relistPanes()
 		}
-		return m, tea.Batch(verify, waitForTransferEvent(m.engine.Events()))
+		if !m.connected() {
+			return m, tea.Batch(verify, settle)
+		}
+		return m, tea.Batch(verify, settle, waitForTransferEvent(m.engine.Events()))
 	case verifyDoneMsg:
 		wasAtBottom := m.isAtBottomPane()
 		m.applyVerifyDone(msg)
@@ -1162,11 +1170,31 @@ func (m Model) connected() bool {
 // refresh re-reads both panes in place, keeping cursors and selections.
 func (m *Model) refresh() tea.Cmd {
 	m.setStatus("refreshing")
+	return m.relistPanes()
+}
+
+// relistPanes re-reads both panes in place without touching the status line,
+// for the automatic refresh after a transfer batch finishes — see the
+// transfer.Event handler. A completed upload's new files, or a completed
+// download's, only show up once the destination directory is listed again;
+// doing it here saves the user the manual "leave the directory and come
+// back" they would otherwise need.
+func (m *Model) relistPanes() tea.Cmd {
 	cmds := []tea.Cmd{m.requestListing(paneLocal, m.local.path, listingRefresh)}
 	if m.connected() {
 		cmds = append(cmds, m.requestListing(paneRemote, m.remote.path, listingRefresh))
 	}
 	return tea.Batch(cmds...)
+}
+
+// queueBusy reports whether any transfer is still queued or running.
+func (m Model) queueBusy() bool {
+	for _, t := range m.transfers {
+		if t.Status == domain.Queued || t.Status == domain.Active {
+			return true
+		}
+	}
+	return false
 }
 
 // requestListing issues a List for dirPath and returns the command that runs
