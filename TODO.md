@@ -23,7 +23,14 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 - [ ] **Queue persistence** — persist the transfer queue (XDG state dir) and offer
       to resume on next launch; the engine's Offset/ResumeFrom already supports
       mid-file resume.
-- [ ] **Sorting controls** — name / size / date / type, asc/desc, per pane.
+- [x] **Sorting controls** — `s` cycles the focused pane's sort key (name /
+      size / date / type), `S` reverses direction. Dirs stay above files for
+      every key but `type`, `..` stays pinned. Per pane, kept across
+      navigation; the focused pane's order persists as the startup default
+      (`sort` in `config.toml`). The UI owns the order now — it sorts
+      `filePane.allEntries` before the filter derives `entries`
+      (`internal/ui/sort.go`); the fs adapters' own sort is just a starting
+      point.
 
 ## Tier 2 — server-admin essentials
 

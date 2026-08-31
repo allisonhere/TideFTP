@@ -31,6 +31,8 @@ const (
 	commandPreviewFile
 	commandCopyPath
 	commandFilter
+	commandSortKey
+	commandSortReverse
 )
 
 type paletteCommand struct {
@@ -73,7 +75,11 @@ func (m Model) paletteCommands() []paletteCommand {
 		commands = append(commands, paletteCommand{id: commandCancelTransfers, title: "Cancel active transfers", hint: "stop current work"})
 	}
 	if pane := m.focusedFilePane(); pane != nil {
-		commands = append(commands, paletteCommand{id: commandFilter, title: "Filter listing", hint: "narrow the pane by glob or substring"})
+		commands = append(commands,
+			paletteCommand{id: commandFilter, title: "Filter listing", hint: "narrow the pane by glob or substring"},
+			paletteCommand{id: commandSortKey, title: "Sort listing", hint: "cycle name / size / date / type"},
+			paletteCommand{id: commandSortReverse, title: "Reverse sort", hint: "flip ascending / descending"},
+		)
 	}
 	if pane := m.focusedFilePane(); pane != nil && len(pane.actionEntries()) > 0 {
 		commands = append(commands,
@@ -224,6 +230,12 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 			pane.filtering = true
 			m.setStatus("filter: type to narrow · enter accepts · esc clears")
 		}
+	case commandSortKey:
+		m.cycleSortKey()
+		return m.persist()
+	case commandSortReverse:
+		m.toggleSortDir()
+		return m.persist()
 	}
 	return nil
 }

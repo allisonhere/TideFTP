@@ -108,6 +108,16 @@ func TestGoldenFilteredPane(t *testing.T) {
 	assertGolden(t, "filtered_pane", ansi.Strip(model.View()))
 }
 
+func TestGoldenSortedPane(t *testing.T) {
+	model := goldenModel(t)
+	model.focus = focusLocal
+	model.local.sortKey = sortBySize
+	model.local.sortDesc = true
+	model.local.allEntries = model.local.entries
+	model.local.resort(model.filePaneVisibleRows())
+	assertGolden(t, "sorted_pane", ansi.Strip(model.View()))
+}
+
 func TestGoldenConnectFormOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model = press(t, model, runes("c"))

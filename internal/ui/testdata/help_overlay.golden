@@ -19,11 +19,11 @@
 │             │    d                                                     download    │             │
 │             │    r                                                      refresh    │             │
 │             │    /                           filter listing (glob or substring)    │             │
-╰─────────────│    n                                                   new folder    │─────────────╯
-╭─────────────│    f2                                                 rename item    │─────────────╮
-│Transfers    │    e                                     edit file in your editor    │        queue│
+╰─────────────│    s                        cycle sort: name / size / date / type    │─────────────╯
+╭─────────────│    S                                       reverse sort direction    │─────────────╮
+│Transfers    │    n                                                   new folder    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/37                                                       │ transferring│
+│↑ [========= │  Rows  1-18/39                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

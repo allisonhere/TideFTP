@@ -82,6 +82,11 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   name; anything else is a case-insensitive substring. `..` always stays
   visible so you can still walk up. Per pane, and dropped when the pane moves
   to another directory
+- `s`: cycle the focused pane's sort key — name, size, date, type. `S`
+  reverses the direction. Directories stay above files for every key except
+  `type`, and `..` stays on top. Per pane, kept across navigation, and the
+  focused pane's order is saved as the startup default (`sort` in
+  `config.toml`)
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)

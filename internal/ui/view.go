@@ -111,10 +111,13 @@ func firstLine(value string) string {
 // flight. It stays in the title rather than replacing the body so the pane's
 // current contents remain readable and usable during a slow listing.
 func (m Model) paneTitle(title string, pane filePane) string {
-	if !pane.loading {
-		return title
+	if marker := m.sortMarker(pane); marker != "" {
+		title += "  " + marker
 	}
-	return title + " " + m.glyphPlain("…", "...")
+	if pane.loading {
+		title += " " + m.glyphPlain("…", "...")
+	}
+	return title
 }
 
 func (m Model) renderTopbar(renderer tideui.Renderer) string {

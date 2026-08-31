@@ -24,6 +24,9 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.Layout.FileSplit != 0.5 || cfg.Layout.BottomSplit != 0.28 {
 		t.Fatalf("default layout = %+v, want 0.5/0.28", cfg.Layout)
 	}
+	if cfg.Sort.Key != "name" || cfg.Sort.Desc {
+		t.Fatalf("default sort = %+v, want name/asc", cfg.Sort)
+	}
 }
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
@@ -60,6 +63,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 		MaxParallel: 4,
 		Editor:      "nvim",
 		Layout:      Layout{FileSplit: 0.63, BottomSplit: 0.21},
+		Sort:        Sort{Key: "size", Desc: true},
 		Profiles: []Profile{
 			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob"},
 			{Name: "locked-down", Protocol: "sftp", Host: "secure.example.com", Port: 22, User: "ops", StartPath: "/srv", HostKeyPolicy: "strict"},

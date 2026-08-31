@@ -35,7 +35,17 @@ type Config struct {
 	// own. It never fires for a disconnect the user asked for.
 	AutoReconnect bool      `toml:"auto_reconnect"`
 	Layout        Layout    `toml:"layout"`
+	Sort          Sort      `toml:"sort"`
 	Profiles      []Profile `toml:"profiles"`
+}
+
+// Sort is the default order both file panes open in. Key is one of "name",
+// "size", "date", or "type"; an unrecognised value is treated as "name" by
+// the UI. Desc reverses it. Panes can be re-sorted independently at runtime
+// without changing what is saved here.
+type Sort struct {
+	Key  string `toml:"key"`
+	Desc bool   `toml:"desc"`
 }
 
 // Layout records the pane split ratios as fractions of the terminal. The UI
@@ -77,6 +87,7 @@ func Default() Config {
 		MaxParallel:   2,
 		AutoReconnect: true,
 		Layout:        Layout{FileSplit: 0.5, BottomSplit: 0.28},
+		Sort:          Sort{Key: "name"},
 	}
 }
 

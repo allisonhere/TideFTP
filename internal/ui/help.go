@@ -25,6 +25,8 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "d", label: "download"},
 	{section: "Act", key: "r", label: "refresh"},
 	{section: "Act", key: "/", label: "filter listing (glob or substring)"},
+	{section: "Act", key: "s", label: "cycle sort: name / size / date / type"},
+	{section: "Act", key: "S", label: "reverse sort direction"},
 	{section: "Act", key: "n", label: "new folder"},
 	{section: "Act", key: "f2", label: "rename item"},
 	{section: "Act", key: "e", label: "edit file in your editor"},

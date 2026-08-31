@@ -190,6 +190,13 @@ type filePane struct {
 	filter     string
 	filtering  bool
 
+	// sortKey and sortDesc order allEntries (and so, after filtering,
+	// entries) — see sort.go. They persist across navigation, unlike the
+	// filter, and their startup value comes from config. A pane can be
+	// re-sorted independently of the other.
+	sortKey  sortKey
+	sortDesc bool
+
 	// requestToken is the id of the most recent listing request. Replies
 	// carrying an older token are stale — two quick Enter presses put two
 	// listings in flight, and the slower one must not overwrite the newer
@@ -399,12 +406,16 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 			path:       cwd,
 			selected:   map[string]bool{},
 			showHidden: false,
+			sortKey:    parseSortKey(cfg.Sort.Key),
+			sortDesc:   cfg.Sort.Desc,
 		},
 		remote: filePane{
 			title:      "Remote",
 			path:       "",
 			selected:   map[string]bool{},
 			showHidden: false,
+			sortKey:    parseSortKey(cfg.Sort.Key),
+			sortDesc:   cfg.Sort.Desc,
 		},
 		localFS:         local,
 		dialer:          dialer,
@@ -457,6 +468,10 @@ func (m Model) snapshotConfig() config.Config {
 		Layout: config.Layout{
 			FileSplit:   m.fileSplit.Value(),
 			BottomSplit: m.bottomSplit.Value(),
+		},
+		Sort: config.Sort{
+			Key:  m.sortDefaultPane().sortKey.String(),
+			Desc: m.sortDefaultPane().sortDesc,
 		},
 		Profiles: profilesToConfig(m.profiles),
 	}
@@ -808,6 +823,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		} else {
 			m.setStatus("filter: focus a file pane first")
 		}
+	case "s":
+		m.cycleSortKey()
+		cmd = m.persist()
+	case "S":
+		m.toggleSortDir()
+		cmd = m.persist()
 	case "ctrl+k":
 		m.openCommandPalette()
 	case "tab":
@@ -1244,6 +1265,7 @@ func (m *Model) applyListing(msg listingMsg) {
 			target.filter, target.filtering = "", false
 		}
 		target.allEntries = target.entries
+		sortEntries(target.allEntries, target.sortKey, target.sortDesc)
 		target.applyFilter(m.filePaneVisibleRows())
 	}
 	// Deliberately not clearing an error status here: refresh lists both
