@@ -159,8 +159,16 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 			dstFS:     dstFS,
 		}
 
-		type dirPair struct{ srcDir, dstDir string }
-		stack := []dirPair{{srcBase, dstBase}}
+		// dstExists records whether the destination directory is known to be
+		// there. It matters most over FTP, where listing a path that does not
+		// exist means a full data-connection round trip that many servers
+		// simply never answer — so a directory the parent's listing did not
+		// show is never listed at all; everything under it is just "new".
+		type dirPair struct {
+			srcDir, dstDir string
+			dstExists      bool
+		}
+		stack := []dirPair{{srcBase, dstBase, true}}
 		var orphanDirs []string
 
 		for len(stack) > 0 {
@@ -175,11 +183,13 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 			if err != nil {
 				return syncScanMsg{err: fmt.Errorf("read %s: %w", it.srcDir, err)}
 			}
-			// A destination directory that will not list is almost always one
-			// that does not exist yet — a subtree the mirror is about to
-			// create. That is not a scan failure; it just means nothing there
-			// matches and nothing there is an extra.
-			dstChildren, _ := dstFS.List(ctx, it.dstDir, showHidden)
+			var dstChildren []domain.Entry
+			if it.dstExists {
+				// An error here (the root does not exist yet, say) is not a
+				// scan failure: it just means nothing there matches and
+				// nothing there is an extra to prune.
+				dstChildren, _ = dstFS.List(ctx, it.dstDir, showHidden)
+			}
 			dstByName := make(map[string]domain.Entry, len(dstChildren))
 			for _, e := range dstChildren {
 				dstByName[e.Name] = e
@@ -191,7 +201,8 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 				childSrc := srcFS.Child(it.srcDir, child.Name)
 				childDst := dstFS.Child(it.dstDir, child.Name)
 				if child.IsDir() {
-					stack = append(stack, dirPair{childSrc, childDst})
+					existing, ok := dstByName[child.Name]
+					stack = append(stack, dirPair{childSrc, childDst, ok && existing.IsDir()})
 					continue
 				}
 				if plan.count() >= preflightScanCap {

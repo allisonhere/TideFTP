@@ -19,7 +19,8 @@ import (
 // map that List reads and Remove mutates, so a prune's effect can be
 // asserted. Paths are POSIX and cleaned.
 type syncFS struct {
-	tree map[string][]domain.Entry
+	tree   map[string][]domain.Entry
+	listed []string // every path List was called with, in order
 }
 
 var _ vfs.FS = (*syncFS)(nil)
@@ -49,6 +50,7 @@ func (f *syncFS) put(dir string, entries ...domain.Entry) {
 }
 
 func (f *syncFS) List(_ context.Context, dir string, showHidden bool) ([]domain.Entry, error) {
+	f.listed = append(f.listed, syncClean(dir))
 	entries, ok := f.tree[syncClean(dir)]
 	if !ok {
 		return nil, &fsMissingDirError{dir}
@@ -296,6 +298,43 @@ func TestSyncScopesToDirectoryUnderCursor(t *testing.T) {
 	if model.sync.newCount() != 1 {
 		t.Fatalf("newCount = %d, want just assets/logo.png", model.sync.newCount())
 	}
+}
+
+func TestSyncNeverListsAMissingDestinationSubtree(t *testing.T) {
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	src := newSyncFS()
+	src.put("/src", dirEntry("fresh"), dirEntry("known"))
+	src.put("/src/fresh", file("a.txt", 10, old))
+	src.put("/src/known", file("b.txt", 20, old))
+	dst := newSyncFS()
+	dst.put("/dst", dirEntry("known")) // "fresh" does not exist at the destination
+	dst.put("/dst/known")
+	model, _ := mirrorModel(t, src, dst)
+
+	model = press(t, model, runes("M"))
+	if model.sync == nil {
+		t.Fatal("no plan")
+	}
+	for _, p := range dst.listed {
+		if p == "/dst/fresh" {
+			t.Fatalf("listed the missing destination subtree /dst/fresh — an FTP LIST of a nonexistent path is exactly the call that hangs; dst.listed=%v", dst.listed)
+		}
+	}
+	if !containsStr(dst.listed, "/dst/known") {
+		t.Fatalf("did not list the destination subtree that does exist; dst.listed=%v", dst.listed)
+	}
+	if model.sync.newCount() != 2 {
+		t.Fatalf("newCount = %d, want 2 (fresh/a.txt + known/b.txt)", model.sync.newCount())
+	}
+}
+
+func containsStr(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSyncNeedsConnection(t *testing.T) {
