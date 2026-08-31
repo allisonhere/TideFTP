@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Get version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          targets=(
+            "linux   amd64 tideftp-linux-x86_64"
+            "linux   arm64 tideftp-linux-aarch64"
+            "darwin  amd64 tideftp-darwin-x86_64"
+            "darwin  arm64 tideftp-darwin-aarch64"
+          )
+          for entry in "${targets[@]}"; do
+            read -r goos goarch name <<< "$entry"
+            CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+              -o "dist/$name" \
+              ./cmd/tideftp
+            tar -czf "dist/$name.tar.gz" -C dist "$name"
+            rm "dist/$name"
+            echo "Built dist/$name.tar.gz"
+          done
+          ( cd dist && sha256sum *.tar.gz > SHA256SUMS )
+          echo "----- SHA256SUMS -----"
+          cat dist/SHA256SUMS
+
+      - name: Extract release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "## TideFTP $TAG"
+            echo
+            echo "A keyboard-first terminal file transfer client for SFTP, FTP and FTPS — a FileZilla-style two-pane layout with a real transfer queue, conflict policies, directory mirror, streaming preview, and in-place edit."
+            echo
+            # Pull this tag's section out of CHANGELOG.md (between "## <tag>" and
+            # the next "## " heading) so the release notes never drift from it.
+            awk -v ver="## $TAG" '
+              $0 == ver { flag = 1; next }
+              /^## / && flag { flag = 0 }
+              flag { print }
+            ' CHANGELOG.md
+            echo
+            echo "---"
+            echo
+            echo '**Install:** `curl -fsSL https://raw.githubusercontent.com/allisonhere/TideFTP/main/install.sh | sh`'
+          } > release-notes.md
+          echo "----- release-notes.md -----"
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "TideFTP ${{ steps.version.outputs.tag }}"
+          body_path: release-notes.md
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS

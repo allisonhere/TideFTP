@@ -1,29 +1,35 @@
 # TideFTP
 
-TideFTP is a keyboard-first, mouse-friendly terminal file transfer client built
-with Go, Bubble Tea, and TideUI.
-
-The first slice focuses on the polished app shell:
+TideFTP is a keyboard-first, mouse-friendly terminal file transfer client for
+SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
 
 - FileZilla-style layout: local pane, remote pane, wide transfer pane.
-- Whatthedock-style soft modal screens with drop shadows.
-- `tide-night` default theme plus a live theme picker.
-- Shift-arrow pane resizing.
-- Real SFTP and FTP over the same adapter interfaces, plus fakes for UI work.
+- A real transfer queue — parallelism, per-file and overall ETA, retry,
+  resume, conflict policies.
+- Directory mirror (`M`) with a pre-flight plan and opt-in prune.
+- Streaming preview and in-place edit without downloading the whole file.
+- Strict host-key checking; passwords are never passed as flags.
+- `tide-night` default theme plus a live theme picker, soft modal screens,
+  shift-arrow pane resizing.
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/allisonhere/TideFTP/main/install.sh | sh
+```
+
+The installer drops a binary in `~/.local/bin` (set `INSTALL_DIR` for
+elsewhere) — no system password. Or grab an archive from the
+[latest release](https://github.com/allisonhere/TideFTP/releases/latest).
 
 ## Run
 
 ```bash
-./start.sh
+./start.sh          # or: go run ./cmd/tideftp
 ```
 
-or directly:
-
-```bash
-go run ./cmd/tideftp
-```
-
-That runs on the fake demo adapter. To reach a real server:
+That opens the app disconnected, ready for `c`. To connect straight to a
+server:
 
 ```bash
 # SFTP (the default protocol)
@@ -139,3 +145,16 @@ go test ./...             # hermetic; safe anywhere
 go test -race ./...       # the adapters and the transfer engines are concurrent
 go vet ./...
 ```
+
+## Releasing
+
+Version comes from the git tag, injected at build time via
+`-ldflags "-X main.version=$TAG"`. To cut a release:
+
+1. Update `CHANGELOG.md` with a `## vX.Y.Z` section.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`
+
+`.github/workflows/release.yml` then cross-compiles Linux and macOS
+(x86_64 + aarch64) binaries, writes `SHA256SUMS`, and publishes a GitHub
+release with notes pulled from that changelog section. `install.sh` fetches
+from `releases/latest`.

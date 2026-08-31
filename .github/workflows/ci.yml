@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, Vet & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # Pure Go — no cgo. Static binaries, same as the release build.
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # The adapters and transfer engines are concurrent; the race detector
+      # needs cgo, which ubuntu-latest provides via gcc.
+      - name: Test
+        run: go test ./... -race
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Not yet gating: this repo has no baseline lint pass. Flip
+      # continue-on-error to false once `golangci-lint run` is clean locally.
+      - name: golangci-lint
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
