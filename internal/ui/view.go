@@ -26,8 +26,8 @@ func (m Model) View() string {
 	// renderPane reserves 2 rows for its border and 1 for its title header,
 	// so the content passed in must be sized to height-3 to fill exactly the
 	// space actually visible inside the pane (see renderPane's bodyHeight).
-	local := m.renderPane(renderer, m.paneTitle("Local", m.local), m.local.displayPath(), m.renderFilePane(renderer, m.local, localWidth-2, topHeight-3), localWidth, topHeight, m.focus == focusLocal)
-	remote := m.renderPane(renderer, m.paneTitle("Remote", m.remote), m.remotePaneHint(), m.renderRemotePane(renderer, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
+	local := m.renderPane(renderer, m.paneTitle("Local", m.local), m.paneHint(m.local, m.local.displayPath()), m.renderFilePane(renderer, m.local, localWidth-2, topHeight-3), localWidth, topHeight, m.focus == focusLocal)
+	remote := m.renderPane(renderer, m.paneTitle("Remote", m.remote), m.paneHint(m.remote, m.remotePaneHint()), m.renderRemotePane(renderer, remoteWidth-2, topHeight-3), remoteWidth, topHeight, m.focus == focusRemote)
 	top := lipgloss.JoinHorizontal(lipgloss.Top, local, remote)
 
 	bottomTitle := "Transfers"
@@ -58,6 +58,26 @@ func (m Model) connectionSummary() string {
 	default:
 		return "not connected — press c"
 	}
+}
+
+// paneHint is the text shown at the right of a file pane's header. While a
+// filter is set or being typed it shows the query and the match count,
+// which matters more in that moment than the path; otherwise it falls back
+// to whatever the caller would normally show there (the directory path, or
+// the connection state for a disconnected remote pane).
+func (m Model) paneHint(pane filePane, fallback string) string {
+	if !pane.filterActive() {
+		return fallback
+	}
+	query := pane.filter
+	if pane.filtering {
+		query += "_"
+	}
+	if query == "" {
+		query = "…"
+	}
+	shown, total := pane.filterCounts()
+	return fmt.Sprintf("filter: %s  %d/%d", query, shown, total)
 }
 
 // remotePaneHint is what the remote pane header shows to the right of its
@@ -148,8 +168,11 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 	}
 	if len(pane.entries) == 0 {
 		label := "empty"
-		if pane.loading {
+		switch {
+		case pane.loading:
 			label = "loading…"
+		case strings.TrimSpace(pane.filter) != "":
+			label = "no matches for " + strings.TrimSpace(pane.filter)
 		}
 		rows = append(rows, fitRow(renderer.Styles.DetailMeta, width, label))
 	}

@@ -61,7 +61,7 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `Backspace`: parent directory
 - `Space`: select item
 - `Ctrl+A`: select all
-- `Esc`: clear selection or close overlay
+- `Esc`: clear an active pane filter, else clear selection, else close overlay
 - `u`: upload selected/local cursor item
 - `d`: download selected/remote cursor item
 - `e`: edit the highlighted file in an editor (writes it back if you change it).
@@ -76,6 +76,12 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   this uses OSC 52 so the paths land on *your* clipboard, not the server's;
   locally it prefers `wl-copy`/`pbcopy`/`xclip`/`xsel` and falls back to OSC 52
 - `x`: cancel active transfers
+- `/`: filter the focused pane's listing — type to narrow it live, `enter`
+  accepts the filter (normal keys resume, the listing stays narrowed), `esc`
+  clears it. A query with `*`, `?` or `[` is matched as a glob against each
+  name; anything else is a case-insensitive substring. `..` always stays
+  visible so you can still walk up. Per pane, and dropped when the pane moves
+  to another directory
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)

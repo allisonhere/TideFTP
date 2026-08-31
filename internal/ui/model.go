@@ -178,6 +178,18 @@ type filePane struct {
 	showHidden bool
 	selected   map[string]bool
 
+	// filter narrows the visible listing to entries whose name matches a
+	// query — a glob when the query carries glob metacharacters, otherwise a
+	// case-insensitive substring. allEntries is the full listing; entries is
+	// the filtered view the rest of the UI reads, so cursor, selection,
+	// rendering, and the mouse hit-test need no filter-awareness at all.
+	// filtering is true only while the query is being typed; filter can stay
+	// set after that, with the input closed. Both are per-directory and are
+	// dropped when the pane walks somewhere new.
+	allEntries []domain.Entry
+	filter     string
+	filtering  bool
+
 	// requestToken is the id of the most recent listing request. Replies
 	// carrying an older token are stale — two quick Enter presses put two
 	// listings in flight, and the slower one must not overwrite the newer
@@ -775,12 +787,27 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 
+	// A pane with its filter input open is a live text field: keystrokes edit
+	// the query rather than triggering the single-letter bindings below.
+	if fp := m.focusedFilePane(); fp != nil && fp.filtering {
+		cmd := m.handleFilterKey(msg)
+		m.clampCursors()
+		return m, cmd
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if m.conn != nil {
 			return m, tea.Sequence(closeConnCmd(m.conn), tea.Quit)
 		}
 		return m, tea.Quit
+	case "/":
+		if fp := m.focusedFilePane(); fp != nil {
+			fp.filtering = true
+			m.setStatus("filter: type to narrow · enter accepts · esc clears")
+		} else {
+			m.setStatus("filter: focus a file pane first")
+		}
 	case "ctrl+k":
 		m.openCommandPalette()
 	case "tab":
@@ -812,7 +839,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case " ":
 		m.toggleSelection()
 	case "esc":
-		m.clearSelection()
+		if fp := m.focusedFilePane(); fp != nil && fp.filterActive() {
+			fp.clearFilter(m.filePaneVisibleRows())
+			m.setStatus("filter cleared")
+		} else {
+			m.clearSelection()
+		}
 	case "ctrl+a":
 		m.selectAll()
 	case ".":
@@ -1202,6 +1234,17 @@ func (m *Model) applyListing(msg listingMsg) {
 	if msg.pane == paneIdentity {
 		m.prependPaneParent(&m.connectIdentityPane, m.localFS)
 		target.clamp(connectIdentityBrowserHeight - 1)
+	}
+	// The pane filter belongs to one directory: walking into a new one drops
+	// it, re-reading the same one (a refresh, a hidden-files toggle) keeps it
+	// and reapplies it to the fresh listing. The identity browser has no
+	// filter of its own.
+	if msg.pane != paneIdentity {
+		if msg.kind == listingNavigate {
+			target.filter, target.filtering = "", false
+		}
+		target.allEntries = target.entries
+		target.applyFilter(m.filePaneVisibleRows())
 	}
 	// Deliberately not clearing an error status here: refresh lists both
 	// panes, so a success on one would wipe a genuine failure reported by the

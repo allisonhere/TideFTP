@@ -9,8 +9,14 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
       5 MiB cap, refuses binaries. `vfs.FS` gained `ReadFile`/`WriteFile`.
       Editor picked in Settings (`auto` = $VISUAL/$EDITOR/`git core.editor`/PATH)
       or `editor` in `config.toml`.
-- [ ] **Filter / search within a pane** — type to narrow the visible listing
-      (glob or substring), like the help overlay's search. Essential for large dirs.
+- [x] **Filter / search within a pane** — `/` opens a live filter on the
+      focused pane: type to narrow the listing, `enter` accepts it (keys
+      resume, listing stays narrowed), `esc` clears it. Glob when the query
+      has `*?[`, case-insensitive substring otherwise; `..` always stays
+      visible. Per pane, dropped on navigation, kept across a refresh. The
+      pane keeps the full listing in `filePane.allEntries` and exposes the
+      filtered view as `entries`, so cursor/selection/render/mouse code is
+      unchanged (`internal/ui/filter.go`).
 - [ ] **Directory sync / mirror** — walk both trees, transfer only what differs by
       size/mtime, optionally prune extras. The apex of the recursive-queue +
       conflict-policy work. (`lftp mirror`.)

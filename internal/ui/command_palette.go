@@ -30,6 +30,7 @@ const (
 	commandEditFile
 	commandPreviewFile
 	commandCopyPath
+	commandFilter
 )
 
 type paletteCommand struct {
@@ -70,6 +71,9 @@ func (m Model) paletteCommands() []paletteCommand {
 	}
 	if hasCancelableTransfer(m.transfers) {
 		commands = append(commands, paletteCommand{id: commandCancelTransfers, title: "Cancel active transfers", hint: "stop current work"})
+	}
+	if pane := m.focusedFilePane(); pane != nil {
+		commands = append(commands, paletteCommand{id: commandFilter, title: "Filter listing", hint: "narrow the pane by glob or substring"})
 	}
 	if pane := m.focusedFilePane(); pane != nil && len(pane.actionEntries()) > 0 {
 		commands = append(commands,
@@ -215,6 +219,11 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		return m.startPreview()
 	case commandCopyPath:
 		return m.copySelectedPaths()
+	case commandFilter:
+		if pane := m.focusedFilePane(); pane != nil {
+			pane.filtering = true
+			m.setStatus("filter: type to narrow · enter accepts · esc clears")
+		}
 	}
 	return nil
 }

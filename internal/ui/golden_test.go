@@ -98,6 +98,16 @@ func TestGoldenHelpOverlay(t *testing.T) {
 	assertGolden(t, "help_overlay", ansi.Strip(model.View()))
 }
 
+func TestGoldenFilteredPane(t *testing.T) {
+	model := goldenModel(t)
+	model.focus = focusLocal
+	model.local.allEntries = model.local.entries
+	model.local.filter = "md"
+	model.local.filtering = true
+	model.local.applyFilter(model.filePaneVisibleRows())
+	assertGolden(t, "filtered_pane", ansi.Strip(model.View()))
+}
+
 func TestGoldenConnectFormOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model = press(t, model, runes("c"))
