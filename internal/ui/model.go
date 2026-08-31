@@ -53,6 +53,7 @@ const (
 	overlayFileAction
 	overlayServerList
 	overlayPreview
+	overlaySync
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -283,6 +284,9 @@ type Model struct {
 	// overlayConflict (some files already exist at their destination) is
 	// asking the user to confirm it. Nil the rest of the time.
 	preflight *preflightScan
+	// sync holds a computed directory-mirror plan while overlaySync asks the
+	// user to confirm it (see sync.go). Nil the rest of the time.
+	sync *syncPlan
 	// sessionConflictPolicy is set by the conflict overlay's "apply &
 	// remember" key. Once set, a future conflicting batch resolves with it
 	// automatically instead of prompting again. In-memory only — matches
@@ -650,6 +654,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPreflightScan(msg)
 		m.settleBottomOffset(wasAtBottom)
 		return m, nil
+	case syncScanMsg:
+		m.applySyncScan(msg)
+		return m, nil
+	case syncPruneMsg:
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("prune: removed %d, %d failed (%v)", msg.removed, msg.failed, msg.err))
+		} else if msg.removed > 0 {
+			m.setStatus(fmt.Sprintf("pruned %d extra item(s)", msg.removed))
+		}
+		return m, m.refresh()
 	case transfer.Event:
 		// Applying an event can finish a transfer, which frees a slot for the
 		// next queued one, which is why startQueuedTransfers runs here too.
@@ -744,6 +758,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayConflict {
 		return m, m.handleConflictKey(msg)
 	}
+	if m.overlay == overlaySync {
+		return m, m.handleSyncKey(msg)
+	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
@@ -829,6 +846,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.queueUpload()
 	case "d":
 		cmd = m.queueDownload()
+	case "M":
+		cmd = m.startSync()
 	case "e":
 		cmd = m.startEdit()
 	case "v":

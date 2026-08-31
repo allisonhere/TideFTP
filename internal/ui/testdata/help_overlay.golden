@@ -17,13 +17,13 @@
 │             │    esc                                   clear selection / cancel    │             │
 │             │    u                                                       upload    │             │
 │             │    d                                                     download    │             │
+│             │    M            mirror directory (sync changed files, opt. prune)    │             │
 │             │    r                                                      refresh    │             │
-│             │    n                                                   new folder    │             │
-╰─────────────│    f2                                                 rename item    │─────────────╯
-╭─────────────│    e                                     edit file in your editor    │─────────────╮
-│Transfers    │    v                                   preview file (text or hex)    │        queue│
+╰─────────────│    n                                                   new folder    │─────────────╯
+╭─────────────│    f2                                                 rename item    │─────────────╮
+│Transfers    │    e                                     edit file in your editor    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/36                                                       │ transferring│
+│↑ [========= │  Rows  1-18/37                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

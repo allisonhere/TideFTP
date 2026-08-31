@@ -615,6 +615,43 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "queue folder", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
 		return &overlay
+	case overlaySync:
+		if m.sync == nil {
+			return nil
+		}
+		plan := m.sync
+		w := 66
+		rows := []string{
+			renderer.Styles.DetailBody.Width(w).Render(syncDirectionLabel(plan.direction)),
+			renderer.Styles.DetailMeta.Width(w).Render(short(plan.srcRoot+"  →  "+plan.dstRoot, w)),
+			"",
+			renderer.Styles.DetailBody.Width(w).Render(fmt.Sprintf("%4d new       %10s", plan.newCount(), formatSize(plan.totalBytes))),
+			renderer.Styles.DetailBody.Width(w).Render(fmt.Sprintf("%4d updated", plan.updateCount())),
+			renderer.Styles.DetailMeta.Width(w).Render(fmt.Sprintf("%4d unchanged", plan.identical)),
+		}
+		if len(plan.prunePaths) > 0 {
+			state := "OFF — extras kept"
+			if plan.prune {
+				state = "ON — extras deleted"
+			}
+			rows = append(rows,
+				"",
+				renderer.Styles.DetailBody.Width(w).Render(fmt.Sprintf("%4d extra file(s), %d dir(s)   %s",
+					plan.pruneFileCount(), plan.pruneDirCount(), formatSize(plan.pruneBytes))),
+				renderer.Styles.DetailMeta.Width(w).Render("prune: "+state),
+			)
+		}
+		if plan.truncated {
+			rows = append(rows, "", renderer.Styles.DetailMeta.Width(w).Render("stopped early — more changes than shown"))
+		}
+		hints := []tideui.SoftHint{{Key: "enter", Label: "mirror"}}
+		if len(plan.prunePaths) > 0 {
+			hints = append(hints, tideui.SoftHint{Key: "p", Label: "toggle prune"})
+		}
+		hints = append(hints, tideui.SoftHint{Key: "esc", Label: "cancel"})
+		rows = append(rows, "", renderer.RenderSoftHints(w, hints...))
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "mirror directory", Width: w + 6, Content: renderer.RenderSoftBody(w+6, strings.Join(rows, "\n"))})
+		return &overlay
 	case overlayHostKey:
 		if m.hostKeyPrompt == nil {
 			return nil

@@ -11,9 +11,13 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
       or `editor` in `config.toml`.
 - [ ] **Filter / search within a pane** — type to narrow the visible listing
       (glob or substring), like the help overlay's search. Essential for large dirs.
-- [ ] **Directory sync / mirror** — walk both trees, transfer only what differs by
-      size/mtime, optionally prune extras. The apex of the recursive-queue +
-      conflict-policy work. (`lftp mirror`.)
+- [x] **Directory sync / mirror** — `M` mirrors the focused pane (or the
+      highlighted subdirectory) onto the other side. Walks both trees, queues
+      only files missing or differing by size / a newer mtime (2s skew
+      window), and shows a new/updated/unchanged plan to confirm. `p` arms
+      **prune**, deleting destination entries with no source counterpart
+      bottom-up (off by default). Copies reuse `commitScan`; see
+      `internal/ui/sync.go`.
 - [ ] **Queue persistence** — persist the transfer queue (XDG state dir) and offer
       to resume on next launch; the engine's Offset/ResumeFrom already supports
       mid-file resume.

@@ -75,6 +75,11 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `y`: copy the selection's full paths to the clipboard, one per line. Over SSH
   this uses OSC 52 so the paths land on *your* clipboard, not the server's;
   locally it prefers `wl-copy`/`pbcopy`/`xclip`/`xsel` and falls back to OSC 52
+- `M`: mirror the focused pane (or the directory under the cursor) onto the
+  other side. Walks both trees, queues only files that are missing or differ
+  by size / a newer mtime, and shows a plan — new, updated, unchanged — to
+  confirm. `p` in that overlay arms **prune**, which then also deletes
+  anything at the destination with no source counterpart (off by default).
 - `x`: cancel active transfers
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
