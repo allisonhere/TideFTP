@@ -3,6 +3,7 @@ package ftpsession
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"tideftp/internal/domain"
 	"tideftp/internal/transfer"
+	"tideftp/internal/vfs"
 )
 
 func ftpCtx(t *testing.T) context.Context {
@@ -90,6 +92,17 @@ func TestFSRenameRefusesExistingTarget(t *testing.T) {
 	}
 	if _, err := os.Stat(server.path("keep.txt")); err != nil {
 		t.Fatalf("keep.txt should still be there: %v", err)
+	}
+}
+
+func TestFSChmodIsUnsupported(t *testing.T) {
+	server := startFTPServer(t)
+	server.writeFile(t, "app.conf", []byte("x"))
+	fs := server.connect(t).FS()
+
+	err := fs.Chmod(ftpCtx(t), "/app.conf", 0o600)
+	if !errors.Is(err, vfs.ErrUnsupported) {
+		t.Fatalf("Chmod err = %v, want it to wrap vfs.ErrUnsupported", err)
 	}
 }
 

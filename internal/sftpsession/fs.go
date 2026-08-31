@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"sort"
 	"strings"
@@ -112,6 +113,13 @@ func (f *FS) Remove(ctx context.Context, targetPath string) error {
 		return nil
 	}
 	return f.client.RemoveDirectory(targetPath)
+}
+
+func (f *FS) Chmod(ctx context.Context, path string, mode fs.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.client.Chmod(vfs.CleanRemote(path), mode)
 }
 
 func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {

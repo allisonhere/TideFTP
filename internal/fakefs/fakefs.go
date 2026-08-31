@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
 	"sort"
 	"strings"
@@ -231,6 +232,37 @@ func (r *Remote) Remove(ctx context.Context, targetPath string) error {
 	r.entries[parent] = remaining
 	delete(r.entries, targetPath)
 	return nil
+}
+
+func (r *Remote) Chmod(ctx context.Context, targetPath string, mode fs.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	targetPath = clean(targetPath)
+	parent, name := path.Dir(targetPath), path.Base(targetPath)
+	children, ok := r.entries[parent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", parent)
+	}
+	for i, entry := range children {
+		if entry.Name != name {
+			continue
+		}
+		typeChar := "-"
+		switch entry.Kind {
+		case domain.EntryDir:
+			typeChar = "d"
+		case domain.EntrySymlink:
+			typeChar = "L"
+		}
+		// Rebuild the slice rather than write through children[i], whose
+		// backing array a handed-out listing may still be reading.
+		updated := append([]domain.Entry(nil), children...)
+		updated[i].Mode = typeChar + mode.Perm().String()[1:]
+		r.entries[parent] = updated
+		return nil
+	}
+	return fmt.Errorf("no such item: %s", targetPath)
 }
 
 func (r *Remote) ReadFile(ctx context.Context, filePath string) ([]byte, error) {

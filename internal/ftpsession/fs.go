@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
 	"sort"
 	"strings"
@@ -123,6 +124,18 @@ func (f *FS) Remove(ctx context.Context, targetPath string) error {
 		}
 		return conn.RemoveDir(targetPath)
 	})
+}
+
+// Chmod is not available over plain FTP: RFC 959 has no permission command,
+// and while many servers accept SITE CHMOD, jlaffaye/ftp exposes no way to
+// send it. The mode column for an FTP listing shows the entry kind rather
+// than permission bits anyway (see modeLabel), so there is nothing here to
+// edit.
+func (f *FS) Chmod(ctx context.Context, targetPath string, mode fs.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("chmod %s: %w", vfs.CleanRemote(targetPath), vfs.ErrUnsupported)
 }
 
 func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {

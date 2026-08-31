@@ -150,6 +150,9 @@ const (
 	// because the target name is taken; confirming it deletes that target
 	// first. It is only ever reached from the fileActionMsg handler.
 	fileActionRenameForce
+	// fileActionChmod changes the permission bits of every entry in
+	// prompt.entries to the octal mode typed into prompt.text.
+	fileActionChmod
 )
 
 type fileActionPrompt struct {
@@ -855,6 +858,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.openMkdirPrompt()
 	case "f2":
 		m.openRenamePrompt()
+	case "m":
+		m.openChmodPrompt()
 	case "delete":
 		m.openDeletePrompt()
 	case " ":

@@ -118,6 +118,21 @@ func TestGoldenSortedPane(t *testing.T) {
 	assertGolden(t, "sorted_pane", ansi.Strip(model.View()))
 }
 
+func TestGoldenChmodOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.focus = focusRemote
+	model.overlay = overlayFileAction
+	model.fileAction = &fileActionPrompt{
+		kind:    fileActionChmod,
+		pane:    paneRemote,
+		text:    "640",
+		cursor:  3,
+		oldName: "index.html",
+		entries: []domain.Entry{{Name: "index.html", Kind: domain.EntryFile, Mode: "-rw-r--r--"}},
+	}
+	assertGolden(t, "chmod_overlay", ansi.Strip(model.View()))
+}
+
 func TestGoldenConnectFormOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model = press(t, model, runes("c"))

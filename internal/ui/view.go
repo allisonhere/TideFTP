@@ -734,6 +734,22 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 					tideui.SoftHint{Key: "y/enter", Label: "replace"},
 					tideui.SoftHint{Key: "esc/n", Label: "cancel"}),
 			)
+		} else if prompt.kind == fileActionChmod {
+			runes := []rune(prompt.text)
+			cur := min(max(prompt.cursor, 0), len(runes))
+			shown := string(append(runes[:cur], append([]rune{'|'}, runes[cur:]...)...))
+			decoded := "?"
+			if mode, err := parseChmodMode(prompt.text); err == nil {
+				decoded = symbolicPerm(mode)
+			}
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(contentWidth).Render("chmod "+prompt.oldName),
+				renderer.Styles.DetailMeta.Width(contentWidth).Render("Mode  "+shown+"   "+decoded),
+				"",
+				renderer.RenderSoftHints(contentWidth,
+					tideui.SoftHint{Key: "enter", Label: "apply"},
+					tideui.SoftHint{Key: "esc", Label: "cancel"}),
+			)
 		} else if prompt.kind == fileActionDelete {
 			names := make([]string, 0, min(5, len(prompt.entries)))
 			for i, entry := range prompt.entries {

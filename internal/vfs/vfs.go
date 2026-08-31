@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"path"
 	"strings"
 
@@ -26,6 +27,11 @@ import (
 // already taken. The UI checks for it with errors.Is to offer an overwrite
 // confirmation rather than just surfacing the message.
 var ErrExists = errors.New("already exists")
+
+// ErrUnsupported is wrapped by an operation a backend cannot perform at all —
+// chmod over plain FTP, say, where the protocol offers no portable way to do
+// it. The UI reports it as a plain message rather than a failure to retry.
+var ErrUnsupported = errors.New("not supported by this server")
 
 type FS interface {
 	// List returns the entries in dirPath, omitting hidden ones unless
@@ -43,6 +49,11 @@ type FS interface {
 	Rename(ctx context.Context, oldPath, newPath string) error
 	// Remove deletes the file or empty directory at targetPath.
 	Remove(ctx context.Context, targetPath string) error
+	// Chmod sets the permission bits of the file or directory at path. Only
+	// the permission and setuid/setgid/sticky bits of mode are meaningful.
+	// A backend that cannot change permissions — plain FTP — wraps
+	// ErrUnsupported.
+	Chmod(ctx context.Context, path string, mode fs.FileMode) error
 	// ReadFile returns the whole contents of the file at path. Callers keep
 	// it to small files (the edit flow caps the size itself).
 	ReadFile(ctx context.Context, path string) ([]byte, error)

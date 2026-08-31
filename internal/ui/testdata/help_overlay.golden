@@ -23,7 +23,7 @@
 ╭─────────────│    S                                       reverse sort direction    │─────────────╮
 │Transfers    │    n                                                   new folder    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/39                                                       │ transferring│
+│↑ [========= │  Rows  1-18/40                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

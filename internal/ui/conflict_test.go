@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"io"
+	"io/fs"
 	"path"
 	"strings"
 	"testing"
@@ -31,6 +32,7 @@ func (f *conflictFS) Parent(current string) string                     { return 
 func (f *conflictFS) Mkdir(context.Context, string) error              { return nil }
 func (f *conflictFS) Rename(context.Context, string, string) error     { return nil }
 func (f *conflictFS) Remove(context.Context, string) error             { return nil }
+func (f *conflictFS) Chmod(context.Context, string, fs.FileMode) error { return nil }
 func (f *conflictFS) ReadFile(context.Context, string) ([]byte, error) { return nil, nil }
 func (f *conflictFS) Open(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil

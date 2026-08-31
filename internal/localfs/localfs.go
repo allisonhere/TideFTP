@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -98,6 +99,13 @@ func (FS) Remove(ctx context.Context, targetPath string) error {
 		return err
 	}
 	return os.Remove(targetPath)
+}
+
+func (FS) Chmod(ctx context.Context, path string, mode fs.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 func (FS) ReadFile(ctx context.Context, path string) ([]byte, error) {

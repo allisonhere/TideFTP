@@ -29,6 +29,7 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "S", label: "reverse sort direction"},
 	{section: "Act", key: "n", label: "new folder"},
 	{section: "Act", key: "f2", label: "rename item"},
+	{section: "Act", key: "m", label: "change permissions (chmod)"},
 	{section: "Act", key: "e", label: "edit file in your editor"},
 	{section: "Act", key: "v", label: "preview file (text or hex)"},
 	{section: "Act", key: "y", label: "copy path(s) to clipboard"},

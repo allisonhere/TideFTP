@@ -87,6 +87,11 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   `type`, and `..` stays on top. Per pane, kept across navigation, and the
   focused pane's order is saved as the startup default (`sort` in
   `config.toml`)
+- `m`: change permissions (chmod) on the selection or highlighted row. Enter
+  an octal mode (`644`, `0755`, `2775`); the prompt pre-fills the current
+  mode and echoes back the `rw-r--r--` it decodes to. Works on the local
+  pane and over SFTP; plain FTP has no portable permission command, so it
+  reports "not supported" there
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)

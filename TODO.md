@@ -34,8 +34,12 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 
 ## Tier 2 — server-admin essentials
 
-- [ ] **chmod / permissions edit** — `m` on a row to change the mode shown in the
-      listing. SFTP and FTP both support it.
+- [x] **chmod / permissions edit** — `m` opens an octal-mode prompt for the
+      selection or highlighted row, pre-filled with the current mode and
+      echoing the symbolic form back. `vfs.FS` gained `Chmod`; localfs and
+      SFTP implement it, FTP returns the new `vfs.ErrUnsupported` (no
+      portable permission command, and jlaffaye/ftp exposes no SITE CHMOD).
+      Multi-select applies one mode to every entry.
 - [ ] **Per-connection bookmarks** — favourite directories beyond the start path;
       jump straight to `/var/www` etc.
 - [ ] **Ignore patterns for recursive queue** — skip `.git`, `node_modules`,

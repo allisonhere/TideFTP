@@ -20,6 +20,8 @@ func fileActionLabel(kind fileActionKind) string {
 		return "replace"
 	case fileActionDelete:
 		return "delete"
+	case fileActionChmod:
+		return "chmod"
 	default:
 		return "file action"
 	}
@@ -33,6 +35,8 @@ func fileActionDoneLabel(kind fileActionKind) string {
 		return "renamed"
 	case fileActionDelete:
 		return "deleted"
+	case fileActionChmod:
+		return "permissions changed"
 	default:
 		return "done"
 	}
@@ -95,6 +99,39 @@ func (m *Model) openDeletePrompt() {
 	m.fileAction = &fileActionPrompt{kind: fileActionDelete, pane: paneID, entries: entries}
 	m.overlay = overlayFileAction
 	m.setStatus(fmt.Sprintf("delete %d item(s)?", len(entries)))
+}
+
+func (m *Model) openChmodPrompt() {
+	paneID, pane, ok := m.focusedMutablePane()
+	if !ok {
+		return
+	}
+	entries := pane.actionEntries()
+	if len(entries) == 0 {
+		m.setError("highlight or select item(s) to chmod")
+		return
+	}
+	prefill := modeStringToOctal(entries[0].Mode)
+	if prefill == "" {
+		prefill = "644"
+		if entries[0].IsDir() {
+			prefill = "755"
+		}
+	}
+	label := entries[0].Name
+	if len(entries) > 1 {
+		label = fmt.Sprintf("%d items", len(entries))
+	}
+	m.fileAction = &fileActionPrompt{
+		kind:    fileActionChmod,
+		pane:    paneID,
+		text:    prefill,
+		cursor:  len([]rune(prefill)),
+		oldName: label,
+		entries: entries,
+	}
+	m.overlay = overlayFileAction
+	m.setStatus("chmod " + label)
 }
 
 func (m *Model) handleFileActionKey(msg tea.KeyMsg) tea.Cmd {
@@ -179,6 +216,11 @@ func (m *Model) submitFileAction() tea.Cmd {
 			return nil
 		}
 		prompt.text = name
+	case fileActionChmod:
+		if _, err := parseChmodMode(prompt.text); err != nil {
+			m.setError(err.Error())
+			return nil
+		}
 	}
 	m.fileAction = nil
 	m.overlay = overlayNone
@@ -217,6 +259,20 @@ func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 					continue
 				}
 				if err = fs.Remove(ctx, fs.Child(base, entry.Name)); err != nil {
+					break
+				}
+			}
+		case fileActionChmod:
+			mode, perr := parseChmodMode(prompt.text)
+			if perr != nil {
+				err = perr
+				break
+			}
+			for _, entry := range prompt.entries {
+				if isParentDirEntry(entry) {
+					continue
+				}
+				if err = fs.Chmod(ctx, fs.Child(base, entry.Name), mode); err != nil {
 					break
 				}
 			}

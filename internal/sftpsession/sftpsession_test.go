@@ -126,6 +126,23 @@ func TestFSReadFileWriteFileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFSChmodChangesTheMode(t *testing.T) {
+	server := startTestServer(t)
+	server.writeFile(t, "deploy.sh", []byte("#!/bin/sh\n"))
+	fs := connect(t, server).FS()
+
+	if err := fs.Chmod(context.Background(), server.path("deploy.sh"), 0o750); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	info, err := os.Stat(server.path("deploy.sh"))
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o750 {
+		t.Fatalf("mode after Chmod = %o, want 750", got)
+	}
+}
+
 func TestFSOpenStreamsWithoutBuffering(t *testing.T) {
 	server := startTestServer(t)
 	body := bytes.Repeat([]byte("chunk\n"), 2048)

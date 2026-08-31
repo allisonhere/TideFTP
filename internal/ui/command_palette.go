@@ -33,6 +33,7 @@ const (
 	commandFilter
 	commandSortKey
 	commandSortReverse
+	commandChmod
 )
 
 type paletteCommand struct {
@@ -84,6 +85,7 @@ func (m Model) paletteCommands() []paletteCommand {
 	if pane := m.focusedFilePane(); pane != nil && len(pane.actionEntries()) > 0 {
 		commands = append(commands,
 			paletteCommand{id: commandRename, title: "Rename item", hint: "rename highlighted item"},
+			paletteCommand{id: commandChmod, title: "Change permissions", hint: "chmod the selection or highlight"},
 			paletteCommand{id: commandDelete, title: "Delete item(s)", hint: "delete selection or highlight"},
 		)
 		commands = append(commands, paletteCommand{id: commandCopyPath, title: "Copy path", hint: "copy selection's full path to the clipboard"})
@@ -217,6 +219,8 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		m.openMkdirPrompt()
 	case commandRename:
 		m.openRenamePrompt()
+	case commandChmod:
+		m.openChmodPrompt()
 	case commandDelete:
 		m.openDeletePrompt()
 	case commandEditFile:
