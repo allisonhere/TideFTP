@@ -56,7 +56,8 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 
 ## Keys
 
-- `Tab` / `Shift+Tab`: switch panes
+- `Tab` / `Shift+Tab`: cycle panes (local, remote, transfers)
+- `←` / `→` (or `h` / `l`): focus the local / remote pane
 - `Enter`: open directory
 - `Backspace`: parent directory
 - `Space`: select item
@@ -75,6 +76,11 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `y`: copy the selection's full paths to the clipboard, one per line. Over SSH
   this uses OSC 52 so the paths land on *your* clipboard, not the server's;
   locally it prefers `wl-copy`/`pbcopy`/`xclip`/`xsel` and falls back to OSC 52
+- `M`: mirror the focused pane (or the directory under the cursor) onto the
+  other side. Walks both trees, queues only files that are missing or differ
+  by size / a newer mtime, and shows a plan — new, updated, unchanged — to
+  confirm. `p` in that overlay arms **prune**, which then also deletes
+  anything at the destination with no source counterpart (off by default).
 - `x`: cancel active transfers
 - `/`: filter the focused pane's listing — type to narrow it live, `enter`
   accepts the filter (normal keys resume, the listing stays narrowed), `esc`

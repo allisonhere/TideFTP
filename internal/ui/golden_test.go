@@ -251,3 +251,27 @@ func TestGoldenPreflightOverlay(t *testing.T) {
 	}
 	assertGolden(t, "preflight_overlay", ansi.Strip(model.View()))
 }
+
+func TestGoldenSyncOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.overlay = overlaySync
+	overwrite := conflictOverwrite
+	model.sync = &syncPlan{
+		direction: domain.Upload,
+		srcRoot:   "/home/allie/projects/site",
+		dstRoot:   "/public_html/site",
+		copies: []preflightFile{
+			{name: "index.html", size: 8192},
+			{name: "app.js", size: 40000, conflict: &domain.Entry{Name: "app.js", Size: 39000}, resolution: &overwrite},
+		},
+		updates:    1,
+		identical:  118,
+		totalBytes: 48192,
+		prunePaths: []prunePath{
+			{path: "/public_html/site/old.css", name: "old.css"},
+			{path: "/public_html/site/legacy", name: "legacy", isDir: true},
+		},
+		pruneBytes: 5120,
+	}
+	assertGolden(t, "sync_overlay", ansi.Strip(model.View()))
+}

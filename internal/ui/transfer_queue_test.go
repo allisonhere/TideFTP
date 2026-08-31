@@ -216,3 +216,35 @@ func TestADoneTransferAgesOutOfTheQueueTabIntoHistory(t *testing.T) {
 		t.Fatalf("History tab rows = %+v, want the finished transfer", rows)
 	}
 }
+
+func TestDrainingTheQueueRelistsThePanesSoNewFilesShow(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneRemote, "/public_html"))
+	before := model.remote.requestToken
+
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, BytesTotal: 100},
+		{ID: 2, Status: domain.Active, BytesTotal: 100},
+	}
+
+	// A progress tick never relists.
+	next, cmd := model.Update(transfer.Event{ID: 1, Kind: transfer.Progress, BytesDone: 50})
+	model = settle(t, next.(Model), cmd)
+	if model.remote.requestToken != before {
+		t.Fatalf("a progress event relisted the panes")
+	}
+
+	// One of two transfers completing leaves the queue busy — still no relist.
+	next, cmd = model.Update(transfer.Event{ID: 1, Kind: transfer.Completed, BytesDone: 100})
+	model = settle(t, next.(Model), cmd)
+	if model.remote.requestToken != before {
+		t.Fatalf("relisted while transfer 2 was still active")
+	}
+
+	// The last one completing drains the queue and triggers the relist.
+	next, cmd = model.Update(transfer.Event{ID: 2, Kind: transfer.Completed, BytesDone: 100})
+	model = settle(t, next.(Model), cmd)
+	if model.remote.requestToken == before {
+		t.Fatalf("queue drained but the panes were never relisted")
+	}
+}

@@ -151,6 +151,42 @@ func TestTabCyclesThroughAllThreePanesBothWays(t *testing.T) {
 	}
 }
 
+func TestLeftRightAndHLMoveBetweenTheTopPanes(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+
+	cases := []struct {
+		from focusPane
+		key  tea.KeyMsg
+		want focusPane
+	}{
+		{focusRemote, tea.KeyMsg{Type: tea.KeyLeft}, focusLocal},
+		{focusLocal, tea.KeyMsg{Type: tea.KeyRight}, focusRemote},
+		{focusRemote, runes("h"), focusLocal},
+		{focusLocal, runes("l"), focusRemote},
+		{focusQueue, runes("h"), focusLocal}, // also a quick way back up
+		{focusQueue, tea.KeyMsg{Type: tea.KeyRight}, focusRemote},
+		{focusLocal, runes("h"), focusLocal}, // already there: no-op
+	}
+	for _, c := range cases {
+		model.focus = c.from
+		model = press(t, model, c.key)
+		if model.focus != c.want {
+			t.Fatalf("%v + %v = %v, want %v", c.from, c.key, model.focus, c.want)
+		}
+	}
+}
+
+func TestBackspaceStillGoesToParentAfterHWasRebound(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusRemote
+	model = settle(t, model, model.navigateTo(paneRemote, "/public_html/assets"))
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyBackspace})
+	if model.remote.path != "/public_html" {
+		t.Fatalf("backspace left the pane at %q, want /public_html", model.remote.path)
+	}
+}
+
 // TestSixOpensTheStatsTab confirms the number key alongside 1-5 reaches the
 // Stats tab and its cursor/scroll are inert, the same treatment tabLog gets.
 func TestSixOpensTheStatsTab(t *testing.T) {

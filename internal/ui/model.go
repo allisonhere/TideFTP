@@ -53,6 +53,7 @@ const (
 	overlayFileAction
 	overlayServerList
 	overlayPreview
+	overlaySync
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -305,6 +306,9 @@ type Model struct {
 	// overlayConflict (some files already exist at their destination) is
 	// asking the user to confirm it. Nil the rest of the time.
 	preflight *preflightScan
+	// sync holds a computed directory-mirror plan while overlaySync asks the
+	// user to confirm it (see sync.go). Nil the rest of the time.
+	sync *syncPlan
 	// sessionConflictPolicy is set by the conflict overlay's "apply &
 	// remember" key. Once set, a future conflicting batch resolves with it
 	// automatically instead of prompting again. In-memory only — matches
@@ -680,6 +684,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPreflightScan(msg)
 		m.settleBottomOffset(wasAtBottom)
 		return m, nil
+	case syncScanMsg:
+		m.applySyncScan(msg)
+		return m, nil
+	case syncPruneMsg:
+		if msg.err != nil {
+			m.setError(fmt.Sprintf("prune: removed %d, %d failed (%v)", msg.removed, msg.failed, msg.err))
+		} else if msg.removed > 0 {
+			m.setStatus(fmt.Sprintf("pruned %d extra item(s)", msg.removed))
+		}
+		return m, m.refresh()
 	case transfer.Event:
 		// Applying an event can finish a transfer, which frees a slot for the
 		// next queued one, which is why startQueuedTransfers runs here too.
@@ -687,10 +701,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		verify := m.applyTransferEvent(msg)
 		m.startQueuedTransfers()
 		m.settleBottomOffset(wasAtBottom)
-		if !m.connected() {
-			return m, verify
+		// When a terminal event empties the queue, re-list the panes so the
+		// files a batch just moved actually appear at their destination
+		// without the user navigating away and back. Only on drain, so a big
+		// mirror lists once at the end rather than after every file.
+		var settle tea.Cmd
+		if msg.Terminal() && !m.queueBusy() {
+			settle = m.relistPanes()
 		}
-		return m, tea.Batch(verify, waitForTransferEvent(m.engine.Events()))
+		if !m.connected() {
+			return m, tea.Batch(verify, settle)
+		}
+		return m, tea.Batch(verify, settle, waitForTransferEvent(m.engine.Events()))
 	case verifyDoneMsg:
 		wasAtBottom := m.isAtBottomPane()
 		m.applyVerifyDone(msg)
@@ -774,6 +796,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayConflict {
 		return m, m.handleConflictKey(msg)
 	}
+	if m.overlay == overlaySync {
+		return m, m.handleSyncKey(msg)
+	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
@@ -852,8 +877,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.moveCursor(10)
 	case "enter":
 		cmd = m.activateCursor()
-	case "backspace", "h":
+	case "backspace":
 		cmd = m.parentDir()
+	case "left", "h":
+		m.focus = focusLocal
+	case "right", "l":
+		m.focus = focusRemote
 	case "n":
 		m.openMkdirPrompt()
 	case "f2":
@@ -887,6 +916,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.queueUpload()
 	case "d":
 		cmd = m.queueDownload()
+	case "M":
+		cmd = m.startSync()
 	case "e":
 		cmd = m.startEdit()
 	case "v":
@@ -1201,11 +1232,31 @@ func (m Model) connected() bool {
 // refresh re-reads both panes in place, keeping cursors and selections.
 func (m *Model) refresh() tea.Cmd {
 	m.setStatus("refreshing")
+	return m.relistPanes()
+}
+
+// relistPanes re-reads both panes in place without touching the status line,
+// for the automatic refresh after a transfer batch finishes — see the
+// transfer.Event handler. A completed upload's new files, or a completed
+// download's, only show up once the destination directory is listed again;
+// doing it here saves the user the manual "leave the directory and come
+// back" they would otherwise need.
+func (m *Model) relistPanes() tea.Cmd {
 	cmds := []tea.Cmd{m.requestListing(paneLocal, m.local.path, listingRefresh)}
 	if m.connected() {
 		cmds = append(cmds, m.requestListing(paneRemote, m.remote.path, listingRefresh))
 	}
 	return tea.Batch(cmds...)
+}
+
+// queueBusy reports whether any transfer is still queued or running.
+func (m Model) queueBusy() bool {
+	for _, t := range m.transfers {
+		if t.Status == domain.Queued || t.Status == domain.Active {
+			return true
+		}
+	}
+	return false
 }
 
 // requestListing issues a List for dirPath and returns the command that runs

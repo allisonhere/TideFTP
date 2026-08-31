@@ -21,6 +21,7 @@ const (
 	commandSettings
 	commandUpload
 	commandDownload
+	commandMirror
 	commandCancelTransfers
 	commandResetLayout
 	commandHelp
@@ -71,6 +72,9 @@ func (m Model) paletteCommands() []paletteCommand {
 	}
 	if m.connected() && len(m.remote.actionEntries()) > 0 {
 		commands = append(commands, paletteCommand{id: commandDownload, title: "Download selected", hint: "queue remote selection"})
+	}
+	if _, ok := m.focusedPaneID(); ok && m.connected() {
+		commands = append(commands, paletteCommand{id: commandMirror, title: "Mirror directory", hint: "sync changed files to the other pane, optionally prune"})
 	}
 	if hasCancelableTransfer(m.transfers) {
 		commands = append(commands, paletteCommand{id: commandCancelTransfers, title: "Cancel active transfers", hint: "stop current work"})
@@ -206,6 +210,8 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		return m.queueUpload()
 	case commandDownload:
 		return m.queueDownload()
+	case commandMirror:
+		return m.startSync()
 	case commandCancelTransfers:
 		m.cancelActiveTransfers()
 	case commandResetLayout:
