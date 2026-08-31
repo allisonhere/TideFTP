@@ -1113,6 +1113,32 @@ func TestFileActionDeletesSelectedItemsAfterConfirm(t *testing.T) {
 	}
 }
 
+func TestFileActionDeletesANonEmptyDirectoryAndItsContents(t *testing.T) {
+	local := fakefs.NewRemote() // /public_html/assets holds three files
+	model := loadedModelOver(t, local, fakefs.NewRemote(), newScriptedEngine())
+	model = settle(t, model, model.navigateTo(paneLocal, "/public_html"))
+	model.focus = focusLocal
+	model.local.selected = map[string]bool{"assets": true}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyDelete})
+	if model.overlay != overlayFileAction {
+		t.Fatalf("delete did not open the confirmation overlay")
+	}
+	model = press(t, model, runes("y"))
+
+	if model.statusErr {
+		t.Fatalf("recursive delete reported an error: %q", model.status)
+	}
+	for _, entry := range model.local.entries {
+		if entry.Name == "assets" {
+			t.Fatalf("the non-empty directory is still listed: %+v", model.local.entries)
+		}
+	}
+	if _, err := local.List(context.Background(), "/public_html/assets", true); err == nil {
+		t.Fatalf("the deleted directory still lists — its contents survived")
+	}
+}
+
 func TestPaneStaysUsableWhileLoading(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusRemote

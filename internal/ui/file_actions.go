@@ -198,7 +198,14 @@ func validFileActionName(name string) bool {
 
 func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
+		// A recursive delete can visit thousands of entries over a slow link,
+		// so it gets the longer walk budget; the single-shot actions keep the
+		// tight one so a hung rename or mkdir surfaces quickly.
+		timeout := listTimeout
+		if prompt.kind == fileActionDelete {
+			timeout = preflightScanTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		var err error
 		newName := strings.TrimSpace(prompt.text)
@@ -216,11 +223,46 @@ func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 				if isParentDirEntry(entry) {
 					continue
 				}
-				if err = fs.Remove(ctx, fs.Child(base, entry.Name)); err != nil {
+				target := fs.Child(base, entry.Name)
+				if entry.IsDir() {
+					err = removeTree(ctx, fs, target)
+				} else {
+					err = fs.Remove(ctx, target)
+				}
+				if err != nil {
 					break
 				}
 			}
 		}
 		return fileActionMsg{kind: prompt.kind, pane: prompt.pane, err: err, oldName: prompt.oldName, newName: newName}
 	}
+}
+
+// removeTree deletes root and everything under it, depth-first: every file
+// and subdirectory goes before the directory that holds it, because
+// vfs.FS.Remove — like rmdir — only takes an empty directory. Hidden
+// entries are included; symlinks are removed as the link, never followed. A
+// listing or delete that fails aborts with that error rather than leaving a
+// half-emptied tree reported as a clean delete.
+func removeTree(ctx context.Context, fs vfs.FS, root string) error {
+	entries, err := fs.List(ctx, root, true)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if isParentDirEntry(entry) {
+			continue
+		}
+		child := fs.Child(root, entry.Name)
+		if entry.IsDir() {
+			if err := removeTree(ctx, fs, child); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := fs.Remove(ctx, child); err != nil {
+			return err
+		}
+	}
+	return fs.Remove(ctx, root)
 }

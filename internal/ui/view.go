@@ -747,15 +747,23 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			)
 		} else if prompt.kind == fileActionDelete {
 			names := make([]string, 0, min(5, len(prompt.entries)))
+			hasDir := false
 			for i, entry := range prompt.entries {
-				if i >= 5 {
-					break
+				if entry.IsDir() {
+					hasDir = true
 				}
-				names = append(names, entry.Name)
+				if i < 5 {
+					names = append(names, entry.Name)
+				}
 			}
 			rows = append(rows,
 				renderer.Styles.DetailBody.Width(contentWidth).Render(fmt.Sprintf("Delete %d item(s)?", len(prompt.entries))),
 				renderer.Styles.DetailMeta.Width(contentWidth).Render(strings.Join(names, ", ")),
+			)
+			if hasDir {
+				rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("a folder is removed with everything inside it"))
+			}
+			rows = append(rows,
 				"",
 				renderer.RenderSoftHints(contentWidth,
 					tideui.SoftHint{Key: "y/enter", Label: "delete"},
