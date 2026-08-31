@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatTheDock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    --ground:    #eef2f4;
+    --surface:   #ffffff;
+    --surface-2: #e2e9ec;
+    --ink:       #121e24;
+    --ink-dim:   #4d6570;
+    --accent:    #1a7ba6;
+    --line:      #d3dfe4;
+    --ok:        #1c8a5f;
+    --warn:      #b06a12;
+    --glow: 0 0% 0% / 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #0b1519;
+      --surface:   #0f2026;
+      --surface-2: #163037;
+      --ink:       #e0eef2;
+      --ink-dim:   #86a1ab;
+      --accent:    #5cbce6;
+      --line:      #21404a;
+      --ok:        #56cf98;
+      --warn:      #e6ab5e;
+      --glow: 200 65% 60% / 0.15;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0b1519; --surface:#0f2026; --surface-2:#163037;
+    --ink:#e0eef2; --ink-dim:#86a1ab; --accent:#5cbce6; --line:#21404a;
+    --ok:#56cf98; --warn:#e6ab5e; --glow: 200 65% 60% / 0.15;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width: 74ch; margin: 0 auto; padding: 0 24px; }
+  .wide { max-width: 110ch; margin: 0 auto; padding: 0 24px; }
+  h1,h2,h3 { font-family:"Zilla Slab",Georgia,serif; font-weight:700; text-wrap:balance; line-height:1.12; margin:0; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  p code, li code { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.85em; background:color-mix(in oklab,var(--accent) 14%,transparent); color:var(--accent); padding:1px 5px; border-radius:4px; }
+
+  .eyebrow { font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500; letter-spacing:.19em; text-transform:uppercase; color:var(--accent); margin:0 0 18px; }
+  .rule { max-width:110ch; margin:92px auto; padding:0 24px; display:flex; align-items:center; gap:12px; color:var(--line); font-family:"IBM Plex Mono",monospace; font-size:13px; }
+  .rule::before,.rule::after { content:""; height:1px; background:var(--line); flex:1; }
+  .rule span { color:var(--ink-dim); letter-spacing:.12em; }
+
+  header.hero { padding: 84px 0 32px; }
+  .brand { display:flex; align-items:baseline; gap:14px; font-family:"Zilla Slab",Georgia,serif; font-weight:700; font-size:clamp(42px,8.4vw,74px); letter-spacing:-0.01em; margin:0 0 8px; }
+  .brand .wave { color: var(--accent); font-weight: 500; }
+  .lede { font-size: clamp(19px,2.6vw,23px); max-width: 48ch; margin: 18px 0 0; }
+  .lede b { color: var(--accent); font-weight: 600; }
+  .cta-row { display:flex; flex-wrap:wrap; gap:12px; margin-top:32px; }
+  .btn { font-family:"IBM Plex Mono",monospace; font-size:14px; font-weight:500; padding:12px 20px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink); text-decoration:none; display:inline-flex; align-items:center; gap:9px; transition:transform .12s ease,border-color .12s ease; }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--ground); border-color: var(--accent); font-weight:600; }
+  .btn .k { opacity:.55; }
+
+  .term {
+    --t-bg:#091519; --t-head:#0d1f24; --t-ink:#cfe6ec; --t-dim:#6b8b95; --t-cyan:#5cbce6;
+    --t-ok:#56cf98; --t-warn:#e6ab5e; --t-line:#1c3a43; --t-sel:#123037;
+    margin: 42px auto 0; max-width: 110ch; background: var(--t-bg); border:1px solid var(--t-line);
+    border-radius: 12px; overflow: hidden; color: var(--t-ink);
+    font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; font-size:13px; line-height:1.7;
+    box-shadow: 0 24px 60px -24px hsl(200 45% 6% / .55), 0 0 0 1px hsl(var(--glow));
+  }
+  .term .titlebar { display:flex; align-items:center; gap:8px; padding:9px 14px; background:var(--t-head); border-bottom:1px solid var(--t-line); color:var(--t-dim); font-size:12px; }
+  .term .titlebar i { width:10px; height:10px; border-radius:50%; background:var(--t-line); }
+  .term .titlebar i:first-child{ background:#dd7a6b; } .term .titlebar i:nth-child(2){ background:var(--t-warn); } .term .titlebar i:nth-child(3){ background:var(--t-ok); }
+  .term .fleet { padding:7px 14px; border-bottom:1px solid var(--t-line); color:var(--t-dim); }
+  .term .fleet b { color:var(--t-cyan); font-weight:500; }
+  .term .fleet .up { color:var(--t-ok); }
+  .term .fleet .bad { color:var(--t-warn); }
+  .term .grid { display:grid; grid-template-columns: 26% 1fr; }
+  .term .hosts { border-right:1px solid var(--t-line); padding:8px 0; }
+  .term .hosts div { padding:1px 14px; }
+  .term .hosts .on { background:var(--t-sel); color:var(--t-cyan); }
+  .term .conts { padding:8px 0; }
+  .term .c { display:grid; grid-template-columns: 12px 1fr 66px 44px; gap:9px; align-items:center; padding:2px 14px; }
+  .term .c .dot { color:var(--t-ok); }
+  .term .c.bad .dot { color:var(--t-warn); }
+  .term .c .nm { color:var(--t-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .term .c.bad .nm { color:var(--t-warn); }
+  .term .c .spark { color:var(--t-cyan); letter-spacing:1px; font-size:11px; }
+  .term .c.bad .spark { color:var(--t-warn); }
+  .term .c .pc { color:var(--t-dim); text-align:right; font-size:12px; }
+  .term .status { display:flex; justify-content:space-between; padding:6px 14px; background:var(--t-head); border-top:1px solid var(--t-line); color:var(--t-dim); font-size:12px; }
+  .term .status .hl { color:var(--t-cyan); }
+  .cursor { display:inline-block; width:7px; height:1.05em; background:var(--t-cyan); vertical-align:-0.18em; margin-left:2px; animation:blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  h2 { font-size: clamp(28px,4.4vw,38px); margin-bottom: 6px; }
+  .section-lede { color: var(--ink-dim); max-width: 56ch; margin: 0 0 34px; }
+  .thesis p { font-size: 20px; max-width: 54ch; }
+  .thesis strong { font-weight: 600; }
+
+  .fgroup { margin-top: 40px; }
+  .fgroup > h3 { font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:500; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+  .fgrid { display:grid; gap:22px 28px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .feat h4 { font-family:"Zilla Slab",Georgia,serif; font-size:19px; font-weight:500; margin:0 0 4px; }
+  .feat p { margin:0; color:var(--ink-dim); font-size:15px; line-height:1.55; }
+  .feat .key { font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--accent); background:color-mix(in oklab,var(--accent) 13%,transparent); padding:1px 6px; border-radius:4px; margin-left:6px; }
+
+  .clip { background: var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:26px 28px; margin-top:38px; }
+  .clip h3 { font-family:"Zilla Slab",serif; font-size:22px; margin:0 0 8px; }
+  .clip .steps { display:grid; gap:10px; margin:16px 0 0; padding:0; list-style:none; counter-reset:s; }
+  .clip .steps li { position:relative; padding-left:34px; color:var(--ink-dim); }
+  .clip .steps li::before { counter-increment:s; content:counter(s); position:absolute; left:0; top:0; font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--accent); border:1px solid var(--accent); border-radius:5px; width:20px; height:20px; display:grid; place-items:center; }
+  .clip .steps li b { color: var(--ink); font-weight:600; }
+
+  .keys { margin-top: 32px; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .keys table { border-collapse: collapse; width: 100%; font-family:"IBM Plex Mono",monospace; font-size:13.5px; }
+  .keys td { padding: 9px 16px; border-bottom: 1px solid var(--line); }
+  .keys tr:last-child td { border-bottom: 0; }
+  .keys td:first-child { color: var(--accent); white-space: nowrap; width: 1%; }
+  .keys td:last-child { color: var(--ink-dim); }
+
+  .install .card { background: var(--surface); border:1px solid var(--line); border-radius:10px; padding:22px 24px; margin-top:22px; }
+  .install h4 { font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:500; color:var(--ink-dim); letter-spacing:.05em; text-transform:uppercase; margin:0 0 12px; }
+  pre.sh { margin:0; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:13px; line-height:1.75; color:var(--ink); overflow-x:auto; white-space:pre; }
+  pre.sh .p { color: var(--accent); user-select: none; }
+  pre.sh .c { color: var(--ink-dim); }
+
+  .not ul { list-style:none; margin:20px 0 0; padding:0; display:grid; gap:14px; }
+  .not li { padding-left:26px; position:relative; color:var(--ink-dim); max-width:62ch; }
+  .not li::before { content:"—"; position:absolute; left:0; top:0; color:var(--warn); font-family:"IBM Plex Mono",monospace; }
+  .not li b { color:var(--ink); font-weight:600; }
+
+  footer { margin-top:108px; border-top:1px solid var(--line); padding:40px 0 70px; color:var(--ink-dim); font-size:14px; }
+  footer .wide { display:flex; flex-wrap:wrap; gap:8px 26px; align-items:baseline; }
+  footer .mono { font-family:"IBM Plex Mono",monospace; font-size:12.5px; }
+  footer .grow { flex:1; }
+
+  .reveal { opacity:0; transform:translateY(14px); }
+  .reveal.in { opacity:1; transform:none; transition:opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  @media (prefers-reduced-motion: reduce) { .reveal,.reveal.in{opacity:1;transform:none;transition:none;} .cursor{animation:none;} }
+  @media (max-width: 640px) { .term { font-size:11.5px; } .term .grid { grid-template-columns: 1fr; } .term .hosts { border-right:0; border-bottom:1px solid var(--t-line); } .rule { margin:64px auto; } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wide">
+    <p class="eyebrow">Terminal client for Docker &amp; Compose</p>
+    <h1 class="brand"><span class="wave">≈</span>WhatTheDock</h1>
+    <p class="lede">The stuff you do with containers all the time — <b>see, log, restart, recreate</b> — across local and remote hosts, on one screen.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/allisonhere/whatthedock">View on GitHub</a>
+      <a class="btn" href="#install"><span class="k">$</span> Install</a>
+    </div>
+
+    <div class="term" role="img" aria-label="WhatTheDock's dashboard: a fleet summary line, a list of Docker hosts on the left, and a list of containers with status dots, CPU sparklines and percentages — one worker container flagged as restarting.">
+      <div class="titlebar"><i></i><i></i><i></i><span>&nbsp;whatthedock — dashboard</span></div>
+      <div class="fleet"><b>local</b> &nbsp; <span class="up">3 running</span> &nbsp; <span class="bad">1 restarting</span> &nbsp; 12 images &nbsp; 4 volumes</div>
+      <div class="grid">
+        <div class="hosts">
+          <div class="on">local</div>
+          <div>&nbsp;staging-1</div>
+          <div>&nbsp;prod-eu&nbsp;<span style="color:var(--t-dim)">(ssh)</span></div>
+          <div>&nbsp;Catalog</div>
+        </div>
+        <div class="conts">
+          <div class="c"><span class="dot">●</span><span class="nm">web</span><span class="spark">▁▂▂▃▂▁▂</span><span class="pc">0.4%</span></div>
+          <div class="c"><span class="dot">●</span><span class="nm">db</span><span class="spark">▂▃▃▄▅▄▃</span><span class="pc">2.1%</span></div>
+          <div class="c"><span class="dot">●</span><span class="nm">cache</span><span class="spark">▁▁▂▁▁▁▂</span><span class="pc">0.1%</span></div>
+          <div class="c bad"><span class="dot">◍</span><span class="nm">worker</span><span class="spark">▅▂▆▁▅▂▆</span><span class="pc">×3</span></div>
+        </div>
+      </div>
+      <div class="status"><span>&nbsp;worker exited 137 — restarting &nbsp; press <span class="hl">p</span> for problems<span class="cursor"></span></span><span>l logs&nbsp;&nbsp;s stop&nbsp;&nbsp;? help&nbsp;</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="rule"><span>the idea</span></div>
+
+<section class="thesis">
+  <div class="wrap">
+    <p>If <code>docker ps</code> works on your machine, WhatTheDock has a decent shot at working too. It uses Docker's normal defaults and puts the everyday operations — <strong>logs, restarts, edits, host switches</strong> — one or two keystrokes away instead of a shell history search.</p>
+  </div>
+</section>
+
+<div class="rule"><span>what it does</span></div>
+
+<section>
+  <div class="wide">
+    <h2 class="reveal">The everyday operations</h2>
+    <p class="section-lede reveal">Not a Docker course — the handful of things you actually reach for.</p>
+
+    <div class="fgroup reveal">
+      <h3>See it</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>What's running, at a glance</h4><p>A fleet summary line, then every container with a status dot and a per-container CPU / memory / network sparkline row.</p></div>
+        <div class="feat"><h4>Colour-coded logs<span class="key">l &nbsp; L</span></h4><p>Filter to errors, warnings, info or all; jump to the end and follow live; page back through history; copy the visible filtered lines.</p></div>
+        <div class="feat"><h4>A problems pane<span class="key">p</span></h4><p>Restart loops and unhealthy containers surfaced together — and <code>a</code> asks a configured AI provider to analyse the selected one.</p></div>
+        <div class="feat"><h4>Stats graphs<span class="key">g</span></h4><p>CPU, memory and network over time when a sparkline isn't enough.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Change it</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Start, stop, recreate<span class="key">s &nbsp; Alt+r &nbsp; u</span></h4><p>Toggle a container, restart it, or <code>u</code> to pull the latest image and recreate it in place.</p></div>
+        <div class="feat"><h4>Create &amp; edit with a live preview<span class="key">n &nbsp; m</span></h4><p>A form for standalone containers, Compose services, or whole stacks — with the generated YAML shown as you type, or edit the YAML directly.</p></div>
+        <div class="feat"><h4>Clone<span class="key">C</span></h4><p>Duplicate a container or service as a starting point for the next one.</p></div>
+        <div class="feat"><h4>Shell in<span class="key">e</span></h4><p>Drop straight into a running container.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Move it between hosts</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Local and remote, one list</h4><p>Manage several Docker hosts — local sockets and SSH — from the same screen, Compose reads and writes included.</p></div>
+        <div class="feat"><h4>Graceful host control</h4><p>Shut down or reboot a host from inside the app, cleanly.</p></div>
+      </div>
+    </div>
+
+    <div class="clip reveal">
+      <h3>The Container Clipboard</h3>
+      <p style="color:var(--ink-dim); max-width:60ch; margin:0">Copy a running container's whole configuration off one host and recreate it on another — no hand-copied <code>docker run</code> flags.</p>
+      <ol class="steps">
+        <li>On the source host, select the container and press <b><code>y</code></b> to yank its config.</li>
+        <li>Switch to the target host in the host list.</li>
+        <li>Press <b><code>P</code></b> to paste — WhatTheDock recreates it there.</li>
+      </ol>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>The Compose catalog</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>A library you keep</h4><p>Hold onto Compose files, edit them safely, add notes, and later make one live on any local or remote host.</p></div>
+        <div class="feat"><h4>Practical, not magical</h4><p>A single-service file edits as a service; a multi-service file is a stack; editing a stack row edits the whole file. It tells you which it's doing.</p></div>
+      </div>
+    </div>
+
+    <div class="keys reveal">
+      <table>
+        <tr><td>j / k &nbsp;·&nbsp; Tab</td><td>move &nbsp;·&nbsp; cross panes</td></tr>
+        <tr><td>l / L &nbsp;·&nbsp; p &nbsp;·&nbsp; g</td><td>logs &nbsp;·&nbsp; problems &nbsp;·&nbsp; stats</td></tr>
+        <tr><td>s &nbsp;·&nbsp; Alt+r &nbsp;·&nbsp; u</td><td>start·stop &nbsp;·&nbsp; restart &nbsp;·&nbsp; pull &amp; recreate</td></tr>
+        <tr><td>n / m &nbsp;·&nbsp; C &nbsp;·&nbsp; D</td><td>create / edit &nbsp;·&nbsp; clone &nbsp;·&nbsp; delete</td></tr>
+        <tr><td>y / P &nbsp;·&nbsp; e</td><td>yank / paste config &nbsp;·&nbsp; shell in</td></tr>
+        <tr><td>/ &nbsp;·&nbsp; Ctrl+K &nbsp;·&nbsp; ?</td><td>filter &nbsp;·&nbsp; command palette &nbsp;·&nbsp; searchable help</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="rule" id="install"><span>install</span></div>
+
+<section class="install">
+  <div class="wrap">
+    <h2 class="reveal">Get it</h2>
+    <p class="section-lede reveal">The installer checks the binary runs, then drops it in <code>/usr/local/bin</code> (or <code>~/.local/bin</code> if that's not writable).</p>
+    <div class="card reveal">
+      <h4>One line</h4>
+<pre class="sh"><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/allisonhere/whatthedock/main/scripts/install.sh | sh</pre>
+    </div>
+    <div class="card reveal">
+      <h4>From source</h4>
+<pre class="sh"><span class="p">$ </span>go install github.com/allisonhere/whatthedock/cmd/whatthedock@latest</pre>
+    </div>
+    <div class="card reveal">
+      <h4>Kick the tyres without Docker</h4>
+<pre class="sh"><span class="p">$ </span>whatthedock --demo</pre>
+    </div>
+  </div>
+</section>
+
+<div class="rule"><span>the honest part</span></div>
+
+<section class="not">
+  <div class="wrap">
+    <h2 class="reveal">Where it's at</h2>
+    <ul class="reveal">
+      <li><b>Early, but the main workflow is usable.</b> See, log, start/stop/edit/clone/recreate, multi-host and Compose all work today.</li>
+      <li><b>It follows Docker's defaults.</b> No custom socket dance — if <code>docker ps</code> works, this should.</li>
+      <li><b>Compose support is scoped.</b> Service and stack edits, catalog, and <code>docker compose</code> runs on local and SSH hosts — not every exotic Compose feature.</li>
+      <li><b>AI analysis is opt-in</b> and only runs on the problem you press <code>a</code> on, after you configure a provider.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wide">
+    <span class="mono">≈ WhatTheDock</span>
+    <span>Part of the <a href="../">Tide family</a> · Go · Bubble Tea</span>
+    <span class="grow"></span>
+    <a class="mono" href="https://github.com/allisonhere/whatthedock">github.com/allisonhere/whatthedock</a>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  })();
+</script>
+
+</body>
+</html>

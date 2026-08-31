@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TideFTP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+
+    /* Sea-glass light: cool off-white with a green bias, deep-tide accent. */
+    --ground:    #edf3f1;
+    --surface:   #ffffff;
+    --surface-2: #e2ebe9;
+    --ink:       #12262b;
+    --ink-dim:   #4b696f;
+    --accent:    #0a7c6f;
+    --accent-2:  #9a5f16;
+    --line:      #d3e1de;
+    --glow: 0 0% 0% / 0;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #0b171b;
+      --surface:   #0f2126;
+      --surface-2: #163037;
+      --ink:       #e0eff0;
+      --ink-dim:   #83a3a9;
+      --accent:    #54d6c5;
+      --accent-2:  #e8ac60;
+      --line:      #21404a;
+      --glow: 172 60% 55% / 0.16;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:    #0b171b;
+    --surface:   #0f2126;
+    --surface-2: #163037;
+    --ink:       #e0eff0;
+    --ink-dim:   #83a3a9;
+    --accent:    #54d6c5;
+    --accent-2:  #e8ac60;
+    --line:      #21404a;
+    --glow: 172 60% 55% / 0.16;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 74ch; margin: 0 auto; padding: 0 24px; }
+  .wrap-wide { max-width: 108ch; margin: 0 auto; padding: 0 24px; }
+
+  h1, h2, h3 {
+    font-family: "Zilla Slab", Georgia, serif;
+    font-weight: 700;
+    text-wrap: balance;
+    line-height: 1.12;
+    margin: 0;
+  }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+
+  /* ---- rule: a hairline that ends in terminal corner ticks ---- */
+  .rule {
+    max-width: 108ch;
+    margin: 96px auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--line);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+  }
+  .rule::before, .rule::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+  .rule span { color: var(--ink-dim); letter-spacing: 0.1em; }
+
+  /* ================= HERO ================= */
+  header.hero { padding: 84px 0 40px; }
+  .brand {
+    display: flex; align-items: baseline; gap: 14px;
+    font-family: "Zilla Slab", Georgia, serif;
+    font-weight: 700;
+    font-size: clamp(44px, 9vw, 76px);
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  .brand .wave { color: var(--accent); font-weight: 500; }
+  .lede {
+    font-size: clamp(19px, 2.6vw, 23px);
+    color: var(--ink);
+    max-width: 46ch;
+    margin: 18px 0 0;
+  }
+  .lede b { font-weight: 600; color: var(--accent); }
+
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+  .btn {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 12px 20px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    display: inline-flex; align-items: center; gap: 9px;
+    transition: transform .12s ease, border-color .12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--ground); border-color: var(--accent); font-weight: 600; }
+  .btn .k { opacity: .55; }
+
+  /* ================= TERMINAL MOCK ================= */
+  /* Always its own dark chrome — a terminal is dark on any page, like a screenshot. */
+  .term {
+    --t-bg:    #0a171b;
+    --t-panel: #0d1f24;
+    --t-ink:   #cfe7e5;
+    --t-dim:   #6d8f95;
+    --t-cyan:  #57d6c5;
+    --t-amber: #e8ac60;
+    --t-line:  #1e3c44;
+    --t-sel:   #14313a;
+    --t-head:  #0f272d;
+
+    margin: 44px auto 0;
+    max-width: 108ch;
+    background: var(--t-bg);
+    border: 1px solid var(--t-line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px -24px hsl(190 50% 6% / 0.55), 0 0 0 1px hsl(var(--glow));
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--t-ink);
+  }
+  .term .titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 14px;
+    background: var(--t-head);
+    border-bottom: 1px solid var(--t-line);
+    color: var(--t-dim);
+    font-size: 12px;
+  }
+  .term .titlebar i { width: 10px; height: 10px; border-radius: 50%; background: var(--t-line); }
+  .term .titlebar i:first-child { background: #d9654f; }
+  .term .titlebar i:nth-child(2) { background: var(--t-amber); }
+  .term .titlebar i:nth-child(3) { background: var(--t-cyan); }
+  .term .titlebar span { margin-left: 8px; }
+
+  .term .topbar {
+    display: flex; justify-content: space-between;
+    padding: 6px 14px;
+    color: var(--t-dim);
+    border-bottom: 1px solid var(--t-line);
+  }
+  .term .topbar b { color: var(--t-cyan); font-weight: 500; }
+
+  .term .panes { display: grid; grid-template-columns: 1fr 1fr; }
+  .term .pane { padding: 8px 0; min-width: 0; }
+  .term .pane + .pane { border-left: 1px solid var(--t-line); }
+  .term .pane h4 {
+    margin: 0; padding: 2px 14px 6px;
+    font: inherit; font-weight: 500;
+    color: var(--t-ink);
+    display: flex; justify-content: space-between;
+    border-bottom: 1px solid var(--t-line);
+  }
+  .term .pane h4 .path { color: var(--t-dim); }
+  .term .pane.active h4 { color: var(--t-cyan); }
+  .term .cols { padding: 4px 14px 2px; color: var(--t-dim); font-size: 12px; }
+  .term .row {
+    padding: 1px 14px;
+    white-space: pre;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .term .row .nm { color: var(--t-ink); }
+  .term .row .dir .nm { color: var(--t-cyan); }
+  .term .row.sel { background: var(--t-sel); }
+  .term .row.sel .cur { color: var(--t-cyan); }
+  .term .row .cur { color: transparent; }
+  .term .row .meta { color: var(--t-dim); }
+
+  .term .xfer {
+    border-top: 1px solid var(--t-line);
+    padding: 8px 14px 12px;
+  }
+  .term .xfer .h {
+    display: flex; justify-content: space-between;
+    color: var(--t-dim); margin-bottom: 8px;
+  }
+  .term .xfer .h b { color: var(--t-cyan); font-weight: 500; }
+  .term .job { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: center; padding: 2px 0; }
+  .term .job .ar { color: var(--t-cyan); }
+  .term .job .ar.dn { color: var(--t-amber); }
+  .term .bar {
+    height: 10px; border-radius: 3px;
+    background: var(--t-sel);
+    overflow: hidden;
+    position: relative;
+  }
+  .term .bar::after {
+    content: "";
+    position: absolute; inset: 0 auto 0 0;
+    width: var(--fill, 62%);
+    background: linear-gradient(90deg, hsl(172 55% 45% / .35), var(--t-cyan));
+    animation: fill 3.4s cubic-bezier(.4,.1,.2,1) infinite alternate;
+  }
+  .term .job.dn .bar::after {
+    background: linear-gradient(90deg, hsl(34 65% 45% / .3), var(--t-amber));
+    --fill: 28%;
+    animation-duration: 4.2s;
+  }
+  .term .job .pc { color: var(--t-dim); font-variant-numeric: tabular-nums; }
+
+  .term .status {
+    display: flex; justify-content: space-between;
+    padding: 6px 14px;
+    background: var(--t-head);
+    border-top: 1px solid var(--t-line);
+    color: var(--t-dim);
+    font-size: 12px;
+  }
+  .term .status .ok { color: var(--t-cyan); }
+  .cursor {
+    display: inline-block; width: 7px; height: 1.05em;
+    background: var(--t-cyan); vertical-align: -0.18em;
+    margin-left: 2px;
+    animation: blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fill { from { width: 8%; } to { width: 72%; } }
+
+  /* ================= PROSE BLOCKS ================= */
+  section { margin: 0; }
+  .thesis { padding: 8px 0; }
+  .thesis p { font-size: 20px; max-width: 54ch; }
+  .thesis p strong { font-weight: 600; }
+
+  h2 { font-size: clamp(28px, 4.5vw, 38px); margin-bottom: 6px; }
+  .section-lede { color: var(--ink-dim); max-width: 56ch; margin: 0 0 36px; }
+
+  /* comparison */
+  .cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.cmp {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 620px;
+    font-size: 15px;
+  }
+  table.cmp th, table.cmp td {
+    text-align: left;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  table.cmp thead th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 500;
+  }
+  table.cmp thead th:first-child { color: var(--accent); }
+  table.cmp tbody th {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 500;
+  }
+  table.cmp td { text-align: center; font-family: "IBM Plex Mono", monospace; }
+  table.cmp td:first-of-type { }
+  table.cmp .mark { color: var(--accent); }
+  table.cmp .part { color: var(--ink-dim); }
+  table.cmp .no   { color: var(--line); }
+  table.cmp col.me { }
+  table.cmp tbody td:nth-child(2) {
+    background: color-mix(in oklab, var(--accent) 9%, transparent);
+  }
+
+  /* feature groups */
+  .fgroup { margin-top: 40px; }
+  .fgroup > h3 {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .fgrid { display: grid; gap: 22px 28px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .feat h4 { font-family: "Zilla Slab", Georgia, serif; font-size: 19px; font-weight: 500; margin: 0 0 4px; }
+  .feat p { margin: 0; color: var(--ink-dim); font-size: 15px; line-height: 1.55; }
+  .feat .key {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+  }
+
+  /* install */
+  .install .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px 24px;
+    margin-top: 22px;
+  }
+  .install .card + .card { margin-top: 14px; }
+  .install h4 { font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 500; color: var(--ink-dim); letter-spacing: .05em; text-transform: uppercase; margin: 0 0 12px; }
+  pre.sh {
+    margin: 0;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: var(--ink);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  pre.sh .p { color: var(--accent); user-select: none; }
+  pre.sh .c { color: var(--ink-dim); }
+
+  /* honesty */
+  .not ul { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 14px; }
+  .not li { padding-left: 26px; position: relative; color: var(--ink-dim); max-width: 60ch; }
+  .not li::before {
+    content: "—";
+    position: absolute; left: 0; top: 0;
+    color: var(--accent-2);
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .not li b { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 110px;
+    border-top: 1px solid var(--line);
+    padding: 40px 0 70px;
+    color: var(--ink-dim);
+    font-size: 14px;
+  }
+  footer .wrap-wide { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: baseline; }
+  footer .mono { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; }
+  footer .grow { flex: 1; }
+
+  .reveal { opacity: 0; transform: translateY(14px); }
+  .reveal.in { opacity: 1; transform: none; transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal, .reveal.in { opacity: 1; transform: none; transition: none; }
+    .cursor { animation: none; }
+    .term .bar::after { animation: none; }
+  }
+
+  @media (max-width: 620px) {
+    .term { font-size: 11.5px; border-radius: 10px; }
+    .term .panes { grid-template-columns: 1fr; }
+    .term .pane + .pane { border-left: 0; border-top: 1px solid var(--t-line); }
+    .rule { margin: 68px auto; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap-wide">
+    <p class="eyebrow">Terminal file transfer client</p>
+    <h1 class="brand"><span class="wave">≈</span>TideFTP</h1>
+    <p class="lede">FileZilla's layout and <b>lftp's</b> muscle, in a terminal that's actually pleasant to live in. SFTP, FTP and FTPS over one set of keys.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/allisonhere/TideFTP">View on GitHub</a>
+      <a class="btn" href="#quickstart"><span class="k">$</span> Quickstart</a>
+    </div>
+
+    <div class="term" role="img" aria-label="TideFTP's interface: a local file pane and a remote file pane side by side above a wide transfer pane with two progress bars, and a status line.">
+      <div class="titlebar"><i></i><i></i><i></i><span>tideftp — deploy@files.example.com</span></div>
+      <div class="topbar"><span>&nbsp;TideFTP&nbsp;&nbsp;<b>deploy@files.example.com</b>&nbsp;&nbsp;files.example.com:22</span><span>2 queued&nbsp;&nbsp;tide-night&nbsp;</span></div>
+      <div class="panes">
+        <div class="pane active">
+          <h4><span>Local</span><span class="path">~/sites/marina</span></h4>
+          <div class="cols">mode        size    modified      name</div>
+          <div class="row dir sel"><span class="cur">▸ </span><span class="meta">drwxr-xr-x    &lt;DIR&gt;  Aug 30 14:02  </span><span class="nm">dist</span></div>
+          <div class="row"><span class="cur">  </span><span class="meta">-rw-r--r--   4.1 KB  Aug 30 14:02  </span><span class="nm">index.html</span></div>
+          <div class="row"><span class="cur">  </span><span class="meta">-rw-r--r--    880 B  Aug 28 09:11  </span><span class="nm">robots.txt</span></div>
+          <div class="row dir"><span class="cur">  </span><span class="meta">drwxr-xr-x    &lt;DIR&gt;  Aug 30 14:02  </span><span class="nm">assets</span></div>
+        </div>
+        <div class="pane">
+          <h4><span>Remote</span><span class="path">/var/www/marina</span></h4>
+          <div class="cols">mode        size    modified      name</div>
+          <div class="row dir"><span class="cur">  </span><span class="meta">drwxr-xr-x    &lt;DIR&gt;  Aug 21 03:40  </span><span class="nm">assets</span></div>
+          <div class="row"><span class="cur">  </span><span class="meta">-rw-r--r--   3.7 KB  Aug 21 03:40  </span><span class="nm">index.html</span></div>
+          <div class="row"><span class="cur">  </span><span class="meta">-rw-r--r--    790 B  Aug 12 22:05  </span><span class="nm">robots.txt</span></div>
+          <div class="row"><span class="cur">  </span><span class="meta">-rw-r--r--   1.2 KB  Jul 30 17:18  </span><span class="nm">old-banner.png</span></div>
+        </div>
+      </div>
+      <div class="xfer">
+        <div class="h"><span>Transfers</span><span>ETA <b>0:07</b>&nbsp;&nbsp;1.9 MB/s&nbsp;</span></div>
+        <div class="job">
+          <span class="ar">↑</span>
+          <div class="bar"></div>
+          <span class="pc">62%</span>
+        </div>
+        <div class="job dn">
+          <span class="ar dn">↑</span>
+          <div class="bar"></div>
+          <span class="pc">queued</span>
+        </div>
+      </div>
+      <div class="status"><span>&nbsp;<span class="ok">mirror</span>: 3 new, 1 updated, 46 unchanged<span class="cursor"></span></span><span>tab pane&nbsp;&nbsp;M mirror&nbsp;&nbsp;? help&nbsp;</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="rule"><span>why bother</span></div>
+
+<section class="thesis">
+  <div class="wrap">
+    <p>A dedicated, polished, two-pane <strong>transfer client</strong> for the terminal is a niche almost nobody occupies. Most "TUI FTP" is a general file manager with a protocol layer bolted on, or a scriptable CLI with no interface at all. TideFTP is the part in between — the queue, the progress, the conflict prompts, on screen.</p>
+  </div>
+</section>
+
+<div class="rule"><span>vs. the field</span></div>
+
+<section>
+  <div class="wrap-wide reveal">
+    <h2>Different where it counts</h2>
+    <p class="section-lede">An honest read against the tools people reach for now.</p>
+    <div class="cmp-scroll">
+      <table class="cmp">
+        <thead>
+          <tr><th scope="col">Capability</th><th scope="col">TideFTP</th><th scope="col">lftp</th><th scope="col">mc</th><th scope="col">FileZilla</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Two-pane visual UI</th><td class="mark">●</td><td class="no">○</td><td class="mark">●</td><td class="mark">●</td></tr>
+          <tr><th scope="row">Transfer queue with conflict policies</th><td class="mark">●</td><td class="part">◐</td><td class="no">○</td><td class="mark">●</td></tr>
+          <tr><th scope="row">Directory mirror with pre-flight plan</th><td class="mark">●</td><td class="mark">●</td><td class="no">○</td><td class="mark">●</td></tr>
+          <tr><th scope="row">Streaming preview &amp; in-place edit</th><td class="mark">●</td><td class="no">○</td><td class="part">◐</td><td class="no">○</td></tr>
+          <tr><th scope="row">Runs in a terminal, over SSH</th><td class="mark">●</td><td class="mark">●</td><td class="mark">●</td><td class="no">○</td></tr>
+          <tr><th scope="row">Scriptable / headless</th><td class="no">○</td><td class="mark">●</td><td class="part">◐</td><td class="no">○</td></tr>
+          <tr><th scope="row">Cloud storage backends</th><td class="no">○</td><td class="no">○</td><td class="no">○</td><td class="no">○</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-lede" style="margin-top:20px">● full&nbsp;&nbsp;◐ partial&nbsp;&nbsp;○ none. For scripted bulk sync or S3/GCS, reach for lftp or rclone — TideFTP is for the interactive session.</p>
+  </div>
+</section>
+
+<div class="rule"><span>what's in it</span></div>
+
+<section>
+  <div class="wrap-wide">
+    <h2 class="reveal">The whole client, keyboard-first</h2>
+    <p class="section-lede reveal">Three things a transfer client is for. TideFTP takes each one seriously.</p>
+
+    <div class="fgroup reveal">
+      <h3>Move</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>A real transfer queue</h4><p>Parallel transfers, per-file and overall throughput, a live ETA, retry and cancel per row. The thing mc and ranger never had.</p></div>
+        <div class="feat"><h4>Conflict policies<span class="key">on collision</span></h4><p>Overwrite if newer, if a different size, resume, rename, skip. Apply to one, apply to all, or remember it for the session.</p></div>
+        <div class="feat"><h4>Directory mirror<span class="key">M</span></h4><p>Walks both trees, queues only what's missing or changed, shows a new / updated / unchanged plan first. Prune is one keystroke, and opt-in.</p></div>
+        <div class="feat"><h4>Resume, not restart</h4><p>An interrupted transfer picks up from the byte it stopped at, on both ends.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Inspect</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Preview without downloading<span class="key">v</span></h4><p>The first 128&nbsp;KB as syntax-highlighted text, or a hexdump for binaries. It never pulls the whole file.</p></div>
+        <div class="feat"><h4>Edit in place<span class="key">e</span></h4><p>Checks a file out to a temp copy, opens <code>$EDITOR</code>, writes it back if you changed it. Either pane.</p></div>
+        <div class="feat"><h4>Filter &amp; sort<span class="key">/ &nbsp; s</span></h4><p>Type to narrow a listing by glob or substring; cycle sort by name, size, date or type. Per pane.</p></div>
+        <div class="feat"><h4>Change permissions<span class="key">m</span></h4><p>An octal prompt pre-filled with the current mode, echoing back the <code>rw-r--r--</code> it decodes to. Local and SFTP.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Keep it safe</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Post-transfer verify</h4><p>Opt in, and every completed transfer is re-read on both ends and compared by SHA-256. A mismatch is a failure you can retry.</p></div>
+        <div class="feat"><h4>Strict host keys</h4><p>Checked against <code>known_hosts</code> by default, with an explicit trust-once / trust-and-remember prompt for a new one. No silent accept.</p></div>
+        <div class="feat"><h4>Passwords never in argv</h4><p>Read from the environment or typed into the form — a flag would leave the secret in the process table for every other user on the box.</p></div>
+        <div class="feat"><h4>Auto-reconnect</h4><p>Redials after an unrequested drop, backing off 2/4/8/15/30&nbsp;s, and puts you back in the directory you were in.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="rule" id="quickstart"><span>quickstart</span></div>
+
+<section class="install">
+  <div class="wrap">
+    <h2 class="reveal">Two minutes</h2>
+    <p class="section-lede reveal">Go 1.26+. No install-time network beyond the module cache.</p>
+    <div class="card reveal">
+      <h4>Build it</h4>
+<pre class="sh"><span class="p">$ </span>git clone https://github.com/allisonhere/TideFTP
+<span class="p">$ </span>cd TideFTP
+<span class="p">$ </span>go build -o tideftp ./cmd/tideftp</pre>
+    </div>
+    <div class="card reveal">
+      <h4>Connect</h4>
+<pre class="sh"><span class="c"># open straight onto a server…</span>
+<span class="p">$ </span>./tideftp --host files.example.com --user deploy --path /var/www
+
+<span class="c"># …or just launch and press c for the server list</span>
+<span class="p">$ </span>./tideftp</pre>
+    </div>
+    <p class="section-lede reveal" style="margin-top:22px">FTP and FTPS read the password from <code>TIDEFTP_FTP_PASSWORD</code>. SFTP uses your agent and <code>~/.ssh</code> keys. FTPS verifies the server certificate; point <code>--ftps-ca</code> at a PEM for a self-signed one.</p>
+  </div>
+</section>
+
+<div class="rule"><span>the honest part</span></div>
+
+<section class="not">
+  <div class="wrap">
+    <h2 class="reveal">What it isn't, yet</h2>
+    <ul class="reveal">
+      <li><b>Not a cloud client.</b> SFTP, FTP and FTPS only. S3, GCS and Dropbox are rclone's job.</li>
+      <li><b>Not scriptable.</b> No headless mode. For cron and pipelines, lftp and rclone win outright.</li>
+      <li><b>Still filling edges.</b> Queue persistence across restarts, bandwidth limiting and directory bookmarks are on the roadmap, not in the build.</li>
+      <li><b>Pre-1.0, one maintainer.</b> lftp has absorbed decades of protocol quirks; TideFTP handles what <code>pkg/sftp</code> and <code>jlaffaye/ftp</code> expose — which is why FTP has no <code>chmod</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap-wide">
+    <span class="mono">≈ TideFTP</span>
+    <span>Go · Bubble Tea · TideUI</span>
+    <span>Part of the <a href="../"><em>Tide</em> family</a> of terminal tools</span>
+    <span class="grow"></span>
+    <a class="mono" href="https://github.com/allisonhere/TideFTP">github.com/allisonhere/TideFTP</a>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TideMail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    --ground:    #f2f1ec;
+    --surface:   #ffffff;
+    --surface-2: #e9e6dd;
+    --ink:       #211d13;
+    --ink-dim:   #6a6353;
+    --accent:    #9a6a15;
+    --accent-2:  #3f6f5e;
+    --line:      #ded9cc;
+    --glow: 0 0% 0% / 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #14150f;
+      --surface:   #1c1d15;
+      --surface-2: #26271c;
+      --ink:       #efeada;
+      --ink-dim:   #9a927c;
+      --accent:    #e7b45f;
+      --accent-2:  #71c2a5;
+      --line:      #34352a;
+      --glow: 40 70% 58% / 0.15;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#14150f; --surface:#1c1d15; --surface-2:#26271c;
+    --ink:#efeada; --ink-dim:#9a927c; --accent:#e7b45f; --accent-2:#71c2a5;
+    --line:#34352a; --glow: 40 70% 58% / 0.15;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width: 74ch; margin: 0 auto; padding: 0 24px; }
+  .wide { max-width: 108ch; margin: 0 auto; padding: 0 24px; }
+  h1,h2,h3 { font-family:"Zilla Slab",Georgia,serif; font-weight:700; text-wrap:balance; line-height:1.12; margin:0; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  p code, li code { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.85em; background:color-mix(in oklab,var(--accent) 14%,transparent); color:var(--accent); padding:1px 5px; border-radius:4px; }
+
+  .eyebrow { font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500; letter-spacing:.19em; text-transform:uppercase; color:var(--accent); margin:0 0 18px; }
+  .rule { max-width:108ch; margin:92px auto; padding:0 24px; display:flex; align-items:center; gap:12px; color:var(--line); font-family:"IBM Plex Mono",monospace; font-size:13px; }
+  .rule::before,.rule::after { content:""; height:1px; background:var(--line); flex:1; }
+  .rule span { color:var(--ink-dim); letter-spacing:.12em; }
+
+  header.hero { padding: 84px 0 32px; }
+  .brand { display:flex; align-items:baseline; gap:14px; font-family:"Zilla Slab",Georgia,serif; font-weight:700; font-size:clamp(44px,9vw,76px); letter-spacing:-0.01em; margin:0 0 8px; }
+  .brand .wave { color: var(--accent); font-weight: 500; }
+  .lede { font-size: clamp(19px,2.6vw,23px); max-width: 47ch; margin: 18px 0 0; }
+  .lede b { color: var(--accent); font-weight: 600; }
+  .cta-row { display:flex; flex-wrap:wrap; gap:12px; margin-top:32px; }
+  .btn { font-family:"IBM Plex Mono",monospace; font-size:14px; font-weight:500; padding:12px 20px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink); text-decoration:none; display:inline-flex; align-items:center; gap:9px; transition:transform .12s ease,border-color .12s ease; }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--ground); border-color: var(--accent); font-weight:600; }
+  .btn .k { opacity:.55; }
+
+  /* terminal mock: three panes */
+  .term {
+    --t-bg:#12130d; --t-panel:#181910; --t-head:#1e1f14; --t-ink:#e7e1cf; --t-dim:#8a8368;
+    --t-gold:#e7b45f; --t-green:#71c2a5; --t-red:#dd7a6b; --t-line:#2c2d1f; --t-sel:#282a1a;
+    margin: 42px auto 0; max-width: 108ch; background: var(--t-bg); border:1px solid var(--t-line);
+    border-radius: 12px; overflow: hidden; color: var(--t-ink);
+    font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; font-size:13px; line-height:1.7;
+    box-shadow: 0 24px 60px -24px hsl(40 30% 6% / .55), 0 0 0 1px hsl(var(--glow));
+  }
+  .term .titlebar { display:flex; align-items:center; gap:8px; padding:9px 14px; background:var(--t-head); border-bottom:1px solid var(--t-line); color:var(--t-dim); font-size:12px; }
+  .term .titlebar i { width:10px; height:10px; border-radius:50%; background:var(--t-line); }
+  .term .titlebar i:first-child{ background:#dd7a6b; } .term .titlebar i:nth-child(2){ background:var(--t-gold); } .term .titlebar i:nth-child(3){ background:var(--t-green); }
+  .term .grid { display:grid; grid-template-columns: 30% 1fr; }
+  .term .accounts { border-right:1px solid var(--t-line); padding:8px 0; }
+  .term .accounts .h { padding:2px 14px 6px; color:var(--t-dim); border-bottom:1px solid var(--t-line); font-size:12px; }
+  .term .accounts div.a { padding:1px 14px; }
+  .term .accounts .on { background:var(--t-sel); color:var(--t-gold); }
+  .term .accounts .badge { color:var(--t-dim); }
+  .term .right { display:flex; flex-direction:column; min-width:0; }
+  .term .list { border-bottom:1px solid var(--t-line); padding:6px 0; }
+  .term .list .row { padding:1px 14px; white-space:pre; overflow:hidden; text-overflow:ellipsis; }
+  .term .list .row.on { background:var(--t-sel); }
+  .term .list .row .from { color:var(--t-ink); } .term .list .row.unread .from { color:var(--t-gold); }
+  .term .list .row .t { color:var(--t-dim); }
+  .term .read { padding:8px 14px 10px; }
+  .term .read .hdr { color:var(--t-dim); }
+  .term .read .hdr b { color:var(--t-ink); font-weight:500; }
+  .term .read .auth { margin:4px 0 8px; }
+  .term .read .chip { color:var(--t-green); }
+  .term .read .body { color:var(--t-ink); }
+  .term .read .body .q { color:var(--t-dim); }
+  .term .status { display:flex; justify-content:space-between; padding:6px 14px; background:var(--t-head); border-top:1px solid var(--t-line); color:var(--t-dim); font-size:12px; }
+  .term .status .u { color:var(--t-gold); }
+  .cursor { display:inline-block; width:7px; height:1.05em; background:var(--t-gold); vertical-align:-0.18em; margin-left:2px; animation:blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  h2 { font-size: clamp(28px,4.4vw,38px); margin-bottom: 6px; }
+  .section-lede { color: var(--ink-dim); max-width: 56ch; margin: 0 0 34px; }
+  .thesis p { font-size: 20px; max-width: 54ch; }
+  .thesis strong { font-weight: 600; }
+
+  .fgroup { margin-top: 40px; }
+  .fgroup > h3 { font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:500; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+  .fgrid { display:grid; gap:22px 28px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .feat h4 { font-family:"Zilla Slab",Georgia,serif; font-size:19px; font-weight:500; margin:0 0 4px; }
+  .feat p { margin:0; color:var(--ink-dim); font-size:15px; line-height:1.55; }
+  .feat .key { font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--accent); background:color-mix(in oklab,var(--accent) 13%,transparent); padding:1px 6px; border-radius:4px; margin-left:6px; }
+
+  .keys { margin-top: 32px; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .keys table { border-collapse: collapse; width: 100%; font-family:"IBM Plex Mono",monospace; font-size:13.5px; }
+  .keys td { padding: 9px 16px; border-bottom: 1px solid var(--line); }
+  .keys tr:last-child td { border-bottom: 0; }
+  .keys td:first-child { color: var(--accent); white-space: nowrap; width: 1%; }
+  .keys td:last-child { color: var(--ink-dim); }
+
+  .install .card { background: var(--surface); border:1px solid var(--line); border-radius:10px; padding:22px 24px; margin-top:22px; }
+  .install h4 { font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:500; color:var(--ink-dim); letter-spacing:.05em; text-transform:uppercase; margin:0 0 12px; }
+  pre.sh { margin:0; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:13px; line-height:1.75; color:var(--ink); overflow-x:auto; white-space:pre; }
+  pre.sh .p { color: var(--accent); user-select: none; }
+  pre.sh .c { color: var(--ink-dim); }
+
+  .not ul { list-style:none; margin:20px 0 0; padding:0; display:grid; gap:14px; }
+  .not li { padding-left:26px; position:relative; color:var(--ink-dim); max-width:62ch; }
+  .not li::before { content:"—"; position:absolute; left:0; top:0; color:var(--accent-2); font-family:"IBM Plex Mono",monospace; }
+  .not li b { color:var(--ink); font-weight:600; }
+
+  footer { margin-top:108px; border-top:1px solid var(--line); padding:40px 0 70px; color:var(--ink-dim); font-size:14px; }
+  footer .wide { display:flex; flex-wrap:wrap; gap:8px 26px; align-items:baseline; }
+  footer .mono { font-family:"IBM Plex Mono",monospace; font-size:12.5px; }
+  footer .grow { flex:1; }
+
+  .reveal { opacity:0; transform:translateY(14px); }
+  .reveal.in { opacity:1; transform:none; transition:opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  @media (prefers-reduced-motion: reduce) { .reveal,.reveal.in{opacity:1;transform:none;transition:none;} .cursor{animation:none;} }
+  @media (max-width: 640px) { .term { font-size:11.5px; } .term .grid { grid-template-columns: 1fr; } .term .accounts { border-right:0; border-bottom:1px solid var(--t-line); } .rule { margin:64px auto; } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wide">
+    <p class="eyebrow">Terminal email client · IMAP + SMTP</p>
+    <h1 class="brand"><span class="wave">≈</span>TideMail</h1>
+    <p class="lede">Mail for people who live in a terminal. Every account on <b>one screen</b>, every setting in the GUI — no config-file editing.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/allisonhere/tidemail">View on GitHub</a>
+      <a class="btn" href="#install"><span class="k">$</span> Install</a>
+    </div>
+
+    <div class="term" role="img" aria-label="TideMail's three panes: an accounts and folders list on the left, a message list top-right, and an open message with SPF, DKIM and DMARC results in the reading pane below.">
+      <div class="titlebar"><i></i><i></i><i></i><span>&nbsp;tidemail — unified inbox</span></div>
+      <div class="grid">
+        <div class="accounts">
+          <div class="h">Accounts</div>
+          <div class="a on">Unified&nbsp;&nbsp;<span class="badge">7</span></div>
+          <div class="a">&nbsp;work</div>
+          <div class="a">&nbsp;personal</div>
+          <div class="a">&nbsp;newsletters&nbsp;<span class="badge">12</span></div>
+          <div class="a">&nbsp;Archive</div>
+          <div class="a">&nbsp;Sent</div>
+        </div>
+        <div class="right">
+          <div class="list">
+            <div class="row unread on"><span class="from">CI · main</span><span>   deploy passed — 2m14s          </span><span class="t">2m</span></div>
+            <div class="row unread"><span class="from">Priya Rao</span><span>    Re: invoice #2231              </span><span class="t">1h</span></div>
+            <div class="row"><span class="from">Fly.io</span><span>       Your receipt                   </span><span class="t">3h</span></div>
+            <div class="row"><span class="from">mum</span><span>          weekend plans?                 </span><span class="t">6h</span></div>
+          </div>
+          <div class="read">
+            <div class="hdr">From <b>ci@build.example.com</b>&nbsp;&nbsp;to&nbsp;me&nbsp;&nbsp;&nbsp;<span class="t">09:41</span></div>
+            <div class="auth"><span class="chip">SPF pass</span>&nbsp;&nbsp;<span class="chip">DKIM pass</span>&nbsp;&nbsp;<span class="chip">DMARC pass</span></div>
+            <div class="body">Pipeline for <b>main</b> is green.<br>&nbsp;&nbsp;build 4.1s · test 22.7s · deploy 6.0s<br><br><span class="q">&gt; triggered by push 8a69279</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="status"><span>&nbsp;<span class="u">sent</span> to Priya — Ctrl+Z to undo (4s)<span class="cursor"></span></span><span>c compose&nbsp;&nbsp;r reply&nbsp;&nbsp;? help&nbsp;</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="rule"><span>the idea</span></div>
+
+<section class="thesis">
+  <div class="wrap">
+    <p>A GUI email client's clarity — a unified inbox, an account picker, a reading pane that never hides your list — with a terminal client's speed and a <strong>keyboard that gets the good seat</strong>. Set it up by filling in a form, not editing TOML.</p>
+  </div>
+</section>
+
+<div class="rule"><span>what it does</span></div>
+
+<section>
+  <div class="wide">
+    <h2 class="reveal">Built around a few real habits</h2>
+    <p class="section-lede reveal">The things you actually do with mail every day, made fast.</p>
+
+    <div class="fgroup reveal">
+      <h3>One screen</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Every account, one view</h4><p>Read a unified inbox, or open any single account, folder, or Gmail label — from the same three-pane screen.</p></div>
+        <div class="feat"><h4>The list never disappears</h4><p>Accounts left, message list top-right, reading pane below it. Opening a message doesn't hide your inbox.</p></div>
+        <div class="feat"><h4>Send from the right address<span class="key">Ctrl+U</span></h4><p>The From row is an account picker. TideMail switches the SMTP server, Drafts folder, From address and signature to match.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>A few seconds to change your mind</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Unsend<span class="key">Ctrl+Z</span></h4><p>A sent message waits five seconds by default. <code>Ctrl+Z</code> reopens it. Set the delay to 0 if you want mail gone at once.</p></div>
+        <div class="feat"><h4>Undo bulk actions</h4><p>Delete, archive and move queue for six seconds before they reach the server. One <code>Ctrl+Z</code> puts the last batch back.</p></div>
+        <div class="feat"><h4>State belongs to the server</h4><p>Read, star, archive, move and delete sync over IMAP. Changes made in Gmail or another client come back on the next sync.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Reading</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>HTML as clean terminal text</h4><p>Mail renders to readable text and <em>never</em> loads remote images.</p></div>
+        <div class="feat"><h4>Unsubscribe without the hunt<span class="key">Ctrl+U</span></h4><p>Uses the message's unsubscribe header or its labelled link — no scrolling to a 6px footer.</p></div>
+        <div class="feat"><h4>Headers when you want them<span class="key">Ctrl+E</span></h4><p>Full headers one keystroke away, with SPF, DKIM and DMARC results called out in colour.</p></div>
+        <div class="feat"><h4>Search that stays live<span class="key">/</span></h4><p>Global search across the local cache, results navigable while the query stays active. Find-in-message, link-walking, visual copy, and save-attachments in the content pane.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Compose</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>Drafts save as you type</h4><p>Under the selected sender account. Reopen one and the same account picker is there.</p></div>
+        <div class="feat"><h4>Contacts, then history</h4><p>To/CC/BCC suggest saved contacts first, then addresses from mail you've synced. Contacts move through vCard files.</p></div>
+        <div class="feat"><h4>Your editor, your way</h4><p>Shift-selection, system clipboard, undo/redo, word movement, Home/End — or switch on Vim mode for <code>dw</code>, <code>dd</code>, <code>:w</code>, <code>:q</code>.</p></div>
+        <div class="feat"><h4>Optional AI, off by default</h4><p>Point it at OpenAI, Claude, Gemini or a local Ollama for summaries and a draft proofread — or to turn a plain-English rule into a local filter that runs with no AI call per message.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup reveal">
+      <h3>Setup &amp; secrets</h3>
+      <div class="fgrid">
+        <div class="feat"><h4>No config file editing<span class="key">M</span></h4><p>Add incoming and outgoing settings in the app, save with <code>Ctrl+S</code>. Any IMAP/SMTP server works via the Custom provider.</p></div>
+        <div class="feat"><h4>OAuth where it matters</h4><p>Gmail and Outlook sign in with OAuth. Outlook uses Thunderbird's shared public client — no setup. Gmail wants a free Google Cloud project you own.</p></div>
+        <div class="feat"><h4>Secrets in the keychain</h4><p>Passwords, AI keys and OAuth refresh tokens go to libsecret on Linux or Keychain on macOS, with a documented config-file fallback.</p></div>
+        <div class="feat"><h4>Mail as it lands</h4><p>IMAP IDLE by default, so messages arrive when the server announces them. Interval polling and manual-only modes are there for servers that need them.</p></div>
+      </div>
+    </div>
+
+    <div class="keys reveal">
+      <table>
+        <tr><td>j / k</td><td>move down / up</td></tr>
+        <tr><td>Tab</td><td>cross panes, or move between compose fields</td></tr>
+        <tr><td>c &nbsp;·&nbsp; r / f</td><td>compose &nbsp;·&nbsp; reply / forward</td></tr>
+        <tr><td>Space &nbsp;·&nbsp; a / m / d</td><td>select &nbsp;·&nbsp; archive / move / delete</td></tr>
+        <tr><td>* &nbsp;·&nbsp; x</td><td>toggle IMAP star &nbsp;·&nbsp; toggle read</td></tr>
+        <tr><td>/ &nbsp;·&nbsp; : &nbsp;·&nbsp; ?</td><td>search &nbsp;·&nbsp; command palette &nbsp;·&nbsp; searchable help</td></tr>
+        <tr><td>M / S / T</td><td>accounts / settings / themes</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="rule" id="install"><span>install</span></div>
+
+<section class="install">
+  <div class="wrap">
+    <h2 class="reveal">Get it</h2>
+    <p class="section-lede reveal">Linux and macOS, Intel and ARM. The installer writes to <code>~/.local/bin</code> — no system password.</p>
+    <div class="card reveal">
+      <h4>One line</h4>
+<pre class="sh"><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/allisonhere/tidemail/main/install.sh | sh</pre>
+    </div>
+    <div class="card reveal">
+      <h4>Then</h4>
+<pre class="sh"><span class="p">$ </span>tidemail
+<span class="c"># press M, add your mail settings, Ctrl+S to save</span></pre>
+    </div>
+    <p class="section-lede reveal" style="margin-top:22px">Prefer an archive? Grab one from the <a href="https://github.com/allisonhere/tidemail/releases/latest">latest release</a>.</p>
+  </div>
+</section>
+
+<div class="rule"><span>the honest part</span></div>
+
+<section class="not">
+  <div class="wrap">
+    <h2 class="reveal">Worth knowing</h2>
+    <ul class="reveal">
+      <li><b>IMAP and SMTP only.</b> Standard mail protocols — including on-prem Exchange that still speaks IMAP. No proprietary-only or EWS-only mailboxes.</li>
+      <li><b>Linux and macOS.</b> No Windows build.</li>
+      <li><b>Gmail OAuth needs a project.</b> TideMail ships no OAuth client, so a no-expiry Gmail token means creating a free Google Cloud project you own. Outlook needs nothing.</li>
+      <li><b>AI is bring-your-own-key</b>, and stays off until you configure a provider.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wide">
+    <span class="mono">≈ TideMail</span>
+    <span>Part of the <a href="../">Tide family</a> · Go · Bubble Tea</span>
+    <span class="grow"></span>
+    <a class="mono" href="https://github.com/allisonhere/tidemail">github.com/allisonhere/tidemail</a>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Tide Family</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    --ground:    #edf3f2;
+    --surface:   #ffffff;
+    --surface-2: #e3ecea;
+    --ink:       #122428;
+    --ink-dim:   #4c686d;
+    --accent:    #0b8478;
+    --line:      #d2e0dd;
+    --glow: 0 0% 0% / 0;
+
+    --hue-rss:  #4b57c8;
+    --hue-mail: #a9741f;
+    --hue-ftp:  #0a7c6f;
+    --hue-dock: #1f7ba6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #0b1618;
+      --surface:   #0f2023;
+      --surface-2: #16302f;
+      --ink:       #e1efee;
+      --ink-dim:   #85a3a4;
+      --accent:    #4ac9be;
+      --line:      #203e3d;
+      --glow: 174 55% 55% / 0.15;
+      --hue-rss:  #8ba1ff;
+      --hue-mail: #e8b45f;
+      --hue-ftp:  #54d6c5;
+      --hue-dock: #5cbce6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0b1618; --surface:#0f2023; --surface-2:#16302f;
+    --ink:#e1efee; --ink-dim:#85a3a4; --accent:#4ac9be; --line:#203e3d;
+    --glow: 174 55% 55% / 0.15;
+    --hue-rss:#8ba1ff; --hue-mail:#e8b45f; --hue-ftp:#54d6c5; --hue-dock:#5cbce6;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 78ch; margin: 0 auto; padding: 0 24px; }
+  .wide { max-width: 112ch; margin: 0 auto; padding: 0 24px; }
+
+  h1, h2, h3 { font-family: "Zilla Slab", Georgia, serif; font-weight: 700; text-wrap: balance; line-height: 1.12; margin: 0; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 18px;
+  }
+
+  .rule {
+    max-width: 112ch; margin: 92px auto; padding: 0 24px;
+    display: flex; align-items: center; gap: 12px; color: var(--line);
+    font-family: "IBM Plex Mono", monospace; font-size: 13px;
+  }
+  .rule::before, .rule::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+  .rule span { color: var(--ink-dim); letter-spacing: 0.12em; }
+
+  /* hero */
+  header.hero { padding: 88px 0 24px; }
+  .brand {
+    display: flex; align-items: baseline; gap: 14px;
+    font-family: "Zilla Slab", Georgia, serif; font-weight: 700;
+    font-size: clamp(46px, 9vw, 82px); letter-spacing: -0.01em; margin: 0 0 6px;
+  }
+  .brand .wave { color: var(--accent); font-weight: 500; }
+  .lede { font-size: clamp(19px, 2.6vw, 23px); max-width: 52ch; margin: 16px 0 0; }
+  .lede b { color: var(--accent); font-weight: 600; }
+  .sub { color: var(--ink-dim); max-width: 54ch; margin: 14px 0 0; font-size: 16px; }
+
+  /* consistency demo: four identical frames, different content */
+  .demo { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 40px; max-width: 112ch; }
+  .panel {
+    --t-bg:#0a1618; --t-head:#0e2022; --t-ink:#cfe6e4; --t-dim:#6c8d8d; --t-line:#1d3a39; --t-sel:#143030;
+    background: var(--t-bg); border: 1px solid var(--t-line); border-radius: 11px; overflow: hidden;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11.5px; line-height: 1.75; color: var(--t-ink);
+    box-shadow: 0 18px 44px -22px hsl(190 50% 6% / .5);
+  }
+  .panel .bar { display: flex; align-items: center; gap: 6px; padding: 7px 11px; background: var(--t-head); border-bottom: 1px solid var(--t-line); color: var(--t-dim); }
+  .panel .bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--t-line); }
+  .panel .bar b { color: var(--hi); font-weight: 500; margin-left: 4px; }
+  .panel .body { display: grid; grid-template-columns: 34% 1fr; min-height: 158px; }
+  .panel .side { border-right: 1px solid var(--t-line); padding: 6px 0; }
+  .panel .side div, .panel .list div { padding: 1px 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel .side .on, .panel .list .on { background: var(--t-sel); color: var(--hi); }
+  .panel .list { padding: 6px 0; }
+  .panel .list .dim { color: var(--t-dim); }
+  .panel .foot { padding: 5px 11px; background: var(--t-head); border-top: 1px solid var(--t-line); color: var(--t-dim); display: flex; justify-content: space-between; }
+  .panel .foot .k { color: var(--hi); }
+  .panel.rss  { --hi: var(--hue-rss); }
+  .panel.mail { --hi: var(--hue-mail); }
+  .panel.ftp  { --hi: var(--hue-ftp); }
+  .panel.dock { --hi: var(--hue-dock); }
+  .demo-note { text-align: center; color: var(--ink-dim); font-size: 13px; font-family: "IBM Plex Mono", monospace; margin: 16px auto 0; max-width: 112ch; }
+
+  /* shared habits */
+  p code, li code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    color: var(--accent);
+    padding: 1px 5px; border-radius: 4px;
+  }
+  h2 { font-size: clamp(28px, 4.4vw, 38px); margin-bottom: 8px; }
+  .section-lede { color: var(--ink-dim); max-width: 58ch; margin: 0 0 34px; }
+  .habits { display: grid; gap: 18px 30px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .habit { display: flex; gap: 13px; }
+  .habit .g {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 13%, transparent);
+    border-radius: 5px; padding: 3px 7px; height: fit-content; white-space: nowrap;
+  }
+  .habit h4 { font-family: "Zilla Slab", serif; font-size: 18px; font-weight: 500; margin: 0 0 2px; }
+  .habit p { margin: 0; color: var(--ink-dim); font-size: 14.5px; line-height: 1.5; }
+
+  /* the apps */
+  .apps { display: grid; gap: 18px; }
+  .app {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 26px 28px; display: grid; grid-template-columns: 1fr; gap: 6px;
+    border-left: 3px solid var(--dot);
+  }
+  .app.rss  { --dot: var(--hue-rss); }
+  .app.mail { --dot: var(--hue-mail); }
+  .app.ftp  { --dot: var(--hue-ftp); }
+  .app.dock { --dot: var(--hue-dock); }
+  .app .top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .app .name { font-family: "Zilla Slab", serif; font-size: 24px; font-weight: 700; }
+  .app .name a { color: inherit; text-decoration: none; }
+  .app .name a:hover { text-decoration: underline; text-decoration-color: var(--dot); text-underline-offset: 4px; }
+  .app .name .w { color: var(--dot); font-weight: 500; }
+  .app .instead { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-dim); }
+  .app .one { font-size: 16px; margin: 4px 0 10px; max-width: 60ch; }
+  .app ul { margin: 0 0 14px; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .app li { position: relative; padding-left: 20px; color: var(--ink-dim); font-size: 14.5px; line-height: 1.5; max-width: 66ch; }
+  .app li::before { content: "›"; position: absolute; left: 4px; color: var(--dot); font-family: "IBM Plex Mono", monospace; }
+  .app .run { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+  .app pre {
+    margin: 0; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px;
+    background: var(--ground); border: 1px solid var(--line); border-radius: 7px;
+    padding: 9px 13px; overflow-x: auto; white-space: pre; color: var(--ink);
+  }
+  .app pre .p { color: var(--dot); user-select: none; }
+  .app .repo { font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+  .app .soon { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--dot); border: 1px dashed var(--dot); border-radius: 5px; padding: 2px 8px; }
+
+  /* engine */
+  .engine { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 30px 30px; }
+  .engine code { font-family: "IBM Plex Mono", monospace; font-size: 0.88em; background: color-mix(in oklab, var(--accent) 12%, transparent); padding: 1px 5px; border-radius: 4px; color: var(--accent); }
+  .engine p { max-width: 62ch; }
+
+  footer {
+    margin-top: 108px; border-top: 1px solid var(--line);
+    padding: 38px 0 72px; color: var(--ink-dim); font-size: 14px;
+  }
+  footer .wide { display: flex; flex-wrap: wrap; gap: 8px 26px; align-items: baseline; }
+  footer .mono { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; }
+  footer .grow { flex: 1; }
+
+  .reveal { opacity: 0; transform: translateY(14px); }
+  .reveal.in { opacity: 1; transform: none; transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  .demo .panel { transition: box-shadow .5s ease, border-color .5s ease; }
+  .demo .panel.glow { border-color: var(--hi); box-shadow: 0 18px 44px -22px hsl(190 50% 6% / .5), 0 0 0 1px var(--hi); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal, .reveal.in { opacity: 1; transform: none; transition: none; }
+    .demo .panel { transition: none; }
+  }
+  @media (max-width: 800px) {
+    .demo { grid-template-columns: 1fr; }
+    .rule { margin: 64px auto; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wide">
+    <p class="eyebrow">A family of terminal apps</p>
+    <h1 class="brand"><span class="wave">≈</span>Tide</h1>
+    <p class="lede">Four terminal apps for four different jobs, that all <b>work the same way</b>.</p>
+    <p class="sub">Read your feeds, your mail, your servers, and your containers without leaving the keyboard — and without learning four sets of habits. One layout, one help key, one set of contrast-checked themes.</p>
+
+    <div class="demo">
+      <div class="panel rss" data-hi="rss">
+        <div class="bar"><i></i><i></i><i></i><b>tide</b><span>&nbsp;feeds</span></div>
+        <div class="body">
+          <div class="side">
+            <div class="on">Unread&nbsp;42</div>
+            <div>lobste.rs</div>
+            <div>golang</div>
+            <div>Julia Evans</div>
+          </div>
+          <div class="list">
+            <div class="on">A tour of the Go race detector</div>
+            <div>Files are hard <span class="dim">· 2h</span></div>
+            <div>What is a monoid, really <span class="dim">· 5h</span></div>
+            <div>PostgreSQL 18 notes <span class="dim">· 1d</span></div>
+          </div>
+        </div>
+        <div class="foot"><span>j/k move · o open</span><span><span class="k">?</span> help</span></div>
+      </div>
+
+      <div class="panel mail" data-hi="mail">
+        <div class="bar"><i></i><i></i><i></i><b>tidemail</b><span>&nbsp;inbox</span></div>
+        <div class="body">
+          <div class="side">
+            <div class="on">Unified&nbsp;7</div>
+            <div>work</div>
+            <div>personal</div>
+            <div>Archive</div>
+          </div>
+          <div class="list">
+            <div class="on">deploy passed on main</div>
+            <div>Re: invoice #2231 <span class="dim">· 1h</span></div>
+            <div>Your receipt from Fly.io <span class="dim">· 3h</span></div>
+            <div>weekend plans? <span class="dim">· 6h</span></div>
+          </div>
+        </div>
+        <div class="foot"><span>c compose · r reply</span><span><span class="k">?</span> help</span></div>
+      </div>
+
+      <div class="panel ftp" data-hi="ftp">
+        <div class="bar"><i></i><i></i><i></i><b>tideftp</b><span>&nbsp;deploy@files</span></div>
+        <div class="body">
+          <div class="side">
+            <div class="on">~/site</div>
+            <div>dist/</div>
+            <div>index.html</div>
+            <div>assets/</div>
+          </div>
+          <div class="list">
+            <div class="on">↑ index.html <span class="dim">62%</span></div>
+            <div>↑ app.css <span class="dim">queued</span></div>
+            <div class="dim">/var/www/marina</div>
+            <div class="dim">ETA 0:07 · 1.9 MB/s</div>
+          </div>
+        </div>
+        <div class="foot"><span>u upload · M mirror</span><span><span class="k">?</span> help</span></div>
+      </div>
+
+      <div class="panel dock" data-hi="dock">
+        <div class="bar"><i></i><i></i><i></i><b>whatthedock</b><span>&nbsp;home</span></div>
+        <div class="body">
+          <div class="side">
+            <div class="on">local</div>
+            <div>staging-1</div>
+            <div>prod-eu</div>
+            <div>Catalog</div>
+          </div>
+          <div class="list">
+            <div class="on">web ▸ running · 0.4%</div>
+            <div>db ▸ running <span class="dim">· 2.1%</span></div>
+            <div>cache ▸ running <span class="dim">· 0.1%</span></div>
+            <div class="dim">worker ▸ restarting ×3</div>
+          </div>
+        </div>
+        <div class="foot"><span>l logs · s stop</span><span><span class="k">?</span> help</span></div>
+      </div>
+    </div>
+    <p class="demo-note">— same frame, same keys, same themes · different job —</p>
+  </div>
+</header>
+
+<div class="rule"><span>the shared part</span></div>
+
+<section>
+  <div class="wide">
+    <h2 class="reveal">One set of habits</h2>
+    <p class="section-lede reveal">Learn the pattern once in any of them and the rest are already familiar.</p>
+    <div class="habits reveal">
+      <div class="habit"><span class="g">j k Tab</span><div><h4>Keyboard first</h4><p>Move with <code>j</code>/<code>k</code>, cross panes with <code>Tab</code>, act with a single letter. The mouse works; you won't need it.</p></div></div>
+      <div class="habit"><span class="g">?</span><div><h4>Help that's in the app</h4><p>Press <code>?</code> anywhere for a searchable keybinding reference. No man page, no wiki tab.</p></div></div>
+      <div class="habit"><span class="g">: Ctrl+K</span><div><h4>A command palette</h4><p>Forget a key? Type what you want to do and hit Enter.</p></div></div>
+      <div class="habit"><span class="g">T</span><div><h4>Themes that stay readable</h4><p>Nineteen palettes — Catppuccin, Nord, Gruvbox and more — with text and borders held to WCAG contrast minimums by automated tests, in every one.</p></div></div>
+      <div class="habit"><span class="g">local</span><div><h4>Your data on your machine</h4><p>Local caches, local config, secrets in the system keychain. Nothing phones home.</p></div></div>
+      <div class="habit"><span class="g">curl · sh</span><div><h4>One-line install</h4><p>A single script drops a binary in <code>~/.local/bin</code> — no root, no package manager.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<div class="rule"><span>the four apps</span></div>
+
+<section>
+  <div class="wrap">
+    <h2 class="reveal">Pick your job</h2>
+    <p class="section-lede reveal">Each is a standalone binary. Take one, take all four.</p>
+    <div class="apps">
+
+      <div class="app rss reveal">
+        <div class="top"><span class="name"><a href="tide/"><span class="w">≈</span> Tide</a></span><span class="instead">Terminal Information Delivery Engine · instead of newsboat</span></div>
+        <p class="one">A terminal RSS &amp; Atom reader. The one that started the family — its three-pane layout and theme workflow became <code>tideui</code>.</p>
+        <ul>
+          <li>Feeds, folders, and a unified unread view in one three-pane screen</li>
+          <li>Reading pane renders articles as clean terminal text</li>
+          <li>Keyboard-driven: <code>j</code>/<code>k</code> through items, <code>o</code> to open, <code>?</code> for help</li>
+        </ul>
+        <div class="run">
+          <a class="repo" href="https://github.com/allisonhere/tide">github.com/allisonhere/tide</a>
+        </div>
+      </div>
+
+      <div class="app mail reveal">
+        <div class="top"><span class="name"><a href="tidemail/"><span class="w">≈</span> TideMail</a></span><span class="instead">instead of mutt / Thunderbird</span></div>
+        <p class="one">A keyboard-first IMAP &amp; SMTP client. Every account on one screen, all setup in the GUI — no config-file editing.</p>
+        <ul>
+          <li>Unified inbox across accounts, or open any account, folder, or Gmail label</li>
+          <li><code>Ctrl+Z</code> to unsend or undo a queued archive / move / delete within a few seconds</li>
+          <li><code>Ctrl+U</code> to unsubscribe straight from the message header while reading</li>
+          <li>SPF / DKIM / DMARC results shown in colour; remote images never load</li>
+          <li>Optional AI (OpenAI, Claude, Gemini, Ollama) for summaries, proofreading, and plain-English filters — off until you configure it</li>
+        </ul>
+        <div class="run">
+          <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/allisonhere/tidemail/main/install.sh | sh</pre>
+        </div>
+        <div class="run" style="margin-top:8px"><a class="repo" href="https://github.com/allisonhere/tidemail">github.com/allisonhere/tidemail</a></div>
+      </div>
+
+      <div class="app ftp reveal">
+        <div class="top"><span class="name"><a href="tideftp/"><span class="w">≈</span> TideFTP</a></span><span class="instead">instead of lftp / FileZilla</span></div>
+        <p class="one">A file transfer client for SFTP, FTP and FTPS — FileZilla's two-pane layout with a real transfer queue, in the terminal.</p>
+        <ul>
+          <li>Parallel transfer queue with per-file and overall ETA, retry and resume</li>
+          <li>Conflict policies: overwrite-if-newer / -different-size / resume / rename / skip, apply-to-all, remember</li>
+          <li>Directory mirror (<code>M</code>) with a new / updated / unchanged plan and opt-in prune</li>
+          <li>Streaming preview and in-place edit without downloading the whole file</li>
+          <li>Strict host-key checking; passwords never passed as flags</li>
+        </ul>
+        <div class="run">
+          <pre><span class="p">$ </span>git clone https://github.com/allisonhere/TideFTP &amp;&amp; cd TideFTP &amp;&amp; go build ./cmd/tideftp</pre>
+        </div>
+        <div class="run" style="margin-top:8px"><a class="repo" href="https://github.com/allisonhere/TideFTP">github.com/allisonhere/TideFTP</a></div>
+      </div>
+
+      <div class="app dock reveal">
+        <div class="top"><span class="name"><a href="whatthedock/"><span class="w">≈</span> WhatTheDock</a></span><span class="instead">instead of lazydocker / the Docker CLI</span></div>
+        <p class="one">A terminal client for Docker containers and Compose stacks — local and remote hosts, in one place.</p>
+        <ul>
+          <li>See what's running, tail colour-coded logs, start / stop / restart / recreate</li>
+          <li>Container Clipboard: <code>y</code> a container's config on one host, switch hosts, <code>P</code> to paste it</li>
+          <li>A Compose catalog you can keep, edit, annotate, and make live on any host</li>
+          <li>Create / edit form with a live-generated YAML preview</li>
+          <li>Opt-in AI analysis of a failing container from the Problems pane</li>
+        </ul>
+        <div class="run">
+          <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/allisonhere/whatthedock/main/scripts/install.sh | sh</pre>
+        </div>
+        <div class="run" style="margin-top:8px"><a class="repo" href="https://github.com/allisonhere/whatthedock">github.com/allisonhere/whatthedock</a>&nbsp;&nbsp;<span class="repo" style="color:var(--ink-dim)">· <code style="all:unset;font-family:inherit">whatthedock --demo</code> needs no Docker</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="rule"><span>the engine</span></div>
+
+<section>
+  <div class="wrap">
+    <h2 class="reveal">tideui — the shared shell</h2>
+    <div class="engine reveal">
+      <p><code>tideui</code> is the toolkit every app is built on: a themeable, multi-pane view layer for <a href="https://github.com/charmbracelet/bubbletea">Bubble&nbsp;Tea</a> and Lipgloss. It renders the pane shells, status bars, and modal overlays; each app keeps its own model, key routing, and state.</p>
+      <p>Five layout modes, nineteen palettes with per-field overrides, four-sided focus borders held to a 7:1 contrast floor, a VT52 ASCII mode, and output that never spills past the terminal's edges — down to tiny windows. It's why the four apps look and move alike.</p>
+      <p style="margin-bottom:0"><a class="repo" href="https://github.com/allisonhere/tideui">github.com/allisonhere/tideui</a></p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wide">
+    <span class="mono">≈ Tide</span>
+    <span>Go · Bubble Tea · Lipgloss</span>
+    <span>Built by <a href="https://github.com/allisonhere">allisonhere</a></span>
+    <span class="grow"></span>
+    <span class="mono">tide · tidemail · tideftp · whatthedock</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.12 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+
+    if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      var panels = Array.prototype.slice.call(document.querySelectorAll(".demo .panel"));
+      var i = 0;
+      setInterval(function () {
+        panels.forEach(function (p) { p.classList.remove("glow"); });
+        panels[i % panels.length].classList.add("glow");
+        i++;
+      }, 2200);
+      panels[0].classList.add("glow");
+    }
+  })();
+</script>
+
+</body>
+</html>

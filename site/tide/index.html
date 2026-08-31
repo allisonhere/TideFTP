@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    --ground:    #f0f1f6;
+    --surface:   #ffffff;
+    --surface-2: #e6e8f2;
+    --ink:       #16182a;
+    --ink-dim:   #5c6076;
+    --accent:    #4650c4;
+    --line:      #dadcec;
+    --glow: 0 0% 0% / 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #0e0f17;
+      --surface:   #161826;
+      --surface-2: #1f2233;
+      --ink:       #e7e9f6;
+      --ink-dim:   #9195ac;
+      --accent:    #8ba1ff;
+      --line:      #2a2e44;
+      --glow: 228 100% 77% / 0.14;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0e0f17; --surface:#161826; --surface-2:#1f2233;
+    --ink:#e7e9f6; --ink-dim:#9195ac; --accent:#8ba1ff; --line:#2a2e44;
+    --glow: 228 100% 77% / 0.14;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width: 74ch; margin: 0 auto; padding: 0 24px; }
+  .wide { max-width: 108ch; margin: 0 auto; padding: 0 24px; }
+  h1,h2,h3 { font-family:"Zilla Slab",Georgia,serif; font-weight:700; text-wrap:balance; line-height:1.12; margin:0; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  p code, li code { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.85em; background:color-mix(in oklab,var(--accent) 15%,transparent); color:var(--accent); padding:1px 5px; border-radius:4px; }
+
+  .eyebrow { font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500; letter-spacing:.2em; text-transform:uppercase; color:var(--accent); margin:0 0 18px; }
+  .rule { max-width:108ch; margin:90px auto; padding:0 24px; display:flex; align-items:center; gap:12px; color:var(--line); font-family:"IBM Plex Mono",monospace; font-size:13px; }
+  .rule::before,.rule::after { content:""; height:1px; background:var(--line); flex:1; }
+  .rule span { color:var(--ink-dim); letter-spacing:.12em; }
+
+  header.hero { padding: 86px 0 28px; }
+  .brand { display:flex; align-items:baseline; gap:14px; font-family:"Zilla Slab",Georgia,serif; font-weight:700; font-size:clamp(46px,9vw,80px); letter-spacing:-0.01em; margin:0 0 4px; }
+  .brand .wave { color: var(--accent); font-weight: 500; }
+
+  /* backronym device — encodes the actual name */
+  .acronym { display:flex; flex-wrap:wrap; gap:8px 26px; margin:22px 0 0; padding:0; list-style:none; }
+  .acronym li { display:flex; align-items:baseline; gap:8px; font-family:"IBM Plex Mono",monospace; font-size:14px; color:var(--ink-dim); }
+  .acronym li b { font-family:"Zilla Slab",serif; font-size:20px; font-weight:700; color:var(--accent); }
+  .lede { font-size: clamp(19px,2.6vw,23px); max-width: 48ch; margin: 24px 0 0; }
+  .lede b { color: var(--accent); font-weight: 600; }
+  .cta-row { display:flex; flex-wrap:wrap; gap:12px; margin-top:30px; }
+  .btn { font-family:"IBM Plex Mono",monospace; font-size:14px; font-weight:500; padding:12px 20px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink); text-decoration:none; display:inline-flex; align-items:center; gap:9px; transition:transform .12s ease,border-color .12s ease; }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--ground); border-color: var(--accent); font-weight:600; }
+
+  .term {
+    --t-bg:#0c0d15; --t-head:#12131f; --t-ink:#dcdef0; --t-dim:#7a7e98; --t-ind:#8ba1ff;
+    --t-line:#22243a; --t-sel:#1b1d30;
+    margin: 40px auto 0; max-width: 108ch; background: var(--t-bg); border:1px solid var(--t-line);
+    border-radius: 12px; overflow: hidden; color: var(--t-ink);
+    font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; font-size:13px; line-height:1.7;
+    box-shadow: 0 24px 60px -24px hsl(230 40% 6% / .6), 0 0 0 1px hsl(var(--glow));
+  }
+  .term .titlebar { display:flex; align-items:center; gap:8px; padding:9px 14px; background:var(--t-head); border-bottom:1px solid var(--t-line); color:var(--t-dim); font-size:12px; }
+  .term .titlebar i { width:10px; height:10px; border-radius:50%; background:var(--t-line); }
+  .term .titlebar i:first-child{ background:#dd7a6b; } .term .titlebar i:nth-child(2){ background:#e6b45f; } .term .titlebar i:nth-child(3){ background:var(--t-ind); }
+  .term .grid { display:grid; grid-template-columns: 26% 34% 1fr; }
+  .term .col { padding:8px 0; min-width:0; }
+  .term .col + .col { border-left:1px solid var(--t-line); }
+  .term .col .h { padding:2px 13px 6px; color:var(--t-dim); border-bottom:1px solid var(--t-line); font-size:12px; }
+  .term .col div.r { padding:1px 13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .term .col .on { background:var(--t-sel); color:var(--t-ind); }
+  .term .col .dim { color:var(--t-dim); }
+  .term .read { padding:6px 13px; }
+  .term .read .k { color:var(--t-ind); }
+  .term .read .m { color:var(--t-dim); margin-bottom:6px; }
+  .term .read p { margin:0 0 7px; }
+  .term .status { display:flex; justify-content:space-between; padding:6px 14px; background:var(--t-head); border-top:1px solid var(--t-line); color:var(--t-dim); font-size:12px; }
+  .term .status .hl { color:var(--t-ind); }
+  .cursor { display:inline-block; width:7px; height:1.05em; background:var(--t-ind); vertical-align:-0.18em; margin-left:2px; animation:blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  h2 { font-size: clamp(28px,4.4vw,38px); margin-bottom: 8px; }
+  .section-lede { color: var(--ink-dim); max-width: 58ch; margin: 0 0 30px; }
+  .thesis p { font-size: 20px; max-width: 55ch; }
+  .thesis strong { font-weight: 600; }
+
+  .origin { display:grid; gap:0; margin-top: 28px; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .origin .step { display:grid; grid-template-columns: 120px 1fr; gap:20px; padding:20px 24px; border-bottom:1px solid var(--line); }
+  .origin .step:last-child { border-bottom:0; }
+  .origin .step .who { font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--accent); }
+  .origin .step p { margin:0; color:var(--ink-dim); font-size:15px; }
+  .origin .step p b { color: var(--ink); font-weight:600; }
+
+  .fgrid { display:grid; gap:22px 28px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin-top:8px; }
+  .feat h4 { font-family:"Zilla Slab",Georgia,serif; font-size:19px; font-weight:500; margin:0 0 4px; }
+  .feat p { margin:0; color:var(--ink-dim); font-size:15px; line-height:1.55; }
+  .feat .key { font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--accent); background:color-mix(in oklab,var(--accent) 14%,transparent); padding:1px 6px; border-radius:4px; margin-left:6px; }
+
+  .install .card { background: var(--surface); border:1px solid var(--line); border-radius:10px; padding:22px 24px; margin-top:20px; }
+  .install h4 { font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:500; color:var(--ink-dim); letter-spacing:.05em; text-transform:uppercase; margin:0 0 12px; }
+  pre.sh { margin:0; font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:13px; line-height:1.75; color:var(--ink); overflow-x:auto; white-space:pre; }
+  pre.sh .p { color: var(--accent); user-select: none; }
+  pre.sh .c { color: var(--ink-dim); }
+
+  footer { margin-top:104px; border-top:1px solid var(--line); padding:38px 0 70px; color:var(--ink-dim); font-size:14px; }
+  footer .wide { display:flex; flex-wrap:wrap; gap:8px 26px; align-items:baseline; }
+  footer .mono { font-family:"IBM Plex Mono",monospace; font-size:12.5px; }
+  footer .grow { flex:1; }
+
+  .reveal { opacity:0; transform:translateY(14px); }
+  .reveal.in { opacity:1; transform:none; transition:opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  @media (prefers-reduced-motion: reduce) { .reveal,.reveal.in{opacity:1;transform:none;transition:none;} .cursor{animation:none;} }
+  @media (max-width: 700px) {
+    .term { font-size:11px; } .term .grid { grid-template-columns: 1fr; }
+    .term .col + .col { border-left:0; border-top:1px solid var(--t-line); }
+    .origin .step { grid-template-columns: 1fr; gap:4px; }
+    .rule { margin: 62px auto; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wide">
+    <p class="eyebrow">Terminal RSS &amp; Atom reader</p>
+    <h1 class="brand"><span class="wave">≈</span>Tide</h1>
+    <ul class="acronym">
+      <li><b>T</b> Terminal</li>
+      <li><b>I</b> Information</li>
+      <li><b>D</b> Delivery</li>
+      <li><b>E</b> Engine</li>
+    </ul>
+    <p class="lede">Your feeds in a <b>three-pane</b> terminal screen — subscriptions, headlines, and the article, without a browser tab.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/allisonhere/tide">View on GitHub</a>
+      <a class="btn" href="#install">Install</a>
+    </div>
+
+    <div class="term" role="img" aria-label="Tide's three panes: a feed list on the left, a headline list in the middle, and the selected article rendered as terminal text on the right.">
+      <div class="titlebar"><i></i><i></i><i></i><span>&nbsp;tide — feeds</span></div>
+      <div class="grid">
+        <div class="col">
+          <div class="h">Feeds</div>
+          <div class="r on">Unread&nbsp;&nbsp;42</div>
+          <div class="r">&nbsp;lobste.rs</div>
+          <div class="r">&nbsp;Go blog</div>
+          <div class="r">&nbsp;Julia Evans</div>
+          <div class="r">&nbsp;LWN</div>
+          <div class="r dim">&nbsp;Saved</div>
+        </div>
+        <div class="col">
+          <div class="h">Headlines</div>
+          <div class="r on">A tour of the race detector</div>
+          <div class="r">Files are hard <span class="dim">· 2h</span></div>
+          <div class="r">What is a monoid, really <span class="dim">· 5h</span></div>
+          <div class="r">Notes on PostgreSQL 18 <span class="dim">· 1d</span></div>
+          <div class="r dim">Weekly links #418 <span class="dim">· 2d</span></div>
+        </div>
+        <div class="col read">
+          <div class="h">A tour of the race detector</div>
+          <div class="m">golang.org &nbsp;·&nbsp; 8 min &nbsp;·&nbsp; today 09:02</div>
+          <p>The race detector instruments memory access at compile time and watches for two goroutines touching the same address without a happens-before edge between them.</p>
+          <p><span class="k">&gt;</span> It costs 5–10× CPU and 5–10× memory, so it rides in CI, not production.</p>
+        </div>
+      </div>
+      <div class="status"><span>&nbsp;j/k headlines&nbsp;&nbsp;<span class="hl">o</span> open&nbsp;&nbsp;<span class="hl">/</span> search<span class="cursor"></span></span><span>T themes&nbsp;&nbsp;? help&nbsp;</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="rule"><span>the idea</span></div>
+
+<section class="thesis">
+  <div class="wrap">
+    <p>Feed reading is a <strong>list, a list, and a body of text</strong> — the exact shape a terminal is good at. Tide keeps your subscriptions, the headlines, and the article on one screen, and moves through all three from the keyboard.</p>
+  </div>
+</section>
+
+<div class="rule"><span>where the family began</span></div>
+
+<section>
+  <div class="wide">
+    <h2 class="reveal">The one the rest are built on</h2>
+    <p class="section-lede reveal">Tide came first. Its layout and theming became a toolkit, and the toolkit became a family.</p>
+    <div class="origin reveal">
+      <div class="step"><span class="who">Tide</span><p>The <b>three-pane layout</b>, the live <b>theme-preview</b> workflow, and the soft <b>modal language</b> were designed here, for reading feeds.</p></div>
+      <div class="step"><span class="who">→ tideui</span><p>Those primitives were pulled out into <b>tideui</b>, a themeable multi-pane view layer for Bubble Tea and Lipgloss.</p></div>
+      <div class="step"><span class="who">→ TideMail</span><p>Refined in a keyboard-first <b>email client</b> — unified inbox, undo-send, GUI setup.</p></div>
+      <div class="step"><span class="who">→ TideFTP</span><p>And again in an SFTP / FTP <b>transfer client</b> — a real queue, conflict policies, directory mirror.</p></div>
+      <div class="step"><span class="who">→ WhatTheDock</span><p>And a <b>Docker client</b> for containers and Compose across hosts.</p></div>
+    </div>
+    <p class="section-lede reveal" style="margin-top:20px">Learn Tide's keys and you already know how to drive the other three. <a href="../">See the whole family →</a></p>
+  </div>
+</section>
+
+<div class="rule"><span>the reader</span></div>
+
+<section>
+  <div class="wide">
+    <h2 class="reveal">What it does</h2>
+    <div class="fgrid reveal">
+      <div class="feat"><h4>Three panes, one screen</h4><p>Feeds and folders on the left, headlines in the middle, the article on the right. Opening a piece never hides the queue behind it.</p></div>
+      <div class="feat"><h4>A unified unread view</h4><p>Everything new across every feed in one list, or drill into a single feed or folder.</p></div>
+      <div class="feat"><h4>Articles as clean text</h4><p>The reading pane renders each item as readable terminal text — no browser, no chrome.</p></div>
+      <div class="feat"><h4>Keyboard throughout<span class="key">j k · o</span></h4><p>Move through headlines with <code>j</code>/<code>k</code>, open with <code>o</code>, cross panes with <code>Tab</code>. <code>?</code> for a searchable key list.</p></div>
+      <div class="feat"><h4>Search your feeds<span class="key">/</span></h4><p>Filter headlines as you type; the query stays live while you move through what matches.</p></div>
+      <div class="feat"><h4>Themes that stay readable<span class="key">T</span></h4><p>The same contrast-checked palettes as the rest of the family, previewed live before you commit.</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="rule" id="install"><span>install</span></div>
+
+<section class="install">
+  <div class="wrap">
+    <h2 class="reveal">Get it</h2>
+    <p class="section-lede reveal">Build and run instructions live in the repository.</p>
+    <div class="card reveal">
+      <h4>From source</h4>
+<pre class="sh"><span class="p">$ </span>git clone https://github.com/allisonhere/tide
+<span class="p">$ </span>cd tide
+<span class="c"># see the README for the build step</span></pre>
+    </div>
+    <p class="section-lede reveal" style="margin-top:20px"><a href="https://github.com/allisonhere/tide">github.com/allisonhere/tide</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wide">
+    <span class="mono">≈ Tide</span>
+    <span>Terminal Information Delivery Engine</span>
+    <span>Origin of the <a href="../">Tide family</a> · Go · Bubble Tea</span>
+    <span class="grow"></span>
+    <a class="mono" href="https://github.com/allisonhere/tide">github.com/allisonhere/tide</a>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  })();
+</script>
+
+</body>
+</html>
