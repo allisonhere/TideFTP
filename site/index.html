@@ -90,9 +90,18 @@
   .demo { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 40px; max-width: 112ch; }
   .panel {
     --t-bg:#0a1618; --t-head:#0e2022; --t-ink:#cfe6e4; --t-dim:#6c8d8d; --t-line:#1d3a39; --t-sel:#143030;
+    display: block; text-decoration: none; cursor: pointer;
     background: var(--t-bg); border: 1px solid var(--t-line); border-radius: 11px; overflow: hidden;
     font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11.5px; line-height: 1.75; color: var(--t-ink);
     box-shadow: 0 18px 44px -22px hsl(190 50% 6% / .5);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .demo .panel:hover,
+  .demo .panel:focus-visible {
+    transform: translateY(-3px);
+    border-color: var(--hi);
+    box-shadow: 0 24px 52px -20px hsl(190 50% 6% / .55), 0 0 0 1px var(--hi);
+    outline: none;
   }
   .panel .bar { display: flex; align-items: center; gap: 6px; padding: 7px 11px; background: var(--t-head); border-bottom: 1px solid var(--t-line); color: var(--t-dim); }
   .panel .bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--t-line); }
@@ -183,6 +192,7 @@
   @media (prefers-reduced-motion: reduce) {
     .reveal, .reveal.in { opacity: 1; transform: none; transition: none; }
     .demo .panel { transition: none; }
+    .demo .panel:hover, .demo .panel:focus-visible { transform: none; }
   }
   @media (max-width: 800px) {
     .demo { grid-template-columns: 1fr; }
@@ -199,7 +209,7 @@
     <p class="sub">Read your feeds, your mail, your servers, and your containers without leaving the keyboard — and without learning four sets of habits. One layout, one help key, one set of contrast-checked themes.</p>
 
     <div class="demo">
-      <div class="panel rss" data-hi="rss">
+      <a class="panel rss" href="tide/">
         <div class="bar"><i></i><i></i><i></i><b>tide</b><span>&nbsp;feeds</span></div>
         <div class="body">
           <div class="side">
@@ -216,9 +226,9 @@
           </div>
         </div>
         <div class="foot"><span>j/k move · o open</span><span><span class="k">?</span> help</span></div>
-      </div>
+      </a>
 
-      <div class="panel mail" data-hi="mail">
+      <a class="panel mail" href="tidemail/">
         <div class="bar"><i></i><i></i><i></i><b>tidemail</b><span>&nbsp;inbox</span></div>
         <div class="body">
           <div class="side">
@@ -235,9 +245,9 @@
           </div>
         </div>
         <div class="foot"><span>c compose · r reply</span><span><span class="k">?</span> help</span></div>
-      </div>
+      </a>
 
-      <div class="panel ftp" data-hi="ftp">
+      <a class="panel ftp" href="tideftp/">
         <div class="bar"><i></i><i></i><i></i><b>tideftp</b><span>&nbsp;deploy@files</span></div>
         <div class="body">
           <div class="side">
@@ -254,9 +264,9 @@
           </div>
         </div>
         <div class="foot"><span>u upload · M mirror</span><span><span class="k">?</span> help</span></div>
-      </div>
+      </a>
 
-      <div class="panel dock" data-hi="dock">
+      <a class="panel dock" href="whatthedock/">
         <div class="bar"><i></i><i></i><i></i><b>whatthedock</b><span>&nbsp;home</span></div>
         <div class="body">
           <div class="side">
@@ -273,9 +283,9 @@
           </div>
         </div>
         <div class="foot"><span>l logs · s stop</span><span><span class="k">?</span> help</span></div>
-      </div>
+      </a>
     </div>
-    <p class="demo-note">— same frame, same keys, same themes · different job —</p>
+    <p class="demo-note">— same frame · same keys · same themes — click any panel to open its page —</p>
   </div>
 </header>
 
