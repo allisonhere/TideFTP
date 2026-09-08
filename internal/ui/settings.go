@@ -137,6 +137,11 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 		themes := appThemes()
 		next := ((themeIndex(m.theme.Name, themes)+direction)%len(themes) + len(themes)) % len(themes)
 		m.theme = themes[next]
+		if m.theme.Name == themeNameMatchOmarchy {
+			if t, ok := resolveOmarchyTheme(); ok {
+				m.theme = t
+			}
+		}
 	case settingsFieldDensity:
 		if m.density == tideui.Compact {
 			m.density = tideui.Comfortable
@@ -170,6 +175,12 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 		}
 	}
 	m.setStatus(fmt.Sprintf("%s: %s", settingsFieldLabel(field), m.settingsFieldValue(field)))
+	if field == settingsFieldTheme {
+		if m.theme.Name == themeNameMatchOmarchy {
+			return tea.Batch(m.persist(), m.startOmarchyWatch())
+		}
+		m.omarchyWatching = false
+	}
 	return m.persist()
 }
 

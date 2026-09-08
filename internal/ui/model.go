@@ -334,6 +334,11 @@ type Model struct {
 	density     tideui.Density
 	shadow      bool
 	showIcons   bool
+	// omarchySig / omarchyWatching drive the "match-omarchy" theme's
+	// live-follow poll (see omarchy_theme.go): omarchySig is the last-seen
+	// Omarchy signature, omarchyWatching guards against a second poll loop.
+	omarchySig      string
+	omarchyWatching bool
 	// settingsCursor selects one row in the settings overlay (see
 	// settings.go), the same way connectField selects a row in the connect
 	// form.
@@ -445,6 +450,10 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		logs:            []string{"redacted logs enabled"},
 		status:          "ready",
 	}
+	if model.theme.Name == themeNameMatchOmarchy {
+		model.omarchySig = omarchySignatureNow()
+		model.omarchyWatching = true
+	}
 	model.themePicker = tideui.NewThemePicker(tideui.ThemePickerOptions{
 		Themes:       appThemes(),
 		InitialTheme: model.theme.Name,
@@ -547,6 +556,9 @@ func (m Model) Init() tea.Cmd {
 	// rather than here.
 	if m.state == connConnecting {
 		cmds = append(cmds, dialCmd(m.dialer, m.target, session.Credentials{}))
+	}
+	if m.theme.Name == themeNameMatchOmarchy {
+		cmds = append(cmds, omarchyTickCmd())
 	}
 	return tea.Batch(cmds...)
 }
@@ -722,6 +734,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case statsTickMsg:
 		return m, m.applyStatsTick()
+	case omarchyTickMsg:
+		return m, m.applyOmarchyTick()
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
@@ -764,6 +778,13 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			m.overlay = overlayNone
 			m.theme = m.themePicker.ConfirmedTheme()
 			m.setStatus("theme set to " + m.theme.Name)
+			if m.theme.Name == themeNameMatchOmarchy {
+				if t, ok := resolveOmarchyTheme(); ok {
+					m.theme = t
+				}
+				return m, tea.Batch(m.persist(), m.startOmarchyWatch())
+			}
+			m.omarchyWatching = false
 			return m, m.persist()
 		case tideui.ThemePickerCancel:
 			m.overlay = overlayNone

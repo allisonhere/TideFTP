@@ -24,13 +24,18 @@ var tideNight = tideui.Theme{
 func appThemes() []tideui.Theme {
 	themes := []tideui.Theme{tideNight}
 	themes = append(themes, tideui.BuiltinThemes...)
+	themes = append(themes, omarchyPickerEntry())
 	return themes
 }
 
 // themeByName resolves a persisted theme name to a Theme by searching the app
-// themes (tide-night plus tideui's builtins). An unknown or stale name falls
-// back to tide-night so a hand-edited config cannot blank the UI.
+// themes (tide-night, tideui's builtins, and the runtime "match-omarchy"
+// entry). An unknown or stale name falls back to tide-night so a hand-edited
+// config cannot blank the UI.
 func themeByName(name string) tideui.Theme {
+	if name == themeNameMatchOmarchy {
+		return omarchyPickerEntry()
+	}
 	for _, theme := range appThemes() {
 		if theme.Name == name {
 			return theme

@@ -9,9 +9,21 @@ import (
 	"tideftp/internal/domain"
 )
 
-// allThemes is every theme the picker offers, so a colour that only works on
-// tide-night cannot slip through.
-func allThemes() []tideui.Theme { return appThemes() }
+// allThemes is every static theme the picker offers, so a colour that only
+// works on tide-night cannot slip through. The runtime "match-omarchy" entry is
+// excluded — its colours depend on the machine's live Omarchy desktop theme, so
+// it is covered separately by deterministic synthetic palettes in
+// omarchy_theme_test.go.
+func allThemes() []tideui.Theme {
+	var out []tideui.Theme
+	for _, th := range appThemes() {
+		if th.Name == themeNameMatchOmarchy {
+			continue
+		}
+		out = append(out, th)
+	}
+	return out
+}
 
 func checkContrast(t *testing.T, label string, fg, bg lipgloss.Color, floor float64) {
 	t.Helper()
