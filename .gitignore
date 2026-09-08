@@ -2,3 +2,6 @@
 /tideftp
 dist/
 *.log
+
+# Large local transfer-test fixtures (never commit these)
+*.7z
