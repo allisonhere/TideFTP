@@ -10,7 +10,9 @@ SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
 - Streaming preview and in-place edit without downloading the whole file.
 - Strict host-key checking; passwords are never passed as flags.
 - `tide-night` default theme plus a live theme picker, soft modal screens,
-  shift-arrow pane resizing.
+  shift-arrow pane resizing. `match-omarchy` follows your current
+  [Omarchy](https://omarchy.org) desktop theme (contrast-corrected, repaints
+  live when you switch it).
 
 ## Install
 
@@ -149,12 +151,19 @@ go vet ./...
 ## Releasing
 
 Version comes from the git tag, injected at build time via
-`-ldflags "-X main.version=$TAG"`. To cut a release:
+`-ldflags "-X main.version=$TAG"`.
+
+Run `./release.sh` for the guided path: a small TUI that picks the
+patch/minor/major bump, takes a commit message, and — after a double-press
+confirm — runs `go test ./...`, checks the worktree, verifies `main` is in
+sync, then commits, pushes `main`, and pushes the version tag.
+
+Or do it by hand:
 
 1. Update `CHANGELOG.md` with a `## vX.Y.Z` section.
 2. `git tag vX.Y.Z && git push origin vX.Y.Z`
 
-`.github/workflows/release.yml` then cross-compiles Linux and macOS
-(x86_64 + aarch64) binaries, writes `SHA256SUMS`, and publishes a GitHub
-release with notes pulled from that changelog section. `install.sh` fetches
-from `releases/latest`.
+Either way the tag push is what starts `.github/workflows/release.yml`, which
+cross-compiles Linux and macOS (x86_64 + aarch64) binaries, writes
+`SHA256SUMS`, and publishes a GitHub release with notes pulled from that
+changelog section. `install.sh` fetches from `releases/latest`.

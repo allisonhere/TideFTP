@@ -5,6 +5,19 @@ All notable changes to TideFTP. The format follows
 [Semantic Versioning](https://semver.org/). Pre-1.0, minor bumps carry
 feature batches and may change behaviour.
 
+## Unreleased
+
+### Added
+
+- **`match-omarchy` theme.** For [Omarchy](https://omarchy.org) users, a theme
+  that follows the current Omarchy desktop theme: it reads the live palette
+  (via `omarchy-theme-color`, falling back to
+  `~/.local/state/omarchy/current/theme/colors.toml`), remaps it, and
+  contrast-corrects it so file and transfer rows stay readable whatever palette
+  Omarchy is on. Works for light and dark Omarchy themes and repaints within a
+  couple of seconds when you switch your desktop theme. Falls back to
+  `tide-night` when Omarchy isn't installed. Pick it with `t` or in Settings.
+
 ## v0.2.0
 
 The first release with real networking. `v0.1.0` was the UI shell over a
