@@ -13,7 +13,7 @@ type helpEntry struct {
 }
 
 var helpEntries = []helpEntry{
-	{section: "Navigate", key: "tab / shift+tab", label: "cycle panes (incl. transfers)"},
+	{section: "Navigate", key: "tab / shift+tab", label: "toggle local / remote pane"},
 	{section: "Navigate", key: "← → / h l", label: "focus local / remote pane"},
 	{section: "Navigate", key: "up/down, k/j", label: "move cursor"},
 	{section: "Navigate", key: "pgup / pgdown", label: "page up / down"},
@@ -37,7 +37,7 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "y", label: "copy path(s) to clipboard"},
 	{section: "Act", key: "delete", label: "delete selected / highlighted"},
 	{section: "Act", key: "x", label: "cancel active transfer (queue pane) / all"},
-	{section: "Act", key: "R", label: "retry selected failed transfer"},
+	{section: "Act", key: "R", label: "retry failed transfer (jumps to it)"},
 	{section: "Act", key: "+/-", label: "more/fewer parallel transfers"},
 	{section: "Act", key: ".", label: "toggle hidden files"},
 	{section: "View", key: "c", label: "connect / disconnect"},
@@ -48,7 +48,7 @@ var helpEntries = []helpEntry{
 	{section: "View", key: "shift+left/right", label: "resize file panes"},
 	{section: "View", key: "shift+up/down", label: "resize transfer pane"},
 	{section: "View", key: "ctrl+0", label: "reset layout"},
-	{section: "View", key: "1-6", label: "bottom tabs"},
+	{section: "View", key: "1-6", label: "bottom tabs (focuses the transfer pane)"},
 	{section: "View", key: "U", label: "update TideFTP (when one is available)"},
 	{section: "View", key: "q / ctrl+c", label: "quit"},
 }

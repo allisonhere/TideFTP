@@ -5,7 +5,7 @@
 │  ▸ drwxr-xr-│  Search  |                                                           │:30 uploads  │
 │    -rw-r--r-│                                                                      │:30 index.htm│
 │    -rw-r--r-│  Navigate                                                            │             │
-│             │    tab / shift+tab                  cycle panes (incl. transfers)    │             │
+│             │    tab / shift+tab                     toggle local / remote pane    │             │
 │             │    ← → / h l                            focus local / remote pane    │             │
 │             │    up/down, k/j                                       move cursor    │             │
 │             │    pgup / pgdown                                   page up / down    │             │

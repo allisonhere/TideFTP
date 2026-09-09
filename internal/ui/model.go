@@ -956,10 +956,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.persist()
 	case "ctrl+k":
 		m.openCommandPalette()
-	case "tab":
-		m.focus = (m.focus + 1) % 3
-	case "shift+tab":
-		m.focus = (m.focus + 2) % 3
+	case "tab", "shift+tab":
+		m.toggleFilePaneFocus()
 	case "up", "k":
 		manualScroll = m.focus == focusQueue
 		m.moveCursor(-1)
@@ -1066,21 +1064,27 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.persist()
 	case "1":
 		tabSwitch = true
+		m.focus = focusQueue
 		cmd = m.setBottomTab(tabQueue)
 	case "2":
 		tabSwitch = true
+		m.focus = focusQueue
 		cmd = m.setBottomTab(tabActive)
 	case "3":
 		tabSwitch = true
+		m.focus = focusQueue
 		cmd = m.setBottomTab(tabFailed)
 	case "4":
 		tabSwitch = true
+		m.focus = focusQueue
 		cmd = m.setBottomTab(tabHistory)
 	case "5":
 		tabSwitch = true
+		m.focus = focusQueue
 		cmd = m.setBottomTab(tabLog)
 	case "6":
 		tabSwitch = true
+		m.focus = focusQueue
 		cmd = m.setBottomTab(tabStats)
 	}
 	m.clampCursors()
@@ -1548,6 +1552,24 @@ func (m *Model) quitNow() tea.Cmd {
 		return tea.Sequence(closeConnCmd(m.conn), tea.Quit)
 	}
 	return tea.Quit
+}
+
+// toggleFilePaneFocus swaps focus between the two file panes. Tab is a
+// two-way toggle rather than a three-way cycle through the transfers pane:
+// the file panes are what a session is spent moving between, and making Tab
+// pass through the queue on the way back cost a keystroke every time. The
+// queue pane is still focusable — the bottom-tab keys 1-6 take focus there,
+// R goes there on its own, and a mouse click still works — so nothing it
+// owns became unreachable.
+//
+// Focus lands on local when the remote pane refuses it, which is what
+// focusRemotePane already does while disconnected.
+func (m *Model) toggleFilePaneFocus() {
+	if m.focus == focusLocal {
+		m.focusRemotePane()
+		return
+	}
+	m.focus = focusLocal
 }
 
 // focusRemotePane moves focus to the remote pane, and reports whether it
@@ -2187,18 +2209,71 @@ func (m *Model) cancelTransferAt(index int) {
 	}
 }
 
+// reachFailedTransfer puts focus and the row cursor somewhere R can act,
+// and reports whether it found anywhere to go. Already on a failed row it
+// changes nothing, so repeated presses retry whatever the user is pointing
+// at rather than snapping back to the first failure every time.
+//
+// Otherwise it moves focus to the queue and looks for a retryable row: on
+// the current tab first, so R stays where the user is looking when that tab
+// has one, and only then falling back to tabFailed, which by definition
+// holds every Failed and Canceled transfer.
+func (m *Model) reachFailedTransfer() bool {
+	retryable := func(t domain.Transfer) bool {
+		return t.Status == domain.Failed || t.Status == domain.Canceled
+	}
+	firstRetryable := func() int {
+		for i, row := range m.bottomTabTransfers() {
+			if retryable(row) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	if m.focus == focusQueue && m.bottomTabHasRows() {
+		rows := m.bottomTabTransfers()
+		if m.bottomCursor >= 0 && m.bottomCursor < len(rows) && retryable(rows[m.bottomCursor]) {
+			return true
+		}
+	}
+
+	m.focus = focusQueue
+	if m.bottomTabHasRows() {
+		if i := firstRetryable(); i >= 0 {
+			m.bottomCursor = i
+			return true
+		}
+	}
+	if m.bottomTab != tabFailed {
+		// tabFailed is neither tabLog nor tabStats, so this never has a
+		// command to run.
+		_ = m.setBottomTab(tabFailed)
+		if i := firstRetryable(); i >= 0 {
+			m.bottomCursor = i
+			return true
+		}
+	}
+	return false
+}
+
 // retrySelectedTransfer re-queues the Failed or Canceled transfer under
 // bottomCursor as a brand new Transfer — fresh ID, zeroed progress — rather
 // than mutating the original row in place, so the original stays in the
 // Failed tab as a record of what happened while the retry runs its own
 // course as a normal queued transfer.
+//
+// Pressed from a file pane it takes focus to the queue itself rather than
+// refusing — see reachFailedTransfer. Tab no longer passes through the
+// transfers pane, so "focus the queue first, then press R" would have made
+// retry a two-step no one would guess at.
 func (m *Model) retrySelectedTransfer() tea.Cmd {
 	if !m.connected() {
 		m.setError("not connected")
 		return nil
 	}
-	if m.focus != focusQueue || !m.bottomTabHasRows() {
-		m.setError("select a failed transfer to retry")
+	if !m.reachFailedTransfer() {
+		m.setError("nothing to retry")
 		return nil
 	}
 	rows := m.bottomTabTransfers()

@@ -42,6 +42,23 @@ feature batches and may change behaviour.
   couple of seconds when you switch your desktop theme. Falls back to
   `tide-night` when Omarchy isn't installed. Pick it with `t` or in Settings.
 
+### Changed
+
+- **`Tab` now toggles between the local and remote panes** instead of cycling
+  through the transfer pane as a third stop. The two file panes are what a
+  session is spent moving between, and passing through the queue on the way
+  back cost a keystroke every time. `Shift+Tab` does the same thing, since
+  with two panes there is no forwards or backwards.
+
+  The transfer pane is still focusable, so nothing it owns became
+  unreachable: `1`-`6` now take focus there along with selecting a tab, a
+  mouse click still works, and `R` goes there by itself. Pressed from a file
+  pane, `R` moves focus to the transfer pane, switches to the Failed tab when
+  the current one holds no failures, and retries the first failure it finds —
+  where it used to just report "select a failed transfer to retry". Pressed
+  while already on a failed row it retries that row, so repeated presses do
+  not snap back to the top.
+
 ### Fixed
 
 - **Explicit FTPS defaulted to port 990, which cannot work.** A `ftps` target

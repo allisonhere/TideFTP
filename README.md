@@ -103,7 +103,9 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 
 ## Keys
 
-- `Tab` / `Shift+Tab`: cycle panes (local, remote, transfers)
+- `Tab` / `Shift+Tab`: toggle between the local and remote panes. The transfers
+  pane is not in the rotation — `1`-`6` focus it along with picking a tab, a
+  click focuses it, and `R` goes there on its own
 - `←` / `→` (or `h` / `l`): focus the local / remote pane
 - `Enter`: open directory
 - `Backspace`: parent directory
@@ -128,7 +130,11 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   by size / a newer mtime, and shows a plan — new, updated, unchanged — to
   confirm. `p` in that overlay arms **prune**, which then also deletes
   anything at the destination with no source counterpart (off by default).
-- `x`: cancel active transfers
+- `x`: cancel transfers — everything in flight from a file pane, or just the
+  row under the cursor with the transfers pane focused
+- `R`: retry a failed transfer. From a file pane it focuses the transfers pane,
+  switches to the Failed tab if the current one has no failures, and retries the
+  first one; on a failed row already, it retries that row
 - `/`: filter the focused pane's listing — type to narrow it live, `enter`
   accepts the filter (normal keys resume, the listing stays narrowed), `esc`
   clears it. A query with `*`, `?` or `[` is matched as a glob against each
@@ -151,7 +157,7 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `.`: toggle hidden files
 - `Shift+Left` / `Shift+Right`: resize local/remote panes
 - `Shift+Up` / `Shift+Down`: resize transfer pane
-- `1`-`6`: bottom tabs
+- `1`-`6`: bottom tabs (also focuses the transfers pane)
 - `U`: install a waiting update
 - `?`: help
 - `q`: quit

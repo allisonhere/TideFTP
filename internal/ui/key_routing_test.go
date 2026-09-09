@@ -125,19 +125,21 @@ func TestConnectFormDeleteRemovesTheCharacterAfterTheCursor(t *testing.T) {
 	}
 }
 
-// TestTabCyclesThroughAllThreePanesBothWays pins the actual cycling order
-// (Local -> Remote -> Queue -> Local) rather than each test just setting
-// m.focus directly, the way most other tests in this package do.
-func TestTabCyclesThroughAllThreePanesBothWays(t *testing.T) {
+// TestTabTogglesBetweenTheFilePanes pins Tab as a two-way toggle rather than
+// a three-way cycle: the transfers pane is no longer on the path between the
+// two panes a session is actually spent moving between. Shift+Tab does the
+// same thing, since with two panes there is no difference between forwards
+// and backwards.
+func TestTabTogglesBetweenTheFilePanes(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusLocal
 
 	order := []focusPane{}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		order = append(order, model.focus)
 		model = press(t, model, tea.KeyMsg{Type: tea.KeyTab})
 	}
-	want := []focusPane{focusLocal, focusRemote, focusQueue, focusLocal}
+	want := []focusPane{focusLocal, focusRemote, focusLocal, focusRemote, focusLocal}
 	for i, got := range order {
 		if got != want[i] {
 			t.Fatalf("tab sequence[%d] = %v, want %v (full sequence %v)", i, got, want[i], order)
@@ -146,8 +148,59 @@ func TestTabCyclesThroughAllThreePanesBothWays(t *testing.T) {
 
 	model.focus = focusLocal
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if model.focus != focusQueue {
-		t.Fatalf("shift+tab from Local = %v, want Queue (reverse order)", model.focus)
+	if model.focus != focusRemote {
+		t.Fatalf("shift+tab from Local = %v, want Remote", model.focus)
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if model.focus != focusLocal {
+		t.Fatalf("shift+tab from Remote = %v, want Local", model.focus)
+	}
+}
+
+// TestTabNeverReachesTheQueuePane is the other half: no amount of tabbing
+// should land on the transfers pane now, in either direction.
+func TestTabNeverReachesTheQueuePane(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.focus = focusLocal
+
+	for i := 0; i < 6; i++ {
+		key := tea.KeyMsg{Type: tea.KeyTab}
+		if i%2 == 1 {
+			key = tea.KeyMsg{Type: tea.KeyShiftTab}
+		}
+		model = press(t, model, key)
+		if model.focus == focusQueue {
+			t.Fatalf("focus reached the queue pane after %d tab presses", i+1)
+		}
+	}
+}
+
+// TestBottomTabKeysFocusTheQueuePane covers the route that replaced tabbing
+// to the transfers pane. Without it the row cursor, and the per-row form of
+// x, would be reachable only with a mouse.
+func TestBottomTabKeysFocusTheQueuePane(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		want bottomTab
+	}{
+		{"1", tabQueue},
+		{"2", tabActive},
+		{"3", tabFailed},
+		{"4", tabHistory},
+		{"5", tabLog},
+		{"6", tabStats},
+	} {
+		model := loadedModel(t, newScriptedEngine())
+		model.focus = focusLocal
+
+		model = press(t, model, runes(tc.key))
+
+		if model.focus != focusQueue {
+			t.Errorf("focus after %q = %v, want Queue", tc.key, model.focus)
+		}
+		if model.bottomTab != tc.want {
+			t.Errorf("bottom tab after %q = %v, want %v", tc.key, model.bottomTab, tc.want)
+		}
 	}
 }
 

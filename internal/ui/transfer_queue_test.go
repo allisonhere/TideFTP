@@ -167,17 +167,74 @@ func TestRetryQueuesAFreshTransferAndKeepsTheFailedRow(t *testing.T) {
 	}
 }
 
-func TestRetryDoesNothingOutsideTheQueuePane(t *testing.T) {
+// TestRetryFromAFilePaneReachesTheFailedTransfer covers R's own route to the
+// queue pane. Tab no longer passes through the transfers pane, so R refusing
+// to act from a file pane — as it used to — would have left retry reachable
+// only by pressing a bottom-tab key first, which nobody would guess at.
+func TestRetryFromAFilePaneReachesTheFailedTransfer(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model.focus = focusLocal
+	model.bottomTab = tabQueue
+	model.nextTransferID = 2
 	model.transfers = []domain.Transfer{
 		{ID: 1, Status: domain.Failed, Source: "/a", Destination: "/a"},
 	}
 
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 
+	if len(model.transfers) != 2 {
+		t.Fatalf("transfers = %+v, want R to have queued a retry", model.transfers)
+	}
+	if model.focus != focusQueue {
+		t.Errorf("focus = %v, want R to have moved it to the queue pane", model.focus)
+	}
+	// tabQueue holds only Queued and Active rows, so the failed transfer was
+	// not on the tab R was pressed from — it had to switch to find it.
+	if model.bottomTab != tabFailed {
+		t.Errorf("bottom tab = %v, want Failed", model.bottomTab)
+	}
+}
+
+// TestRetryStaysOnTheHighlightedFailedRow guards the other direction: once
+// the user is pointing at a specific failure, R must retry that one rather
+// than snapping back to the first row every press.
+func TestRetryStaysOnTheHighlightedFailedRow(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.focus = focusQueue
+	model.bottomTab = tabFailed
+	model.bottomCursor = 1
+	model.nextTransferID = 3
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Failed, Source: "/first", Destination: "/first"},
+		{ID: 2, Status: domain.Failed, Source: "/second", Destination: "/second"},
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+
+	if len(model.transfers) != 3 {
+		t.Fatalf("transfers = %+v, want one retry queued", model.transfers)
+	}
+	if got := model.transfers[2].Source; got != "/second" {
+		t.Errorf("retried %q, want the highlighted row %q", got, "/second")
+	}
+	if model.bottomCursor != 1 {
+		t.Errorf("bottomCursor = %d, want it left on the highlighted row", model.bottomCursor)
+	}
+}
+
+// TestRetryWithNothingFailedDoesNothing keeps R from queuing anything when
+// there is no failure anywhere, however it hunts for one.
+func TestRetryWithNothingFailedDoesNothing(t *testing.T) {
+	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
+	model.focus = focusLocal
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Done, Source: "/a", Destination: "/a"},
+	}
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+
 	if len(model.transfers) != 1 {
-		t.Fatalf("transfers = %+v, want R to be a no-op outside the queue pane", model.transfers)
+		t.Fatalf("transfers = %+v, want R to be a no-op with nothing failed", model.transfers)
 	}
 }
 
