@@ -65,20 +65,34 @@ go run ./cmd/tideftp --host files.example.com --user allie --path /srv/www
 # FTP, or FTPS with explicit TLS
 TIDEFTP_FTP_PASSWORD=... go run ./cmd/tideftp --protocol ftps \
     --host files.example.com --user allie --path /pub
+
+# FTPS with implicit TLS, the older port-990 flavour
+TIDEFTP_FTP_PASSWORD=... go run ./cmd/tideftp --protocol ftps-implicit \
+    --host files.example.com --user allie --path /pub
 ```
+
+The two FTPS flavours are separate protocols because a server speaks one or
+the other, never both on the same port. **`ftps`** is explicit FTPS: an
+ordinary FTP connection on port 21 that `AUTH TLS` upgrades in place.
+**`ftps-implicit`** is implicit FTPS: the TLS handshake happens first, before
+any FTP command, on port 990. Pointing one at the other does not fall back —
+an implicit server sends no greeting until it has a `ClientHello`, so the
+explicit client would sit waiting — which is why there is nothing to
+auto-detect and the picker asks.
 
 SFTP authenticates with the SSH agent, the usual `~/.ssh` keys, or `--identity`
 for a specific key file. Host keys are checked strictly against
 `~/.ssh/known_hosts` (`--known-hosts` to point elsewhere); there is no option to
 skip that check.
 
-FTPS verifies the server certificate. For a self-signed one, trust it with
+Both FTPS flavours verify the server certificate, and all three `--ftps-*`
+flags apply to either. For a self-signed certificate, trust it with
 `--ftps-ca cert.pem` rather than turning verification off; `--ftps-insecure`
 exists but accepts anything. FTPS is capped at TLS 1.2 by default because some
 servers mishandle TLS 1.3 on data connections, corrupting uploads over 16 KB —
 `--ftps-allow-tls13` lifts the cap.
 
-FTP and FTPS need a password. It is read from `TIDEFTP_FTP_PASSWORD`, and SFTP
+FTP and both FTPS flavours need a password. It is read from `TIDEFTP_FTP_PASSWORD`, and SFTP
 will use `TIDEFTP_SFTP_PASSWORD` if key-based methods do not work. Passwords are
 deliberately not flags: a flag puts the secret in the process table for every
 other user on the machine to read.

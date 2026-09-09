@@ -49,15 +49,15 @@ func run() (code int, restartExec string) {
 	flag.BoolVar(showVersion, "v", false, "print the version and exit")
 	host := flag.String("host", "", "host for an initial target to auto-connect to; without it the app just opens, ready for the connect form")
 	demo := flag.Bool("demo", false, "run against the simulated demo adapter instead of real servers, regardless of --host")
-	protocol := flag.String("protocol", "sftp", "sftp, ftp, or ftps")
-	port := flag.Int("port", 0, "port (default: 22 for sftp, 21 for ftp, 990 for ftps)")
+	protocol := flag.String("protocol", "sftp", "sftp, ftp, ftps (explicit, AUTH TLS), or ftps-implicit")
+	port := flag.Int("port", 0, "port (default: 22 for sftp, 21 for ftp and ftps, 990 for ftps-implicit)")
 	username := flag.String("user", "", "username (default: the current user)")
 	startPath := flag.String("path", "", "remote directory to open on connect")
 	identity := flag.String("identity", "", "sftp: SSH private key file; without it the agent and the usual ~/.ssh keys are tried")
 	knownHosts := flag.String("known-hosts", "", "sftp: known_hosts file to verify the host key against (default ~/.ssh/known_hosts)")
-	ftpsCA := flag.String("ftps-ca", "", "ftps: PEM file to trust in addition to the system roots, for a self-signed server certificate")
-	ftpsInsecure := flag.Bool("ftps-insecure", false, "ftps: accept any server certificate (unsafe; prefer --ftps-ca)")
-	ftpsTLS13 := flag.Bool("ftps-allow-tls13", false, "ftps: allow TLS 1.3, which some servers mishandle on data connections")
+	ftpsCA := flag.String("ftps-ca", "", "ftps/ftps-implicit: PEM file to trust in addition to the system roots, for a self-signed server certificate")
+	ftpsInsecure := flag.Bool("ftps-insecure", false, "ftps/ftps-implicit: accept any server certificate (unsafe; prefer --ftps-ca)")
+	ftpsTLS13 := flag.Bool("ftps-allow-tls13", false, "ftps/ftps-implicit: allow TLS 1.3, which some servers mishandle on data connections")
 	flag.Parse()
 
 	if *showVersion {
@@ -130,9 +130,9 @@ func run() (code int, restartExec string) {
 }
 
 // buildSession wires up every real protocol adapter behind a router.Dialer,
-// unless --demo asks for the simulated fakes instead. All three protocols
-// are always dialable — not just the one --protocol names — because the
-// connect form lets the user pick any of sftp/ftp/ftps per attempt, for any
+// unless --demo asks for the simulated fakes instead. Every protocol is
+// always dialable — not just the one --protocol names — because the connect
+// form lets the user pick any of sftp/ftp/ftps/ftps-implicit per attempt, for any
 // target, not only the one CLI flags describe. --host is likewise optional:
 // it only names an initial target to auto-connect to at startup, not a
 // requirement for the connect form to be usable — without one, the app just
@@ -155,9 +155,9 @@ func buildSession(options sessionOptions) (session.Dialer, []session.Target, err
 
 	protocol := options.protocol
 	switch protocol {
-	case "sftp", "ftp", "ftps":
+	case session.ProtocolSFTP, session.ProtocolFTP, session.ProtocolFTPS, session.ProtocolFTPSImplicit:
 	default:
-		return nil, nil, fmt.Errorf("unknown protocol %q: want sftp, ftp, or ftps", protocol)
+		return nil, nil, fmt.Errorf("unknown protocol %q: want sftp, ftp, ftps, or ftps-implicit", protocol)
 	}
 
 	// Password auth for FTP/FTPS is offered only if one is in the
@@ -173,8 +173,16 @@ func buildSession(options sessionOptions) (session.Dialer, []session.Target, err
 		RootCAFile:         options.ftpsCA,
 		InsecureSkipVerify: options.ftpsInsecure,
 	}
+	// Implicit FTPS differs only in when the handshake happens, so it shares
+	// every TLS setting with the explicit dialer — including the TLS 1.2 cap,
+	// whose vsftpd data-connection interop problem is not about how the
+	// control connection was secured.
+	ftpsImplicitConfig := ftpsConfig
+	ftpsImplicitConfig.ExplicitTLS = false
+	ftpsImplicitConfig.ImplicitTLS = true
 	if options.ftpsAllowTLS13 {
 		ftpsConfig.MaxTLSVersion = tls.VersionTLS13
+		ftpsImplicitConfig.MaxTLSVersion = tls.VersionTLS13
 	}
 
 	sshConfig := sftpsession.DefaultConfig()
@@ -187,9 +195,10 @@ func buildSession(options sessionOptions) (session.Dialer, []session.Target, err
 	}
 
 	dialer := router.New(map[string]session.Dialer{
-		"sftp": sftpsession.New(sshConfig),
-		"ftp":  ftpsession.New(ftpConfig),
-		"ftps": ftpsession.New(ftpsConfig),
+		session.ProtocolSFTP:         sftpsession.New(sshConfig),
+		session.ProtocolFTP:          ftpsession.New(ftpConfig),
+		session.ProtocolFTPS:         ftpsession.New(ftpsConfig),
+		session.ProtocolFTPSImplicit: ftpsession.New(ftpsImplicitConfig),
 	})
 
 	host := options.host

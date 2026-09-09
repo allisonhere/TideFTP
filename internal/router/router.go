@@ -25,7 +25,8 @@ type Dialer struct {
 }
 
 // New builds a Dialer over byProtocol, keyed by the protocol string a Target
-// names ("sftp", "ftp", "ftps"). A protocol with no entry fails Dial with a
+// names ("sftp", "ftp", "ftps", "ftps-implicit"). A protocol with no entry
+// fails Dial with a
 // clear error rather than falling back to some other adapter.
 func New(byProtocol map[string]session.Dialer) *Dialer {
 	return &Dialer{byProtocol: byProtocol}

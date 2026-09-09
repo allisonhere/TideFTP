@@ -86,6 +86,25 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
       and returns to the directory the drop interrupted. Transfers the drop
       killed are still Failed; nothing is resumed automatically.
 
+## Protocols
+
+- [x] **Implicit FTPS** (`ftps-implicit`) — TLS before the greeting, port 990.
+      A separate protocol rather than a mode of `ftps`: a server offers one
+      flavour or the other on a port and an implicit server stays silent until
+      it gets a `ClientHello`, so there is nothing to negotiate or detect.
+      Shares every TLS setting with explicit FTPS. Fixed the related bug where
+      `ftps` defaulted to 990 — the one port an AUTH TLS client cannot use.
+- [ ] **WebDAV / WebDAVS** — the one genuinely new protocol worth adding: it
+      maps cleanly onto `vfs.FS` (PROPFIND → List, MKCOL → Mkdir, MOVE →
+      Rename, ranged GET → Open and resume) and covers Nextcloud, ownCloud and
+      IIS. No chmod, so it takes the `vfs.ErrUnsupported` path FTP already uses.
+- [ ] **SCP fallback** — only worth it if we actually meet SSH servers with no
+      sftp subsystem. Transfer-only; listing would have to shell out to `ls`.
+- [ ] **S3 / S3-compatible** — biggest reach, worst fit. No real directories,
+      no rename, no settable mtime, no permissions; `domain.Entry` and the
+      mirror logic would need "directory" to become synthetic. A deliberate
+      decision, not a drive-by.
+
 ## Smaller / opportunistic
 
 - [ ] `--host-key-policy` startup flag (form + persistence already done).

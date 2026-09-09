@@ -33,8 +33,15 @@ const (
 	connectFieldCount
 )
 
-// connectProtocols is the protocol picker's cycle order.
-var connectProtocols = []string{"sftp", "ftp", "ftps"}
+// connectProtocols is the protocol picker's cycle order. The two FTPS
+// flavours are separate entries because a server speaks one or the other and
+// they default to different ports; see session.IsFTPS.
+var connectProtocols = []string{
+	session.ProtocolSFTP,
+	session.ProtocolFTP,
+	session.ProtocolFTPS,
+	session.ProtocolFTPSImplicit,
+}
 
 // connectAuthChoices is the Auth picker's cycle order. It only applies to
 // SFTP — FTP and FTPS have no other way to authenticate, so they force
@@ -149,9 +156,9 @@ func (m Model) connectFieldVisible(field connectField) bool {
 	case connectFieldHostKeyPolicy:
 		return protocol == "sftp"
 	case connectFieldFTPSVerify:
-		return protocol == "ftps"
+		return session.IsFTPS(protocol)
 	case connectFieldFTPSCA:
-		return protocol == "ftps" && connectFTPSVerifyChoices[m.connectForm.ftpsVerify] != "insecure"
+		return session.IsFTPS(protocol) && connectFTPSVerifyChoices[m.connectForm.ftpsVerify] != "insecure"
 	default:
 		return true
 	}
@@ -174,7 +181,7 @@ func (m Model) credentialsFromForm() session.Credentials {
 		creds.KeyPassphrase = m.connectForm.keyPassphrase
 		creds.KnownHostsPath = strings.TrimSpace(m.connectForm.knownHosts)
 	}
-	if protocol == "ftps" {
+	if session.IsFTPS(protocol) {
 		creds.FTPSCAFile = strings.TrimSpace(m.connectForm.ftpsCA)
 		creds.FTPSInsecure = connectFTPSVerifyChoices[m.connectForm.ftpsVerify] == "insecure"
 	}

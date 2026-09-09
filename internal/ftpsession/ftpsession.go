@@ -2,6 +2,11 @@
 // three adapter seams for it: session.Dialer, and through the Conn it returns
 // vfs.FS for browsing and transfer.Engine for moving bytes.
 //
+// One Dialer covers all three of plain FTP, explicit FTPS (AUTH TLS) and
+// implicit FTPS (TLS before the greeting): they differ only in whether and
+// when the control connection is secured, which is Config.ExplicitTLS and
+// Config.ImplicitTLS. Everything past the handshake is the same protocol.
+//
 // The shape differs from internal/sftpsession in one way that drives the whole
 // package: an FTP control connection carries a single command at a time, so a
 // listing and two running transfers cannot share one. Connections are pooled
@@ -14,6 +19,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -70,6 +76,14 @@ type Config struct {
 	// every server advertises AUTH in FEAT even when it supports it — vsftpd
 	// does not — so this is a setting rather than something to autodetect.
 	ExplicitTLS bool
+	// ImplicitTLS wraps the control connection in TLS before a single FTP
+	// command crosses it (FTPS on port 990). It is mutually exclusive with
+	// ExplicitTLS: a server offers one or the other on a given port, never
+	// both, and there is nothing to negotiate — an implicit server sends no
+	// greeting until the handshake completes, so guessing wrong stalls
+	// rather than falling back. Setting both is a programming error and
+	// Dial rejects it.
+	ImplicitTLS bool
 	// TLSConfig overrides everything below when set.
 	TLSConfig *tls.Config
 	// RootCAFile is a PEM bundle trusted in addition to the system roots.
@@ -94,6 +108,9 @@ type Dialer struct {
 func New(cfg Config) *Dialer { return &Dialer{cfg: cfg} }
 
 func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.Credentials) (session.Conn, error) {
+	if d.cfg.ExplicitTLS && d.cfg.ImplicitTLS {
+		return nil, errors.New("ftps: explicit and implicit TLS are mutually exclusive")
+	}
 	if target.User == "" {
 		return nil, errors.New("no username configured for this profile")
 	}
@@ -119,16 +136,41 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 			ftp.DialWithContext(ctx),
 			ftp.DialWithTimeout(timeout),
 		}
-		if d.cfg.ExplicitTLS {
+		var tlsConfig *tls.Config
+		if d.cfg.ExplicitTLS || d.cfg.ImplicitTLS {
 			config, err := d.tlsConfig(target, creds)
 			if err != nil {
 				return nil, err
 			}
-			options = append(options, ftp.DialWithExplicitTLS(config))
+			tlsConfig = config
+			// The config is passed even for implicit TLS, where dialControl
+			// has already done the handshake itself: jlaffaye/ftp reads it
+			// back to secure each data connection after PROT P.
+			if d.cfg.ImplicitTLS {
+				options = append(options, ftp.DialWithTLS(config))
+			} else {
+				options = append(options, ftp.DialWithExplicitTLS(config))
+			}
 		}
+
+		// control is the raw socket, kept so the deadline dialControl set
+		// can be cleared once the connection is up.
+		var control net.Conn
+		options = append(options, ftp.DialWithDialFunc(func(_, addr string) (net.Conn, error) {
+			conn, err := dialControl(ctx, addr, timeout, tlsConfig, d.cfg.ImplicitTLS)
+			control = conn
+			return conn, err
+		}))
+
 		conn, err := ftp.Dial(address, options...)
 		if err != nil {
 			return nil, fmt.Errorf("dial %s: %w", address, err)
+		}
+		// Past the greeting, every later command is bounded by its own
+		// context, so a deadline left on the socket would only expire
+		// mid-session on a connection the pool still considers good.
+		if control != nil {
+			_ = control.SetDeadline(time.Time{})
 		}
 		if err := conn.Login(target.User, password); err != nil {
 			_ = conn.Quit()
@@ -152,6 +194,46 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	connections.seed(first)
 
 	return newConn(connections), nil
+}
+
+// dialControl opens the control connection itself instead of leaving it to
+// jlaffaye/ftp, for one reason: ftp.Dial reads the server's greeting with no
+// deadline of any kind. DialWithTimeout only bounds the TCP connect and
+// DialWithContext's context is consulted only while connecting, so a server
+// that accepts the connection and then says nothing hangs the dial forever.
+// That is not hypothetical — it is exactly what an implicit-FTPS server does
+// to a client speaking explicit FTPS, since it will not answer until it has a
+// ClientHello. Putting a deadline on the socket before handing it over bounds
+// the greeting too, so a misdirected dial fails with a timeout the UI can
+// report; the caller clears the deadline once the connection is established.
+//
+// Supplying a dial function has one side effect worth knowing: ftp.Dial only
+// builds its own TLS-wrapping dialer when it was given none, so implicit TLS
+// has to be applied here. Explicit TLS is unaffected — that upgrade happens
+// after the greeting, on whatever connection this returned.
+func dialControl(ctx context.Context, address string, timeout time.Duration, tlsConfig *tls.Config, implicit bool) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if !implicit {
+		return conn, nil
+	}
+
+	secure := tls.Client(conn, tlsConfig)
+	if err := secure.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("tls handshake: %w", err)
+	}
+	return secure, nil
 }
 
 // tlsConfig builds the FTPS client configuration. Verification is on unless

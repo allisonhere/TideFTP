@@ -68,7 +68,8 @@ type Transfer struct {
 	Message    string
 	StartedAt  time.Time
 	FinishedAt time.Time
-	// Protocol is the connection protocol ("sftp", "ftp", "ftps") this
+	// Protocol is the connection protocol ("sftp", "ftp", "ftps",
+	// "ftps-implicit") this
 	// transfer ran over, captured at queue time. The connection's own
 	// protocol can change on reconnect, after which it would no longer
 	// describe transfers already sitting in the queue — this field is what

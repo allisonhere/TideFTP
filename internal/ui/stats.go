@@ -13,6 +13,7 @@ import (
 	"github.com/allisonhere/tideui"
 
 	"tideftp/internal/domain"
+	"tideftp/internal/session"
 )
 
 // The Stats tab paints its own fixed black-on-green palette rather than
@@ -356,7 +357,12 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 
 // knownProtocols fixes the display order of the per-protocol breakdown —
 // only protocols actually seen this session get a line.
-var knownProtocols = []string{"sftp", "ftp", "ftps"}
+var knownProtocols = []string{
+	session.ProtocolSFTP,
+	session.ProtocolFTP,
+	session.ProtocolFTPS,
+	session.ProtocolFTPSImplicit,
+}
 
 // renderStatsTab composes the Stats tab's content: a live snapshot line,
 // the throughput graph — sandwiched between the two text lines so it gets

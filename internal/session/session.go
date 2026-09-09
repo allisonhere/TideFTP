@@ -52,12 +52,43 @@ func NormalizeHostKeyPolicy(value string) string {
 	}
 }
 
+// The protocols a Target can name. FTPS comes in two incompatible flavours
+// and they are separate protocols here rather than a flag on one, because
+// everything that dispatches on Protocol — the router, the port default, the
+// connect form — has to tell them apart anyway.
+//
+// ProtocolFTPS is explicit FTPS: an ordinary FTP connection on the FTP port
+// that AUTH TLS upgrades in place. ProtocolFTPSImplicit is implicit FTPS: the
+// TLS handshake happens first, before any FTP command, on a port dedicated to
+// it. A server speaking one will not answer the other.
+const (
+	ProtocolSFTP         = "sftp"
+	ProtocolFTP          = "ftp"
+	ProtocolFTPS         = "ftps"
+	ProtocolFTPSImplicit = "ftps-implicit"
+)
+
+// IsFTPS reports whether protocol is one of the two FTPS flavours. The TLS
+// settings — the CA file, the verify toggle — apply to both, so callers that
+// gate on "does this connection use TLS?" ask this rather than comparing
+// against ProtocolFTPS and missing the implicit one.
+func IsFTPS(protocol string) bool {
+	return protocol == ProtocolFTPS || protocol == ProtocolFTPSImplicit
+}
+
 // DefaultPort is the port for a protocol when a Target does not name one.
+//
+// Explicit FTPS defaults to 21, not 990: it begins as a plain FTP connection
+// and only upgrades once AUTH TLS is accepted, so it belongs on the FTP port.
+// 990 is implicit FTPS's port, where the server expects a TLS handshake
+// immediately — offering AUTH TLS there reaches a server waiting for a
+// ClientHello, and the connection hangs or resets rather than failing
+// informatively.
 func DefaultPort(protocol string) int {
 	switch protocol {
-	case "ftp":
+	case ProtocolFTP, ProtocolFTPS:
 		return 21
-	case "ftps":
+	case ProtocolFTPSImplicit:
 		return 990
 	default:
 		return 22

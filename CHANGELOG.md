@@ -9,6 +9,18 @@ feature batches and may change behaviour.
 
 ### Added
 
+- **Implicit FTPS (`ftps-implicit`).** A fourth protocol alongside
+  `sftp`/`ftp`/`ftps`, for servers that expect the TLS handshake before any
+  FTP command rather than an `AUTH TLS` upgrade — the older port-990 flavour
+  that plenty of long-lived FTPS deployments still speak. It is a separate
+  protocol rather than a flag on `ftps` because a server offers one or the
+  other on a given port and there is nothing to negotiate: an implicit server
+  sends no greeting until it has a `ClientHello`, so an explicit client cannot
+  detect it, only hang. Available from `--protocol ftps-implicit` and the
+  connect form's protocol picker, and it shares every TLS setting with
+  explicit FTPS — `--ftps-ca`, `--ftps-insecure`, `--ftps-allow-tls13`, and
+  the form's Verify and CA fields.
+
 - **In-app updates.** TideFTP now checks GitHub for a newer release at launch
   and can install it itself: `U` (or Settings → *Updates*) downloads the
   release archive, verifies it against the release's `SHA256SUMS`, replaces
@@ -29,6 +41,25 @@ feature batches and may change behaviour.
   Omarchy is on. Works for light and dark Omarchy themes and repaints within a
   couple of seconds when you switch your desktop theme. Falls back to
   `tide-night` when Omarchy isn't installed. Pick it with `t` or in Settings.
+
+### Fixed
+
+- **Explicit FTPS defaulted to port 990, which cannot work.** A `ftps` target
+  with no port dialled 990 — implicit FTPS's port — while the client only ever
+  spoke explicit FTPS (`AUTH TLS`). That put an upgrade-in-place client in
+  front of a server waiting for a `ClientHello`, so the connection could not
+  succeed by any route. Explicit FTPS now defaults to 21, where it belongs;
+  990 is the default for the new `ftps-implicit`. A profile that had worked
+  around this by pinning port 990 explicitly should now use the
+  `ftps-implicit` protocol instead.
+
+- **A dial could hang forever on a server that went quiet.** `ftp.Dial` reads
+  the server's greeting with no deadline — the dial timeout bounds only the
+  TCP connect — so a server that accepted the connection and then said nothing
+  left the connect spinning with no way out but killing the app. The control
+  connection is now opened with a deadline that covers the greeting too, so
+  this fails with a timeout the UI can report. It is what the port bug above
+  produced, but it applies to plain FTP just as much.
 
 ## v0.2.0
 
