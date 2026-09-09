@@ -326,3 +326,14 @@ func TestGoldenSettingsOverlayUpdateAvailable(t *testing.T) {
 	model.editorSetting = "vi"
 	assertGolden(t, "settings_overlay_update_available", ansi.Strip(model.View()))
 }
+
+// The progress bar is the one part of this flow with no text to describe it,
+// so it gets a golden of its own.
+func TestGoldenUpdateOverlayInProgress(t *testing.T) {
+	model := goldenUpdateAvailable(t)
+	model.overlay = overlayUpdate
+	model.transfers = nil
+	model.update.state = updateInstalling
+	model.update.percent = 45
+	assertGolden(t, "update_overlay_progress", ansi.Strip(model.View()))
+}

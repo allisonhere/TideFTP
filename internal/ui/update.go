@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allisonhere/tideui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"tideftp/internal/update"
 )
@@ -51,9 +53,18 @@ type updateProgress struct {
 	removeCommand string
 	// percent drives the overlay's progress bar. It is cosmetic: the real
 	// work is a single blocking download and install with no byte-level
-	// reporting to hook into, so this advances on a timer to show the app is
+	// reporting to hook into, so it advances on a timer to show the app is
 	// alive rather than to measure anything.
 	percent int
+	// startedAt is when the install began, and is what percent is derived
+	// from — see updateMinDuration.
+	startedAt time.Time
+	// pending holds an install result that arrived before the bar finished.
+	// A download over a fast link can complete in a few hundred milliseconds,
+	// and a progress bar that flashes to 30% and vanishes reads as a glitch
+	// rather than as work done. Holding the result here until the bar has run
+	// its course is what makes a fast update look like a fast update.
+	pending *updateInstalledMsg
 }
 
 // available reports whether a newer release is waiting and the user has not
@@ -96,10 +107,15 @@ type updateInstalledMsg struct {
 // updateTickMsg advances the cosmetic progress bar.
 type updateTickMsg struct{}
 
-// updateProgressInterval and updateProgressStep pace the cosmetic bar.
 const (
+	// updateProgressInterval is how often the bar redraws. 120ms is fast
+	// enough to read as motion and slow enough not to churn the screen.
 	updateProgressInterval = 120 * time.Millisecond
-	updateProgressStep     = 5
+	// updateMinDuration is how long the bar takes to cross, and so the
+	// shortest an update can appear to take. Real installs are often quicker
+	// than this; finishing in 200ms would show a bar that jumps to a third
+	// and disappears, which looks broken rather than fast.
+	updateMinDuration = 3 * time.Second
 )
 
 func updateTickCmd() tea.Cmd {
@@ -182,6 +198,8 @@ func (m *Model) startUpdateInstall() tea.Cmd {
 	}
 	m.update.state = updateDownloading
 	m.update.percent = 0
+	m.update.startedAt = time.Now()
+	m.update.pending = nil
 	updater, release := m.updater, m.update.latest
 	return tea.Batch(
 		updateTickCmd(),
@@ -201,23 +219,42 @@ func (m *Model) applyUpdateDownloaded(msg updateDownloadedMsg) tea.Cmd {
 	}
 	m.update.asset = msg.asset
 	m.update.state = updateInstalling
-	m.update.percent = 0
 
+	// No second ticker: the one started with the download runs through both
+	// phases, since the bar spans the whole operation rather than restarting
+	// halfway. Batching another here would just double the redraw rate.
 	updater, asset := m.updater, msg.asset
-	return tea.Batch(
-		updateTickCmd(),
-		func() tea.Msg {
-			executable, err := currentExecutable()
-			if err != nil {
-				return updateInstalledMsg{err: err}
-			}
-			result, err := updater.Install(asset, executable)
-			return updateInstalledMsg{result: result, err: err}
-		},
-	)
+	return func() tea.Msg {
+		executable, err := currentExecutable()
+		if err != nil {
+			return updateInstalledMsg{err: err}
+		}
+		result, err := updater.Install(asset, executable)
+		return updateInstalledMsg{result: result, err: err}
+	}
 }
 
 func (m *Model) applyUpdateInstalled(msg updateInstalledMsg) tea.Cmd {
+	// A failure is shown the moment it happens: there is nothing to make look
+	// good, and holding an error back behind an animation is just a delay.
+	if msg.err != nil {
+		return m.finishUpdateInstall(msg)
+	}
+	// Holding only makes sense while a bar is actually running. Without this
+	// a result arriving in any other state would be parked waiting for a tick
+	// that never comes, and the install would silently never land.
+	if m.update.state != updateDownloading && m.update.state != updateInstalling {
+		return m.finishUpdateInstall(msg)
+	}
+	// Success waits for the bar. applyUpdateTick finalises once it lands on
+	// 100%, which is never before updateMinDuration has passed.
+	m.update.pending = &msg
+	return m.applyUpdateTick()
+}
+
+// finishUpdateInstall folds the real result in, once the bar has caught up.
+func (m *Model) finishUpdateInstall(msg updateInstalledMsg) tea.Cmd {
+	m.update.pending = nil
 	m.update.percent = 100
 	if msg.err != nil {
 		m.update.state = updateFailed
@@ -264,13 +301,29 @@ func (m *Model) dismissUpdate() tea.Cmd {
 // instead of the test binary itself.
 var currentExecutable = os.Executable
 
-// applyUpdateTick advances the cosmetic progress bar and schedules the next
-// tick, stopping once the work it was covering has finished.
+// applyUpdateTick redraws the progress bar and decides when the install is
+// allowed to finish.
+//
+// The bar is driven by elapsed time rather than by counting ticks, so it
+// crosses in updateMinDuration regardless of how the scheduler treats the
+// ticker. It is held at 99 until the real work reports back, so it can never
+// sit at 100% while something is still happening — and once the work is done
+// it always finishes at a full 100 before the overlay moves on.
 func (m *Model) applyUpdateTick() tea.Cmd {
 	if m.update.state != updateDownloading && m.update.state != updateInstalling {
 		return nil
 	}
-	m.update.percent = min(95, m.update.percent+updateProgressStep)
+	elapsed := time.Since(m.update.startedAt)
+	percent := int(elapsed * 100 / updateMinDuration)
+	if m.update.pending == nil {
+		// Still working. Crawl the last stretch rather than parking on 100.
+		percent = min(percent, 99)
+	}
+	m.update.percent = min(100, max(0, percent))
+
+	if m.update.pending != nil && m.update.percent >= 100 {
+		return m.finishUpdateInstall(*m.update.pending)
+	}
 	return updateTickCmd()
 }
 
@@ -380,12 +433,17 @@ func updateOverlayTitle(state updateState) string {
 	}
 }
 
-// updateProgressBar draws the cosmetic progress bar. See updateProgress.percent:
-// there is no byte-level reporting behind it.
-func updateProgressBar(percent, width int) string {
+// updateProgressBar draws the bar the way TideMail's does: accent-coloured
+// blocks for the filled part, muted shading for the rest, spanning the full
+// content width. The percentage is not in the bar — it belongs in the label
+// above it, so the bar itself stays a clean run of blocks.
+func updateProgressBar(renderer tideui.Renderer, percent, width int) string {
+	width = max(1, width)
 	percent = min(100, max(0, percent))
-	filled := percent * width / 100
-	return "[" + strings.Repeat("█", filled) + strings.Repeat("·", width-filled) + fmt.Sprintf("] %3d%%", percent)
+	filled := min(width, max(0, width*percent/100))
+	full := lipgloss.NewStyle().Foreground(renderer.Styles.Theme.BorderFocus).Render(strings.Repeat("█", filled))
+	empty := lipgloss.NewStyle().Foreground(renderer.Styles.Theme.Dimmed).Render(strings.Repeat("░", width-filled))
+	return full + empty
 }
 
 // relativeSince renders how long ago a check ran, coarsely — the settings row

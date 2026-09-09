@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -336,5 +337,99 @@ func TestSettingsCheckOnStartupTogglesAndPersists(t *testing.T) {
 	}
 	if len(saved) == 0 || saved[len(saved)-1].Updates.CheckOnStartup {
 		t.Fatalf("the change was not persisted: %+v", saved)
+	}
+}
+
+// A download over a fast link can finish in a few hundred milliseconds. The
+// bar must still cross properly rather than flashing to a third and
+// vanishing, so a result that arrives early is held until the bar catches up.
+func TestFastInstallIsHeldUntilTheBarFinishes(t *testing.T) {
+	model := availableModel(t, "v0.3.0")
+	model.update.state = updateInstalling
+	model.update.startedAt = time.Now() // the install "just" started
+
+	// The real work reports back immediately.
+	model = settle(t, model, model.applyUpdateInstalled(updateInstalledMsg{
+		result: update.InstallResult{Restartable: true, ExecutablePath: "/tmp/tideftp"},
+	}))
+
+	if model.update.state != updateInstalling {
+		t.Fatalf("state = %v, want the bar still running", model.update.state)
+	}
+	if model.update.pending == nil {
+		t.Fatal("the early result was not held")
+	}
+	if model.update.percent >= 100 {
+		t.Fatalf("percent = %d so soon; the bar should still be crossing", model.update.percent)
+	}
+
+	// Once the floor has passed, the next tick finishes at a full 100%.
+	model.update.startedAt = time.Now().Add(-updateMinDuration)
+	model = settle(t, model, model.applyUpdateTick())
+
+	if model.update.percent != 100 {
+		t.Fatalf("percent = %d at the end, want exactly 100", model.update.percent)
+	}
+	if model.update.state != updateInstalled {
+		t.Fatalf("state = %v, want updateInstalled", model.update.state)
+	}
+	if model.RestartExecPath() != "/tmp/tideftp" {
+		t.Fatal("the held result was not applied")
+	}
+}
+
+// The other way round: work that outlasts the bar must not let it sit at
+// 100% while something is still happening.
+func TestSlowInstallHoldsShortOfComplete(t *testing.T) {
+	model := availableModel(t, "v0.3.0")
+	model.update.state = updateInstalling
+	model.update.startedAt = time.Now().Add(-10 * updateMinDuration)
+
+	model = settle(t, model, model.applyUpdateTick())
+
+	if model.update.percent != 99 {
+		t.Fatalf("percent = %d while still working, want it held at 99", model.update.percent)
+	}
+	if model.update.state != updateInstalling {
+		t.Fatalf("state = %v, want it still installing", model.update.state)
+	}
+}
+
+// A failure is shown at once — there is nothing to make look good, and
+// holding an error behind an animation is just a delay.
+func TestFailedInstallIsNotPaddedOut(t *testing.T) {
+	model := availableModel(t, "v0.3.0")
+	model.update.state = updateInstalling
+	model.update.startedAt = time.Now()
+
+	model = settle(t, model, model.applyUpdateInstalled(updateInstalledMsg{err: errors.New("disk full")}))
+
+	if model.update.state != updateFailed {
+		t.Fatalf("state = %v, want updateFailed straight away", model.update.state)
+	}
+	if model.update.pending != nil {
+		t.Fatal("a failure should not be held back")
+	}
+}
+
+// The bar is driven by elapsed time, so it crosses in updateMinDuration
+// whatever the scheduler does with the ticker.
+func TestProgressBarTracksElapsedTime(t *testing.T) {
+	model := availableModel(t, "v0.3.0")
+	model.update.state = updateDownloading
+
+	for _, tc := range []struct {
+		elapsed time.Duration
+		want    int
+	}{
+		{0, 0},
+		{updateMinDuration / 4, 25},
+		{updateMinDuration / 2, 50},
+	} {
+		model.update.startedAt = time.Now().Add(-tc.elapsed)
+		_ = model.applyUpdateTick()
+		if diff := model.update.percent - tc.want; diff < -2 || diff > 2 {
+			t.Errorf("at %v percent = %d, want about %d", tc.elapsed, model.update.percent, tc.want)
+		}
 	}
 }

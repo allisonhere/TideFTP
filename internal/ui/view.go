@@ -127,7 +127,9 @@ func (m Model) renderTopbar(renderer tideui.Renderer) string {
 	// Prepended, so that when align has to truncate the right side it is the
 	// split readout that goes and the update notice that survives.
 	if notice := m.updateNoticeText(); notice != "" {
-		right = " " + notice + " " + right
+		// StatusSuccess is the theme's positive colour on the status bar
+		// background (green in tide-night), and it carries its own padding.
+		right = renderer.Styles.StatusSuccess.Render(notice) + right
 	}
 	// The StatusBar style pads one column on each side, so the line it is
 	// given must be m.width-2. Laying out against m.width made the topbar
@@ -704,9 +706,12 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			if m.update.state == updateInstalling {
 				verb = "Installing"
 			}
+			// Percentage in the label, bar underneath — the bar stays a clean
+			// run of blocks rather than carrying its own readout.
 			rows = append(rows,
-				renderer.Styles.DetailBody.Width(64).Render(fmt.Sprintf("%s TideFTP %s…", verb, m.update.latest.Version)),
-				renderer.Styles.DetailMeta.Width(64).Render(updateProgressBar(m.update.percent, 40)),
+				renderer.Styles.DetailBody.Width(64).Render(fmt.Sprintf("%s TideFTP %s… %d%%", verb, m.update.latest.Version, m.update.percent)),
+				"",
+				updateProgressBar(renderer, m.update.percent, 64),
 			)
 		case updateInstalled:
 			rows = append(rows,
