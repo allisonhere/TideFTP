@@ -258,6 +258,15 @@ func (c *Conn) keepalive() {
 	}
 }
 
+// pingAttempts is how many connections a single keepalive tick will try
+// before calling the session dead. An FTP server that closes idle control
+// connections leaves stale ones in the pool, and one of those failing NOOP
+// says nothing about whether the server is still there — so a failure
+// discards that connection and tries again. get hands back an idle
+// connection while any remain and dials a fresh one once they are gone, so
+// repeating drains the stale ones and ends on a real dial.
+const pingAttempts = 3
+
 // ping borrows a connection and sends NOOP. If none can be borrowed quickly
 // the pool is busy, which is itself evidence the connection is alive, so the
 // tick is skipped rather than reported as a failure.
@@ -265,22 +274,29 @@ func (c *Conn) ping() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, err := c.pool.get(ctx)
-	if err != nil {
-		if errors.Is(err, errPoolClosed) {
+	var lastErr error
+	for range pingAttempts {
+		conn, err := c.pool.get(ctx)
+		if err != nil {
+			if errors.Is(err, errPoolClosed) {
+				return nil
+			}
+			if ctx.Err() != nil {
+				// Out of time rather than out of server: the pool being busy
+				// or slow is not a drop.
+				return nil
+			}
+			return err
+		}
+		noopErr := conn.NoOp()
+		if noopErr == nil {
+			c.pool.put(conn)
 			return nil
 		}
-		if ctx.Err() != nil {
-			return nil
-		}
-		return err
-	}
-	if err := conn.NoOp(); err != nil {
+		lastErr = noopErr
 		c.pool.discard(conn)
-		return err
 	}
-	c.pool.put(conn)
-	return nil
+	return lastErr
 }
 
 func (c *Conn) end(reason error) {

@@ -144,7 +144,7 @@ func TestEditRejectsADirectory(t *testing.T) {
 func TestEditRejectsRemoteWhenNotConnected(t *testing.T) {
 	stubEditor(t)
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, nil, config.Default(), nil, nil)
+	model := NewModel(localfs.New(), dialer, nil, config.Default(), nil, nil, "")
 	model.width, model.height = 120, 36
 	model.focus = focusRemote
 	model.remote.entries = []domain.Entry{{Name: "x.conf", Kind: domain.EntryFile, Size: 10}}

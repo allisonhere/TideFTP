@@ -189,3 +189,30 @@ func TestIsCanceledReportsEitherChannel(t *testing.T) {
 		t.Fatalf("IsCanceled false with quit closed")
 	}
 }
+
+// A transfer canceled and then started again under the same ID must still be
+// cancelable. The first run's cleanup used to delete whichever registration
+// it found under that ID — including the new run's — leaving Cancel nothing
+// to close. Driven directly rather than through two real runs, because the
+// interleaving that exposes it (the old run retiring after the new one
+// registers) is exactly the one a scheduler will not reproduce on demand.
+func TestRunnerDoneOnlyRetiresItsOwnRegistration(t *testing.T) {
+	runner := NewRunner(func(Request, <-chan struct{}, <-chan struct{}, func(int64)) (int64, error) {
+		return 0, nil
+	})
+	retired, current := make(chan struct{}), make(chan struct{})
+	runner.running[9] = current
+
+	runner.done(9, retired)
+
+	got, ok := runner.running[9]
+	if !ok || got != current {
+		t.Fatal("a finished run retired a later transfer's registration, leaving it uncancelable")
+	}
+
+	// Its own registration still goes, or every finished transfer would leak.
+	runner.done(9, current)
+	if _, ok := runner.running[9]; ok {
+		t.Fatal("done did not retire its own registration")
+	}
+}

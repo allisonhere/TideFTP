@@ -124,6 +124,11 @@ func (m Model) renderTopbar(renderer tideui.Renderer) string {
 	left := renderer.Styles.StatusNotice.Render(" TideFTP ")
 	conn := renderer.Styles.StatusBar.Render(" " + m.connectionSummary() + " ")
 	right := fmt.Sprintf(" %d queued  %s  split %.0f/%.0f ", countStatus(m.transfers, domain.Queued), m.theme.Name, m.fileSplit.Value()*100, (1-m.fileSplit.Value())*100)
+	// Prepended, so that when align has to truncate the right side it is the
+	// split readout that goes and the update notice that survives.
+	if notice := m.updateNoticeText(); notice != "" {
+		right = " " + notice + " " + right
+	}
 	// The StatusBar style pads one column on each side, so the line it is
 	// given must be m.width-2. Laying out against m.width made the topbar
 	// wrap onto a second row, which shifted every row below it.
@@ -678,6 +683,82 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		rows = append(rows, "", renderer.RenderSoftHints(w, hints...))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "mirror directory", Width: w + 6, Content: renderer.RenderSoftBody(w+6, strings.Join(rows, "\n"))})
 		return &overlay
+	case overlayQuitConfirm:
+		active := countStatus(m.transfers, domain.Active)
+		queued := countStatus(m.transfers, domain.Queued)
+		rows := []string{
+			renderer.Styles.DetailBody.Width(64).Render("Quit with transfers still running?"),
+			renderer.Styles.DetailMeta.Width(64).Render(fmt.Sprintf("%d running, %d queued — whatever is mid-file is left partial", active, queued)),
+			"",
+			renderer.RenderSoftHints(64,
+				tideui.SoftHint{Key: "y/enter", Label: "quit"},
+				tideui.SoftHint{Key: "esc/n", Label: "stay"}),
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "quit", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlayUpdate:
+		rows := []string{}
+		switch m.update.state {
+		case updateDownloading, updateInstalling:
+			verb := "Downloading"
+			if m.update.state == updateInstalling {
+				verb = "Installing"
+			}
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(64).Render(fmt.Sprintf("%s TideFTP %s…", verb, m.update.latest.Version)),
+				renderer.Styles.DetailMeta.Width(64).Render(updateProgressBar(m.update.percent, 40)),
+			)
+		case updateInstalled:
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(64).Render("Updated to TideFTP "+m.update.latest.Version+"."),
+				renderer.Styles.DetailMeta.Width(64).Render("Restarting relaunches with the same arguments."),
+			)
+			if m.update.removeCommand != "" {
+				rows = append(rows, "",
+					renderer.Styles.DetailMeta.Width(64).Render("An older copy earlier on PATH still shadows it. Remove it with:"),
+					renderer.Styles.DetailMeta.Width(64).Render(m.update.removeCommand))
+			}
+			rows = append(rows, "", renderer.RenderSoftHints(64,
+				tideui.SoftHint{Key: "enter", Label: "restart now"},
+				tideui.SoftHint{Key: "esc", Label: "later"}))
+		case updateNeedsElevation:
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(64).Render("Downloaded TideFTP "+m.update.latest.Version+", but it could not be installed."),
+				renderer.Styles.DetailMeta.Width(64).Render("The install location is not writable. Run this outside TideFTP:"),
+				renderer.Styles.DetailMeta.Width(64).Render(m.update.manualCommand),
+				"", renderer.RenderSoftHints(64,
+					tideui.SoftHint{Key: "c", Label: "copy command"},
+					tideui.SoftHint{Key: "esc", Label: "close"}))
+		case updateFailed:
+			message := "The update failed."
+			if m.update.err != nil {
+				message = m.update.err.Error()
+			}
+			rows = append(rows,
+				renderer.Styles.DetailBody.Width(64).Render("Update failed"),
+				renderer.Styles.DetailMeta.Width(64).Render(message),
+				"", renderer.RenderSoftHints(64, tideui.SoftHint{Key: "esc", Label: "close"}))
+		default:
+			rows = append(rows, renderer.Styles.DetailBody.Width(64).Render(fmt.Sprintf("Install TideFTP %s?", m.update.latest.Version)))
+			if summary := m.update.latest.Summary; summary != "" {
+				rows = append(rows, renderer.Styles.DetailMeta.Width(64).Render(summary))
+			}
+			if m.queueBusy() {
+				rows = append(rows, "", renderer.Styles.DetailMeta.Width(64).Render(fmt.Sprintf(
+					"%d running, %d queued — installing replaces the binary, and restarting drops them",
+					countStatus(m.transfers, domain.Active), countStatus(m.transfers, domain.Queued))))
+			}
+			install := "install"
+			if m.queueBusy() && !m.updateBusyAck {
+				install = "install anyway"
+			}
+			rows = append(rows, "", renderer.RenderSoftHints(64,
+				tideui.SoftHint{Key: "enter", Label: install},
+				tideui.SoftHint{Key: "i", Label: "ignore this version"},
+				tideui.SoftHint{Key: "esc", Label: "later"}))
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: updateOverlayTitle(m.update.state), Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
 	case overlayHostKey:
 		if m.hostKeyPrompt == nil {
 			return nil
@@ -859,12 +940,13 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 	case overlaySettings:
 		width := min(60, max(36, m.width-8))
 		contentWidth := width - 4
-		rows := make([]string, 0, int(settingsFieldCount)+2)
-		for field := settingsField(0); field < settingsFieldCount; field++ {
+		visible := m.settingsVisibleFields()
+		rows := make([]string, 0, len(visible)+2)
+		for row, field := range visible {
 			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
 				Text:     settingsFieldLabel(field),
 				Suffix:   m.settingsFieldValue(field),
-				Selected: int(field) == m.settingsCursor,
+				Selected: row == m.settingsCursor,
 			}, contentWidth))
 		}
 		rows = append(rows, "", renderer.RenderSoftHints(contentWidth,

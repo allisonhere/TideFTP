@@ -248,6 +248,79 @@ func TestEngineUploadAndDownloadRoundTrip(t *testing.T) {
 	}
 }
 
+// The same guard as the SFTP engine's: a source shorter than the listing said
+// ends in an ordinary EOF and used to be reported Completed. Over FTP it was
+// worse still — the server's final reply (226 vs 426) was read by
+// Response.Close and the error thrown away, so even a server saying the
+// transfer broke went unnoticed.
+func TestEngineShortDownloadIsNotReportedComplete(t *testing.T) {
+	server := startFTPServer(t)
+	engine := server.connect(t).Engine()
+
+	body := []byte("short body\n")
+	server.writeFile(t, "short.bin", body)
+	destination := filepath.Join(t.TempDir(), "short.bin")
+
+	engine.Start(transfer.Request{
+		ID: 30, Direction: domain.Download,
+		Source: "/short.bin", Destination: destination, Size: int64(len(body)) * 20,
+	})
+	event := awaitTerminal(t, engine, 30)
+
+	if event.Kind != transfer.Failed {
+		t.Fatalf("terminal event = %v (err %v), want Failed for a truncated download", event.Kind, event.Err)
+	}
+	if !errors.Is(event.Err, transfer.ErrShort) {
+		t.Fatalf("error = %v, want ErrShort", event.Err)
+	}
+}
+
+func TestEngineShortUploadIsNotReportedComplete(t *testing.T) {
+	server := startFTPServer(t)
+	engine := server.connect(t).Engine()
+
+	body := []byte("short body\n")
+	local := filepath.Join(t.TempDir(), "short.bin")
+	if err := os.WriteFile(local, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.Start(transfer.Request{
+		ID: 31, Direction: domain.Upload,
+		Source: local, Destination: "/short.bin", Size: int64(len(body)) * 20,
+	})
+	event := awaitTerminal(t, engine, 31)
+
+	if event.Kind != transfer.Failed || !errors.Is(event.Err, transfer.ErrShort) {
+		t.Fatalf("terminal event = %v (err %v), want Failed with ErrShort", event.Kind, event.Err)
+	}
+}
+
+// A cancelled download reports Canceled rather than Failed. Cancelling closes
+// the handles out from under the copy loop, so whichever call fails next —
+// the read or the write mid-chunk — describes the cancel and not a failure;
+// move maps that once, after disposing of the connection. Where the cancel
+// lands is a matter of timing, so this covers the outcome rather than one
+// particular interleaving.
+func TestCancelDuringADownloadReportsCanceled(t *testing.T) {
+	server := startFTPServer(t)
+	engine := server.connect(t).Engine()
+
+	body := bytes.Repeat([]byte("cancel me\n"), 200000)
+	server.writeFile(t, "big.bin", body)
+
+	engine.Start(transfer.Request{
+		ID: 32, Direction: domain.Download,
+		Source: "/big.bin", Destination: filepath.Join(t.TempDir(), "big.bin"), Size: int64(len(body)),
+	})
+	engine.Cancel(32)
+	event := awaitTerminal(t, engine, 32)
+
+	if event.Kind != transfer.Canceled {
+		t.Fatalf("terminal event = %v (err %v), want Canceled", event.Kind, event.Err)
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {

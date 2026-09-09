@@ -8,6 +8,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -36,7 +38,32 @@ type Config struct {
 	AutoReconnect bool      `toml:"auto_reconnect"`
 	Layout        Layout    `toml:"layout"`
 	Sort          Sort      `toml:"sort"`
+	Updates       Updates   `toml:"updates"`
 	Profiles      []Profile `toml:"profiles"`
+}
+
+// Updates is the self-update behaviour: whether to look for a newer release
+// on launch, and what the last look found.
+//
+// There is deliberately no cache of the available version here. The notice is
+// check-first — it is only ever raised by a live check in the running
+// session, never rehydrated from disk — so a release that was available last
+// week cannot resurface as a phantom update after it has been installed or
+// yanked. LastCheckedUnix and DismissedVersion are the only two facts worth
+// carrying across runs, and neither of them can claim an update exists.
+type Updates struct {
+	// CheckOnStartup looks for a newer release when the app launches. It is
+	// the only gate on the automatic check; there is no interval, because a
+	// check is one request per launch and a long-running session that has
+	// already checked has nothing to gain from checking again.
+	CheckOnStartup bool `toml:"check_on_startup"`
+	// LastCheckedUnix is when a check last completed, successfully or not.
+	// Shown in Settings; never used to decide whether to check.
+	LastCheckedUnix int64 `toml:"last_checked_unix"`
+	// DismissedVersion is a version the user asked not to be told about
+	// again. It suppresses the notice for that exact version only, so a
+	// later release still surfaces.
+	DismissedVersion string `toml:"dismissed_version,omitempty"`
 }
 
 // Sort is the default order both file panes open in. Key is one of "name",
@@ -88,13 +115,23 @@ func Default() Config {
 		AutoReconnect: true,
 		Layout:        Layout{FileSplit: 0.5, BottomSplit: 0.28},
 		Sort:          Sort{Key: "name"},
+		Updates:       Updates{CheckOnStartup: true},
 	}
 }
 
-// Load reads the config file at path. A missing or unparseable file yields the
-// defaults rather than an error, so a deleted or corrupt config never stops
-// the app from starting; only an unexpected I/O failure (a permissions
-// problem, say) is reported.
+// ErrCorrupt wraps Load's error for a file that exists but is not valid TOML.
+// It is distinct from a missing file on purpose: a file that is there and
+// unreadable holds the user's saved profiles, and the app must not treat it
+// as a blank slate it may overwrite. Callers check for it with errors.Is and
+// run without persistence rather than saving defaults over the file — see
+// main, which does exactly that.
+var ErrCorrupt = errors.New("config file is not valid TOML")
+
+// Load reads the config file at path. A missing file yields the defaults with
+// no error, so a first run needs nothing on disk. A file that exists but does
+// not parse yields the defaults *and* ErrCorrupt: the app can still start,
+// but whatever is in that file has to survive, and the caller is the one that
+// decides how (today: by not saving at all until the user fixes it).
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -105,7 +142,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg := Default()
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return Default(), nil // corrupt config: start over rather than crash
+		return Default(), fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
 	return cfg, nil
 }

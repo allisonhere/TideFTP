@@ -23,7 +23,7 @@ var credTestTarget = session.Target{Name: "ftpbox", Protocol: "ftp", Host: "ftp.
 func TestConnectFormSavingRemembersThePassword(t *testing.T) {
 	store := fakecredstore.New()
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -50,7 +50,7 @@ func TestConnectFormSavingRemembersThePassword(t *testing.T) {
 func TestConnectFormReopeningPrefillsARememberedPassword(t *testing.T) {
 	store := fakecredstore.New()
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -79,7 +79,7 @@ func TestConnectFormReopeningPrefillsARememberedPassword(t *testing.T) {
 func TestConnectFormNotRememberingForgetsAnyStoredPassword(t *testing.T) {
 	store := fakecredstore.New()
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store, "")
 	model.width, model.height = 120, 36
 
 	// Save once with Remember on, so there is something to forget.
@@ -105,7 +105,7 @@ func TestConnectFormNotRememberingForgetsAnyStoredPassword(t *testing.T) {
 func TestConnectFormDeletingProfileForgetsItsPassword(t *testing.T) {
 	store := fakecredstore.New()
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -132,7 +132,7 @@ func TestConnectFormCredentialStoreErrorsSurfaceWithoutCrashing(t *testing.T) {
 	store := fakecredstore.New()
 	store.Err = errors.New("secret service not running")
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -155,7 +155,7 @@ func TestConnectFormCredentialStoreErrorsSurfaceWithoutCrashing(t *testing.T) {
 func TestConnectFormRememberFieldRenders(t *testing.T) {
 	store := fakecredstore.New()
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, store, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))
@@ -167,7 +167,7 @@ func TestConnectFormRememberFieldRenders(t *testing.T) {
 
 func TestConnectFormRememberHiddenWithoutACredStore(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{credTestTarget}, config.Default(), nil, nil, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes("c"))

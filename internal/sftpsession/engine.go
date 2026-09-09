@@ -6,7 +6,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -26,10 +25,11 @@ var _ transfer.Engine = (*Engine)(nil)
 type Engine struct {
 	*transfer.Runner
 	client *sftp.Client
+	abort  func() error
 }
 
-func newEngine(client *sftp.Client) *Engine {
-	e := &Engine{client: client}
+func newEngine(client *sftp.Client, abort func() error) *Engine {
+	e := &Engine{client: client, abort: abort}
 	e.Runner = transfer.NewRunner(e.move)
 	return e
 }
@@ -39,35 +39,52 @@ func newEngine(client *sftp.Client) *Engine {
 // size when the conflict policy resolved to Resume — open (below) seeks both
 // sides to it rather than truncating the destination.
 func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
-	src, dst, err := e.open(req)
-	if err != nil {
-		return 0, err
-	}
-
-	var closeOnce sync.Once
-	closeBoth := func() {
-		closeOnce.Do(func() {
-			_ = src.Close()
-			_ = dst.Close()
-		})
-	}
+	// sftp.File.Close takes the same lock as Read/Write, so it cannot
+	// interrupt stalled I/O. Give a responsive transfer time to stop between
+	// chunks, then close the transport if any open, I/O, or close is stuck.
 	finished := make(chan struct{})
-	// LIFO: close(finished) retires the watcher first, then the handles go.
-	defer closeBoth()
-	defer close(finished)
-
-	// Checking a channel between chunks only cancels a transfer that is still
-	// moving. One parked on a dead connection needs its handles closed out
-	// from under it, which is what this does.
+	watcherDone := make(chan struct{})
 	go func() {
+		defer close(watcherDone)
 		select {
 		case <-stop:
 		case <-quit:
 		case <-finished:
 			return
 		}
-		closeBoth()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			_ = e.abort()
+		}
 	}()
+	defer func() {
+		close(finished)
+		<-watcherDone
+	}()
+	sent, err := e.copy(req, stop, quit, report)
+	if err != nil && transfer.IsCanceled(stop, quit) {
+		return sent, transfer.ErrCanceled
+	}
+	if err == nil {
+		err = transfer.CheckComplete(req, sent)
+	}
+	return sent, err
+}
+
+func (e *Engine) copy(req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
+	if transfer.IsCanceled(stop, quit) {
+		return req.Offset, transfer.ErrCanceled
+	}
+	src, dst, err := e.open(req)
+	if err != nil {
+		return 0, err
+	}
+
+	defer src.Close()
+	defer dst.Close()
 
 	sent := req.Offset
 	buf := make([]byte, transfer.CopyChunk)
@@ -95,7 +112,7 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 		}
 		if readErr == io.EOF {
 			// Close the destination explicitly so an error flushing the last
-			// bytes is reported instead of being swallowed by closeBoth.
+			// bytes is reported instead of being swallowed by the deferred close.
 			if err := dst.Close(); err != nil {
 				return sent, fmt.Errorf("close %s: %w", req.Destination, err)
 			}

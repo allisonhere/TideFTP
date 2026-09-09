@@ -9,6 +9,18 @@ feature batches and may change behaviour.
 
 ### Added
 
+- **In-app updates.** TideFTP now checks GitHub for a newer release at launch
+  and can install it itself: `U` (or Settings → *Updates*) downloads the
+  release archive, verifies it against the release's `SHA256SUMS`, replaces
+  the binary, and restarts into it. Downloads are accepted only from
+  `github.com`, and an archive with a missing or mismatched checksum is
+  refused. Installing while transfers are running warns first and asks again,
+  rather than refusing — it is your call. `i` ignores a version until the next
+  release. This is TideFTP's first outbound request to anything other than the
+  server you connect to; it is one call to `api.github.com` per launch and is
+  switched off with `check_on_startup = false` under `[updates]`, or in
+  Settings. A build that is not a tagged release never checks.
+
 - **`match-omarchy` theme.** For [Omarchy](https://omarchy.org) users, a theme
   that follows the current Omarchy desktop theme: it reads the live palette
   (via `omarchy-theme-color`, falling back to

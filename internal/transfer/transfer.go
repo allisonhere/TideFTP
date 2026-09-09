@@ -10,7 +10,12 @@
 // way it does — a synchronous Transfer(src, dst) error would freeze the TUI.
 package transfer
 
-import "tideftp/internal/domain"
+import (
+	"errors"
+	"fmt"
+
+	"tideftp/internal/domain"
+)
 
 // Request describes one file to move. ID matches domain.Transfer.ID so events
 // coming back can be matched to the queue row that produced them.
@@ -53,6 +58,30 @@ type Event struct {
 // Terminal reports whether an event is the last one for its transfer.
 func (e Event) Terminal() bool {
 	return e.Kind == Completed || e.Kind == Failed || e.Kind == Canceled
+}
+
+// ErrShort marks a transfer that ended without error but moved fewer bytes
+// than its Request said it would.
+var ErrShort = errors.New("short transfer")
+
+// CheckComplete guards the one failure a copy loop cannot see on its own: a
+// source that stopped early looks exactly like a source that ended, so an
+// engine reaching EOF has no way to tell a finished download from a
+// truncated one. Comparing what actually moved against the size the listing
+// reported is what separates them, and without it a truncated file is
+// reported Completed — and drawn at 100%, since the UI pins BytesDone to
+// BytesTotal on completion.
+//
+// A Request with no size (Size <= 0) is exempt: an FTP listing that could
+// not parse a size reports 0 for a file that is not empty, and failing every
+// such transfer would be worse than not checking. A transfer that moved more
+// than expected is exempt too — that means the source grew after it was
+// listed, which is not a failure.
+func CheckComplete(req Request, sent int64) error {
+	if req.Size <= 0 || sent >= req.Size {
+		return nil
+	}
+	return fmt.Errorf("%w: moved %d of %d bytes", ErrShort, sent, req.Size)
 }
 
 // Engine moves bytes on behalf of the UI.

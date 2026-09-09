@@ -21,7 +21,7 @@ func TestOverlayShadowRendersWhenEnabled(t *testing.T) {
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil, "")
 	model.width, model.height = 120, 36
 	model.overlay = overlayHelp
 

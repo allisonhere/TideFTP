@@ -71,7 +71,7 @@ func (m *Model) startEdit() tea.Cmd {
 		m.setError("highlight a file to edit")
 		return nil
 	}
-	if entry.IsDir() {
+	if entry.IsDirLike() {
 		m.setError("cannot edit a directory")
 		return nil
 	}

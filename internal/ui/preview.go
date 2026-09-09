@@ -102,7 +102,7 @@ func (m *Model) startPreview() tea.Cmd {
 		m.setError("highlight a file to preview")
 		return nil
 	}
-	if entry.IsDir() {
+	if entry.IsDirLike() {
 		m.setError("cannot preview a directory")
 		return nil
 	}

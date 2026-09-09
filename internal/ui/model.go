@@ -16,6 +16,7 @@ import (
 	"tideftp/internal/domain"
 	"tideftp/internal/session"
 	"tideftp/internal/transfer"
+	"tideftp/internal/update"
 	"tideftp/internal/vfs"
 )
 
@@ -54,6 +55,8 @@ const (
 	overlayServerList
 	overlayPreview
 	overlaySync
+	overlayQuitConfirm
+	overlayUpdate
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -357,6 +360,33 @@ type Model struct {
 	// appear (see connectFieldVisible).
 	creds credstore.Store
 
+	// version is the running binary's version, for the update check to
+	// compare against and for Settings to display.
+	version string
+	// updates is the persisted Updates block, held whole rather than spread
+	// across fields. snapshotConfig rebuilds config.Config from the model
+	// every time it saves, so a config field with nothing behind it here
+	// would be zeroed on the next persist — keeping the block intact is what
+	// makes that impossible.
+	updates config.Updates
+	// updater talks to GitHub. It is a seam, like save and creds: tests
+	// swap in one pointed at a stub transport so nothing reaches the
+	// network. Never nil — NewModel builds the real one.
+	updater *update.Updater
+	// update tracks an in-flight or finished update, and is the only thing
+	// that raises the topbar notice. It is deliberately not restored from
+	// config: the notice is check-first, so a version that was available
+	// last run cannot resurface without a live check confirming it.
+	update updateProgress
+	// restartExec is the freshly installed binary main should exec once the
+	// program has exited. Empty means no update was installed this session.
+	// The handoff waits for exit rather than spawning from in here so the
+	// terminal is restored and two processes never share it.
+	restartExec string
+	// updateBusyAck records that the "transfers are still running" warning
+	// has already been acknowledged for this install attempt.
+	updateBusyAck bool
+
 	status    string
 	statusErr bool
 }
@@ -398,7 +428,12 @@ const parentEntryName = ".."
 // result — the zero Config would silently turn off shadow and icons, so it is
 // not a sensible input. save, when non-nil, is called to persist every change
 // the user makes to those settings.
-func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg config.Config, save config.SaveFunc, creds credstore.Store) Model {
+// currentVersion is the running binary's version, as stamped by ldflags. It
+// is what an update check compares against, and it is deliberately allowed to
+// be empty or "dev": an unreleased build has nothing to update to, and the
+// startup check skips entirely rather than making a request whose answer
+// could only be discarded (see maybeCheckForUpdatesCmd).
+func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg config.Config, save config.SaveFunc, creds credstore.Store, currentVersion string) Model {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
@@ -447,6 +482,9 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		bottomSplit:     tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
 		save:            save,
 		creds:           creds,
+		version:         currentVersion,
+		updates:         cfg.Updates,
+		updater:         update.New(),
 		logs:            []string{"redacted logs enabled"},
 		status:          "ready",
 	}
@@ -489,6 +527,7 @@ func (m Model) snapshotConfig() config.Config {
 			Key:  m.sortDefaultPane().sortKey.String(),
 			Desc: m.sortDefaultPane().sortDesc,
 		},
+		Updates:  m.updates,
 		Profiles: profilesToConfig(m.profiles),
 	}
 }
@@ -559,6 +598,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.theme.Name == themeNameMatchOmarchy {
 		cmds = append(cmds, omarchyTickCmd())
+	}
+	if cmd := m.maybeCheckForUpdatesCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
 }
@@ -651,7 +693,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setError(fmt.Sprintf("editor: %v", msg.err))
 			return m, nil
 		}
-		return m, editSaveCmd(m.fsByID(edit.pane), *edit)
+		// The connection can drop while the editor is open — it is the one
+		// place the user spends minutes away from the app. Writing back
+		// through a filesystem that no longer exists would panic on a nil
+		// interface, so the edit is kept on disk and the user told where,
+		// rather than removed along with their work.
+		saveFS := m.fsByID(edit.pane)
+		if saveFS == nil {
+			m.setError(fmt.Sprintf("connection lost while editing %s — your changes are kept at %s", edit.name, edit.tmpPath))
+			return m, nil
+		}
+		return m, editSaveCmd(saveFS, *edit)
 	case editSavedMsg:
 		if msg.err != nil {
 			m.setError(fmt.Sprintf("save %s: %v", msg.name, msg.err))
@@ -732,6 +784,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case transferStreamClosed:
 		return m, nil
+	case updateCheckedMsg:
+		return m, m.applyUpdateChecked(msg)
+	case updateDownloadedMsg:
+		return m, m.applyUpdateDownloaded(msg)
+	case updateInstalledMsg:
+		return m, m.applyUpdateInstalled(msg)
+	case updateTickMsg:
+		return m, m.applyUpdateTick()
 	case statsTickMsg:
 		return m, m.applyStatsTick()
 	case omarchyTickMsg:
@@ -769,6 +829,20 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		}
 		result = next
 	}()
+
+	// ctrl+c is the reflex for "get me out of here" and has to work from
+	// inside every overlay, not only from the panes underneath them — an
+	// overlay that swallows it reads as a hung app. It is handled ahead of
+	// the overlay dispatch for exactly that reason. From the quit
+	// confirmation itself it is the hard exit, so a user who means it is
+	// never asked twice.
+	if msg.String() == "ctrl+c" {
+		if m.overlay == overlayQuitConfirm {
+			return m, m.quitNow()
+		}
+		m.overlay = overlayNone
+		return m, m.requestQuit()
+	}
 
 	if m.overlay == overlayTheme {
 		action := m.themePicker.Update(msg)
@@ -820,6 +894,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlaySync {
 		return m, m.handleSyncKey(msg)
 	}
+	if m.overlay == overlayUpdate {
+		return m, m.handleUpdateKey(msg)
+	}
 	if m.overlay != overlayNone {
 		switch msg.String() {
 		case "esc", "q", "n":
@@ -841,6 +918,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 			case overlayHostKey:
 				m.overlay = overlayNone
 				return m, m.trustHostKey(false)
+			case overlayQuitConfirm:
+				return m, m.quitNow()
 			}
 		case "r":
 			if m.overlay == overlayHostKey {
@@ -860,11 +939,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "ctrl+c", "q":
-		if m.conn != nil {
-			return m, tea.Sequence(closeConnCmd(m.conn), tea.Quit)
-		}
-		return m, tea.Quit
+	case "q":
+		return m, m.requestQuit()
 	case "/":
 		if fp := m.focusedFilePane(); fp != nil {
 			fp.filtering = true
@@ -903,7 +979,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "left", "h":
 		m.focus = focusLocal
 	case "right", "l":
-		m.focus = focusRemote
+		m.focusRemotePane()
 	case "n":
 		m.openMkdirPrompt()
 	case "f2":
@@ -957,6 +1033,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.refresh()
 	case "c":
 		cmd = m.openServerList()
+	case "U":
+		m.openUpdateOverlay()
 	case "t":
 		m.overlay = overlayTheme
 		m.themePicker.Open(m.theme.Name)
@@ -1023,8 +1101,9 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusLocal
 		m.cursorFromMouse(&m.local, msg.Y)
 	case msg.Y < bottomStart:
-		m.focus = focusRemote
-		m.cursorFromMouse(&m.remote, msg.Y)
+		if m.focusRemotePane() {
+			m.cursorFromMouse(&m.remote, msg.Y)
+		}
 	default:
 		m.focus = focusQueue
 	}
@@ -1432,13 +1511,57 @@ func (m *Model) activateCursor() tea.Cmd {
 	}
 	target := m.filePaneByID(pane)
 	entry, found := target.current()
-	if !found || !entry.IsDir() {
+	// IsDirLike, not IsDir: a symlink pointing at a directory is one to open,
+	// and refusing silently — which is what requiring a real directory did —
+	// makes enter look broken on exactly the layouts this app is for.
+	if !found || !entry.IsDirLike() {
 		return nil
 	}
 	if isParentDirEntry(entry) {
 		return m.parentDir()
 	}
-	return m.navigateTo(pane, m.fsByID(pane).Child(target.path, entry.Name))
+	fs := m.fsByID(pane)
+	if fs == nil {
+		return nil
+	}
+	return m.navigateTo(pane, fs.Child(target.path, entry.Name))
+}
+
+// requestQuit ends the session, asking first when there is something in
+// flight to lose. Quitting mid-transfer leaves a partial file at whichever
+// end was being written and nothing on screen to say so, which is worth one
+// keypress to confirm — ctrl+c from the confirmation skips it for anyone who
+// already knows.
+func (m *Model) requestQuit() tea.Cmd {
+	if m.queueBusy() {
+		m.overlay = overlayQuitConfirm
+		m.setStatus("transfers are still running — quit anyway?")
+		return nil
+	}
+	return m.quitNow()
+}
+
+// quitNow ends the session unconditionally, closing the connection first so
+// the server sees a clean disconnect rather than a dropped socket.
+func (m *Model) quitNow() tea.Cmd {
+	if m.conn != nil {
+		return tea.Sequence(closeConnCmd(m.conn), tea.Quit)
+	}
+	return tea.Quit
+}
+
+// focusRemotePane moves focus to the remote pane, and reports whether it
+// could. A disconnected remote pane has no filesystem behind it, and every
+// action that reaches for one through fsByID gets a nil interface — so focus
+// is refused rather than left pointing at a pane whose next keystroke would
+// panic. clearConnection makes the same move in the other direction.
+func (m *Model) focusRemotePane() bool {
+	if !m.connected() {
+		m.setError("not connected")
+		return false
+	}
+	m.focus = focusRemote
+	return true
 }
 
 // parentDir walks the focused pane up one level, doing nothing at the root.
@@ -1447,8 +1570,12 @@ func (m *Model) parentDir() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	fs := m.fsByID(pane)
+	if fs == nil {
+		return nil
+	}
 	target := m.filePaneByID(pane)
-	parent := m.fsByID(pane).Parent(target.path)
+	parent := fs.Parent(target.path)
 	if parent == target.path {
 		return nil
 	}
@@ -1610,6 +1737,12 @@ type preflightScan struct {
 	totalBytes int64
 	truncated  bool // hit preflightScanCap; files/totalBytes are a lower bound
 	cursor     int  // selects a policy row in overlayConflict
+	// skippedLinks counts symlinks pointing at directories that the walk
+	// left alone. They cannot be queued: transfer.Engine moves file bytes and
+	// vfs.FS has no way to recreate a link, so queuing one only produced a
+	// transfer that failed at open. Following one instead is worse — a link
+	// back up its own tree would drive the walk until it hit the cap.
+	skippedLinks int
 
 	// dstFS and siblings exist only to resolve a Rename: dstFS builds the
 	// renamed path, siblings (destination dir -> name -> entry) is what a
@@ -1726,6 +1859,10 @@ func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries [
 				stack = append(stack, walkItem{srcPath, dstPath})
 				continue
 			}
+			if entry.LinksToDir {
+				scan.skippedLinks++
+				continue
+			}
 			scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, name: entry.Name, size: entry.Size, modified: entry.Modified})
 			scan.totalBytes += entry.Size
 		}
@@ -1746,6 +1883,10 @@ func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries [
 				if child.IsDir() {
 					scan.folders++
 					stack = append(stack, walkItem{childSrc, childDst})
+					continue
+				}
+				if child.LinksToDir {
+					scan.skippedLinks++
 					continue
 				}
 				if len(scan.files) >= preflightScanCap {
@@ -1808,6 +1949,10 @@ func (m *Model) applyPreflightScan(msg preflightScanMsg) {
 		return
 	}
 	if len(msg.scan.files) == 0 {
+		if msg.scan.skippedLinks > 0 {
+			m.setStatus(fmt.Sprintf("nothing to queue — skipped %d linked folder(s)", msg.scan.skippedLinks))
+			return
+		}
 		m.setStatus(fmt.Sprintf("%d empty folder(s), nothing to queue", msg.scan.folders))
 		return
 	}

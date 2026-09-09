@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"path"
@@ -111,6 +112,31 @@ func file(name string, size int64, mod time.Time) domain.Entry {
 }
 func dirEntry(name string) domain.Entry {
 	return domain.Entry{Name: name, Kind: domain.EntryDir, Mode: "drwxr-xr-x"}
+}
+
+func TestSyncScanCapDoesNotPruneMatchingFiles(t *testing.T) {
+	src, dst := newSyncFS(), newSyncFS()
+	entries := make([]domain.Entry, preflightScanCap+2)
+	for i := range entries {
+		entries[i] = file(fmt.Sprintf("f%05d", i), 1, time.Time{})
+	}
+	src.put("/src", entries...)
+	dst.put("/dst", append(append([]domain.Entry(nil), entries...), file("extra", 1, time.Time{}))...)
+	m, _ := mirrorModel(t, src, dst)
+	msg := m.beginSyncScan(domain.Upload, "/src", "/dst", src, dst, true)().(syncScanMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if !msg.plan.truncated {
+		t.Fatal("expected a truncated scan")
+	}
+	if len(msg.plan.prunePaths) != 1 || msg.plan.prunePaths[0].path != "/dst/extra" {
+		t.Fatalf("prune paths = %+v, want only /dst/extra", msg.plan.prunePaths)
+	}
+	result := syncPruneCmd(dst, msg.plan.prunePaths)().(syncPruneMsg)
+	if result.err != nil || result.removed != 1 || len(dst.tree["/dst"]) != len(entries) {
+		t.Fatalf("prune result = %+v; matching files must survive", result)
+	}
 }
 
 // mirrorModel wires a connected model whose local pane is at /src over srcFS

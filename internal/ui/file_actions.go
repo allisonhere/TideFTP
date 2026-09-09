@@ -98,7 +98,19 @@ func (m *Model) openDeletePrompt() {
 	}
 	m.fileAction = &fileActionPrompt{kind: fileActionDelete, pane: paneID, entries: entries}
 	m.overlay = overlayFileAction
-	m.setStatus(fmt.Sprintf("delete %d item(s)?", len(entries)))
+	folders := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			folders++
+		}
+	}
+	if folders > 0 {
+		// The overlay spells out that a folder goes with everything inside
+		// it; the status line should not undersell it either.
+		m.setStatus(fmt.Sprintf("delete %d item(s), including %d folder(s) and their contents?", len(entries), folders))
+	} else {
+		m.setStatus(fmt.Sprintf("delete %d item(s)?", len(entries)))
+	}
 }
 
 func (m *Model) openChmodPrompt() {
@@ -222,10 +234,20 @@ func (m *Model) submitFileAction() tea.Cmd {
 			return nil
 		}
 	}
+	// The connection can drop between opening this prompt and confirming it,
+	// which leaves fsByID handing back a nil interface — calling through it
+	// panics and takes the whole app down.
+	fs := m.fsByID(prompt.pane)
+	if fs == nil {
+		m.fileAction = nil
+		m.overlay = overlayNone
+		m.setError("not connected")
+		return nil
+	}
 	m.fileAction = nil
 	m.overlay = overlayNone
 	m.setStatus(fileActionLabel(prompt.kind) + "...")
-	return fileActionCmd(m.fsByID(prompt.pane), m.filePaneByID(prompt.pane).path, *prompt)
+	return fileActionCmd(fs, m.filePaneByID(prompt.pane).path, *prompt)
 }
 
 // validFileActionName rejects names that would resolve outside the current

@@ -24,6 +24,31 @@ The installer drops a binary in `~/.local/bin` (set `INSTALL_DIR` for
 elsewhere) — no system password. Or grab an archive from the
 [latest release](https://github.com/allisonhere/TideFTP/releases/latest).
 
+## Updating
+
+TideFTP checks GitHub once at launch for a newer release. When there is one,
+the topbar says so and `U` opens a confirmation; accepting downloads the
+release archive, verifies it against the release's `SHA256SUMS`, replaces the
+binary in place, and offers to restart into it. Downloads are only ever
+accepted from `github.com`, and an archive whose checksum is missing or does
+not match is refused rather than installed.
+
+**This is the one thing TideFTP contacts that you did not type in.** It is a
+single request to `api.github.com` per launch, sending nothing but the
+request itself. Turn it off in Settings (`,` → *Check for updates*), or in
+`config.toml`:
+
+```toml
+[updates]
+check_on_startup = false
+```
+
+`i` in the update prompt ignores that one version and keeps quiet until the
+next release. A build that is not a tagged release — `go run`, anything
+reporting `dev` — never checks at all, since it has nothing to compare
+against. If the binary lives somewhere you cannot write, TideFTP says so and
+prints the command to finish the job instead of failing silently.
+
 ## Run
 
 ```bash
@@ -113,6 +138,7 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `Shift+Left` / `Shift+Right`: resize local/remote panes
 - `Shift+Up` / `Shift+Down`: resize transfer pane
 - `1`-`6`: bottom tabs
+- `U`: install a waiting update
 - `?`: help
 - `q`: quit
 

@@ -119,10 +119,24 @@ func ftpPathExists(conn *ftp.ServerConn, name string) bool {
 func (f *FS) Remove(ctx context.Context, targetPath string) error {
 	targetPath = vfs.CleanRemote(targetPath)
 	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
-		if err := conn.Delete(targetPath); err == nil {
+		// Ask what the target is when the server can say (MLST). Deleting
+		// blind and falling back to RMD reports whichever error came last,
+		// so a non-empty directory surfaced as the file error rather than
+		// "directory not empty", and a file that could not be deleted
+		// surfaced as a directory error.
+		if entry, err := conn.GetEntry(targetPath); err == nil && entry != nil && entry.Type == ftp.EntryTypeFolder {
+			return conn.RemoveDir(targetPath)
+		}
+		err := conn.Delete(targetPath)
+		if err == nil {
 			return nil
 		}
-		return conn.RemoveDir(targetPath)
+		// No MLST: try the other call, and keep the DELE error if that fails
+		// too, since a plain file is the more common case.
+		if dirErr := conn.RemoveDir(targetPath); dirErr == nil {
+			return nil
+		}
+		return err
 	})
 }
 

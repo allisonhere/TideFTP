@@ -1,11 +1,10 @@
-   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50
+   TideFTP    test  test.local:22              update v0.3.0  U  1 queued  tide-night  split 50/50
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
 │Local                       /home/allie/projects││Remote                              /public_html│
 │mode        size        modified        name    ││mode        size        modified        name    │
 │  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
 │    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
-│    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
-│                  ╭─ tideftp · settings ───────────────────────────────────────╮                  │
+│    -rw-r--r--    ╭─ tideftp · settings ───────────────────────────────────────╮                  │
 │                  │                                                            │                  │
 │                  │  ▌ Theme                                       tide-night  │                  │
 │                  │    Density                                        compact  │                  │
@@ -16,7 +15,8 @@
 │                  │    Verify                                             off  │                  │
 │                  │    Reconnect                                           on  │                  │
 │                  │    Check for updates                                   on  │                  │
-│                  │    Updates                     dev build — enter to check  │                  │
+│                  │    Updates                       v0.3.0 available — enter  │                  │
+│                  │    Ignore this version                              enter  │                  │
 │                  │                                                            │                  │
 │                  │    up/down select   h/l change   esc close                 │                  │
 ╰──────────────────│                                                            │──────────────────╯

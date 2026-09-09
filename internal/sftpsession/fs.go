@@ -53,13 +53,26 @@ func (f *FS) List(ctx context.Context, dirPath string, showHidden bool) ([]domai
 			if hidden && !showHidden {
 				continue
 			}
+			kind := entryKind(info.Mode())
+			linksToDir := false
+			if kind == domain.EntrySymlink {
+				// ReadDir reports the link itself, so a symlinked directory
+				// arrives looking like a file and the UI refuses to open it.
+				// Stat follows the link to settle that. It costs one round
+				// trip per symlink, which is why it is not done for every
+				// entry; a dangling link just fails and stays a plain symlink.
+				if target, err := f.client.Stat(vfs.ChildRemote(dirPath, name)); err == nil {
+					linksToDir = target.IsDir()
+				}
+			}
 			entries = append(entries, domain.Entry{
-				Name:     name,
-				Kind:     entryKind(info.Mode()),
-				Size:     info.Size(),
-				Mode:     info.Mode().String(),
-				Modified: info.ModTime(),
-				Hidden:   hidden,
+				Name:       name,
+				Kind:       kind,
+				Size:       info.Size(),
+				Mode:       info.Mode().String(),
+				Modified:   info.ModTime(),
+				Hidden:     hidden,
+				LinksToDir: linksToDir,
 			})
 		}
 		sort.Slice(entries, func(i, j int) bool {
@@ -109,10 +122,15 @@ func (f *FS) Remove(ctx context.Context, targetPath string) error {
 		return err
 	}
 	targetPath = vfs.CleanRemote(targetPath)
-	if err := f.client.Remove(targetPath); err == nil {
-		return nil
+	// Which call to make depends on what is actually there. Trying Remove and
+	// falling back to RemoveDirectory reports whichever error came last, so a
+	// file that genuinely could not be deleted surfaced as "not a directory"
+	// — the wrong problem entirely. Lstat, not Stat: a symlink to a directory
+	// is unlinked, never followed and rmdir'd.
+	if info, err := f.client.Lstat(targetPath); err == nil && info.IsDir() {
+		return f.client.RemoveDirectory(targetPath)
 	}
-	return f.client.RemoveDirectory(targetPath)
+	return f.client.Remove(targetPath)
 }
 
 func (f *FS) Chmod(ctx context.Context, path string, mode fs.FileMode) error {

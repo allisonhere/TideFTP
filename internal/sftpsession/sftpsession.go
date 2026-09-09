@@ -435,7 +435,7 @@ func newConn(sshClient *ssh.Client, client *sftp.Client) *Conn {
 		fs:     &FS{client: client},
 		done:   make(chan error, 1),
 	}
-	conn.engine = newEngine(client)
+	conn.engine = newEngine(client, sshClient.Close)
 
 	// The connection ending on its own is a drop. Close reports first, so a
 	// Wait that returns because we closed does not masquerade as one.
@@ -455,9 +455,11 @@ func (c *Conn) Done() <-chan error      { return c.done }
 
 func (c *Conn) Close() error {
 	c.end(nil)
+	// Release pending SFTP requests before waiting for the engine workers.
+	err := c.ssh.Close()
 	_ = c.engine.Close()
 	_ = c.client.Close()
-	return c.ssh.Close()
+	return err
 }
 
 func (c *Conn) end(reason error) {

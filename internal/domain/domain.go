@@ -17,9 +17,24 @@ type Entry struct {
 	Mode     string
 	Modified time.Time
 	Hidden   bool
+	// LinksToDir is set on an EntrySymlink whose target resolves to a
+	// directory. An adapter that cannot resolve the target cheaply — or a
+	// link that dangles — leaves it false, so false means "not known to be
+	// a directory" rather than "known not to be one".
+	LinksToDir bool
 }
 
+// IsDir reports whether the entry is a real directory. It is deliberately
+// false for a symlink pointing at one: everything that walks or deletes a
+// tree keys off this, and following a link there would let a cycle drive the
+// walk forever and let a recursive delete escape the tree it was given. Use
+// IsDirLike for the "can I open this?" question instead.
 func (e Entry) IsDir() bool { return e.Kind == EntryDir }
+
+// IsDirLike reports whether the entry can be opened as a directory — a real
+// one, or a symlink known to point at one. Navigation uses it; tree walks
+// and recursive deletes must not.
+func (e Entry) IsDirLike() bool { return e.Kind == EntryDir || e.LinksToDir }
 
 type TransferDirection int
 

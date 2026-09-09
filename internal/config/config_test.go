@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,17 +40,30 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadCorruptFileReturnsDefaults(t *testing.T) {
+// A corrupt file still yields a usable config so the app can start, but it
+// must report ErrCorrupt as well: the file is there and holds the user's
+// saved profiles, and a caller that cannot tell it apart from a missing file
+// will happily save defaults straight over them.
+func TestLoadCorruptFileReturnsDefaultsAndReportsIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("this is not [ valid toml"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load on corrupt file should not error, got %v", err)
+	if !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("Load on corrupt file err = %v, want ErrCorrupt", err)
 	}
 	if !reflect.DeepEqual(cfg, Default()) {
 		t.Fatalf("Load on corrupt file = %+v, want defaults %+v", cfg, Default())
+	}
+}
+
+// A missing file is the ordinary first run and must stay distinguishable from
+// a corrupt one — no error at all.
+func TestLoadMissingFileIsNotCorrupt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.toml")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load on missing file = %v, want no error", err)
 	}
 }
 

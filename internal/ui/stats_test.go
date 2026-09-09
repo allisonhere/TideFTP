@@ -16,7 +16,7 @@ import (
 
 func statsTestModel(t *testing.T) Model {
 	t.Helper()
-	return NewModel(localfs.New(), &stubDialer{}, nil, config.Default(), nil, nil)
+	return NewModel(localfs.New(), &stubDialer{}, nil, config.Default(), nil, nil, "")
 }
 
 func TestComputeStatsAggregatesAcrossStatusesAndProtocols(t *testing.T) {

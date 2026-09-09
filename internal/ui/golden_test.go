@@ -13,6 +13,7 @@ import (
 	"tideftp/internal/domain"
 	"tideftp/internal/fakefs"
 	"tideftp/internal/session"
+	"tideftp/internal/update"
 )
 
 // updateGolden regenerates every golden file instead of comparing against
@@ -274,4 +275,54 @@ func TestGoldenSyncOverlay(t *testing.T) {
 		pruneBytes: 5120,
 	}
 	assertGolden(t, "sync_overlay", ansi.Strip(model.View()))
+}
+
+// goldenUpdateAvailable pins a model that has just been told a newer release
+// exists, with no network involved.
+func goldenUpdateAvailable(t *testing.T) Model {
+	t.Helper()
+	model := goldenModel(t)
+	model.version = "v0.2.1"
+	model.update = updateProgress{
+		state:   updateAvailable,
+		checked: true,
+		latest: update.ReleaseInfo{
+			Version: "v0.3.0",
+			Summary: "Mirror prune is safer, and cancelling a transfer no longer drops the session.",
+		},
+	}
+	return model
+}
+
+func TestGoldenUpdateOverlay(t *testing.T) {
+	model := goldenUpdateAvailable(t)
+	model.overlay = overlayUpdate
+	// goldenModel ships an active and a queued transfer; drop them so this
+	// golden shows the plain confirm and the busy one below is a real
+	// contrast rather than a duplicate.
+	model.transfers = nil
+	assertGolden(t, "update_overlay", ansi.Strip(model.View()))
+}
+
+// The busy-queue warning is the one thing this overlay does that TideMail's
+// does not, so it gets its own golden rather than riding on the plain one.
+func TestGoldenUpdateOverlayWithTransfersRunning(t *testing.T) {
+	model := goldenUpdateAvailable(t)
+	model.overlay = overlayUpdate
+	assertGolden(t, "update_overlay_busy", ansi.Strip(model.View()))
+}
+
+// The topbar notice has to be visible without opening anything, and must not
+// push the topbar onto a second row.
+func TestGoldenTopbarUpdateNotice(t *testing.T) {
+	model := goldenUpdateAvailable(t)
+	assertGolden(t, "topbar_update_notice", ansi.Strip(model.View()))
+}
+
+func TestGoldenSettingsOverlayUpdateAvailable(t *testing.T) {
+	model := goldenUpdateAvailable(t)
+	model.overlay = overlaySettings
+	model.settingsCursor = 0
+	model.editorSetting = "vi"
+	assertGolden(t, "settings_overlay_update_available", ansi.Strip(model.View()))
 }

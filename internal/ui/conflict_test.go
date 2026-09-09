@@ -15,6 +15,44 @@ import (
 	"tideftp/internal/vfs"
 )
 
+func TestConflictRenameReservesIncomingNames(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		name := "conflict first"
+		if reverse {
+			name = "conflict last"
+		}
+		t.Run(name, func(t *testing.T) {
+			src, dst := newSyncFS(), newSyncFS()
+			entries := []domain.Entry{file("a.txt", 1, time.Time{}), file("a (1).txt", 2, time.Time{})}
+			if reverse {
+				entries[0], entries[1] = entries[1], entries[0]
+			}
+			src.put("/src", entries...)
+			dst.put("/dst", file("a.txt", 3, time.Time{}))
+			m, _ := mirrorModel(t, src, dst)
+			msg := m.beginPreflightScan(domain.Upload, entries, "/src", "/dst", src, dst, true)().(preflightScanMsg)
+			if msg.err != nil {
+				t.Fatal(msg.err)
+			}
+			scan := msg.scan
+			scan.resolveAllRemaining(conflictRename)
+			m.commitScan(scan)
+			if len(m.transfers) != 2 {
+				t.Fatalf("transfers = %+v, want two", m.transfers)
+			}
+			for _, tr := range m.transfers {
+				want := "/dst/a (1).txt"
+				if tr.Source == "/src/a.txt" {
+					want = "/dst/a (2).txt"
+				}
+				if tr.Destination != want {
+					t.Errorf("%s destination = %s, want %s", tr.Source, tr.Destination, want)
+				}
+			}
+		})
+	}
+}
+
 // conflictFS is a minimal vfs.FS test double whose List result at each
 // directory is exactly what a test seeds — full control for exercising
 // destination-conflict detection, which fakefs's fixed tree can't offer.

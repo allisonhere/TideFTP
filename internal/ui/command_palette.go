@@ -19,6 +19,7 @@ const (
 	commandToggleHidden
 	commandTheme
 	commandSettings
+	commandCheckUpdates
 	commandUpload
 	commandDownload
 	commandMirror
@@ -58,6 +59,7 @@ func (m Model) paletteCommands() []paletteCommand {
 		{id: commandToggleHidden, title: "Toggle hidden files", hint: "show or hide dotfiles"},
 		{id: commandTheme, title: "Theme picker", hint: "choose color theme"},
 		{id: commandSettings, title: "Settings", hint: "open app settings"},
+		{id: commandCheckUpdates, title: "Check for updates", hint: "look for a newer TideFTP release"},
 		{id: commandResetLayout, title: "Reset layout", hint: "restore pane sizes"},
 		{id: commandHelp, title: "Help", hint: "show keyboard reference"},
 	}
@@ -206,6 +208,10 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 	case commandSettings:
 		m.overlay = overlaySettings
 		m.settingsCursor = 0
+	case commandCheckUpdates:
+		m.update.state = updateChecking
+		m.setStatus("checking for updates…")
+		return m.checkForUpdatesCmd(true)
 	case commandUpload:
 		return m.queueUpload()
 	case commandDownload:

@@ -24,6 +24,14 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
       **prune**, deleting destination entries with no source counterpart
       bottom-up (off by default). Copies reuse `commitScan`; see
       `internal/ui/sync.go`.
+- [x] **In-app updates** — a startup check against the GitHub releases API,
+      a topbar notice, and `U` / Settings → *Updates* to download, verify
+      against `SHA256SUMS`, install in place and restart via `syscall.Exec`.
+      Ported from TideMail (`internal/update` is the same package with the
+      repo constants changed); the release pipeline already published the
+      matching artifacts, so nothing there changed. Off with
+      `check_on_startup = false`. Installing with transfers in flight warns
+      and asks twice rather than refusing.
 - [ ] **Queue persistence** — persist the transfer queue (XDG state dir) and offer
       to resume on next launch; the engine's Offset/ResumeFrom already supports
       mid-file resume.
@@ -84,5 +92,13 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 - [x] Normalise trailing whitespace in the golden files — `-update` already
       wrote trimmed files (see `assertGolden`); regenerating them for the Tier 3
       work committed the trim, so the churn is gone.
-- [ ] Symlink handling (follow vs show; create).
+- [x] Symlink handling (navigate + transfer safety). A symlink whose target is
+      a directory is marked `LinksToDir` by the local and SFTP adapters (one
+      extra `Stat` per link, never per entry) and `Entry.IsDirLike()` makes it
+      openable — `enter` used to do nothing at all on one. `Entry.IsDir()`
+      deliberately stays false for every symlink, so tree walks and recursive
+      deletes still never follow one; the preflight and mirror scans skip
+      linked directories and say how many they skipped, rather than queuing a
+      transfer that could only fail at open. Still open: *creating* a symlink,
+      and a follow-vs-show toggle.
 - [ ] `!` to run a shell command in the local pane's directory.

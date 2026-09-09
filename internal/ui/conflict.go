@@ -123,6 +123,11 @@ func (m *Model) resolveAllConflicts(remember bool) tea.Cmd {
 // it); a clean file (no conflict) always queues unconditionally.
 func (m *Model) commitScan(scan preflightScan) {
 	claimed := map[string]bool{}
+	// Reserve incoming names before choosing any rename, including files
+	// later in the batch that do not conflict with the destination listing.
+	for _, f := range scan.files {
+		claimed[f.dst] = true
+	}
 	queued := 0
 	for _, f := range scan.files {
 		dst, resumeFrom := f.dst, int64(0)
@@ -170,11 +175,14 @@ func (m *Model) commitScan(scan preflightScan) {
 		m.nextTransferID++
 		queued++
 	}
+	summary := fmt.Sprintf("queued %d transfer(s)", queued)
 	if scan.folders > 0 {
-		m.setStatus(fmt.Sprintf("queued %d transfer(s) from %d folder(s)", queued, scan.folders))
-	} else {
-		m.setStatus(fmt.Sprintf("queued %d transfer(s)", queued))
+		summary = fmt.Sprintf("queued %d transfer(s) from %d folder(s)", queued, scan.folders)
 	}
+	if scan.skippedLinks > 0 {
+		summary += fmt.Sprintf(" — skipped %d linked folder(s)", scan.skippedLinks)
+	}
+	m.setStatus(summary)
 	m.startQueuedTransfers()
 }
 

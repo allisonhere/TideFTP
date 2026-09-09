@@ -74,6 +74,18 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 	} else {
 		e.pool.put(conn)
 	}
+
+	// Cancellation closes the handles out from under the copy loop, so
+	// whatever error that produced ("file already closed", a half-read
+	// response) describes the cancel and not a failure. Mapping it here, once
+	// the connection has been disposed of, is what keeps a cancelled transfer
+	// out of the Failed tab.
+	if err != nil && transfer.IsCanceled(stop, quit) {
+		return sent, transfer.ErrCanceled
+	}
+	if err == nil {
+		err = transfer.CheckComplete(req, sent)
+	}
 	return sent, err
 }
 
@@ -146,6 +158,14 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 			}
 		}
 		if readErr == io.EOF {
+			// Response.Close reads the server's final reply to the transfer —
+			// 226 for a complete one, 426 for a stream that broke. That reply
+			// is the only place a truncated download shows up: the data
+			// connection closing early is an ordinary EOF here, so swallowing
+			// this error reported a partial file as a finished transfer.
+			if err := remote.Close(); err != nil {
+				return sent, fmt.Errorf("retrieve %s: %w", source, err)
+			}
 			if err := local.Close(); err != nil {
 				return sent, fmt.Errorf("close %s: %w", req.Destination, err)
 			}

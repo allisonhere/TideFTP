@@ -109,7 +109,7 @@ func (r *Runner) Close() error {
 // stall waiting for a slot to free up.
 func (r *Runner) run(req Request, stop chan struct{}) {
 	defer r.wg.Done()
-	defer r.done(req.ID)
+	defer r.done(req.ID, stop)
 
 	sent, err := r.move(req, stop, r.quit, func(sent int64) {
 		r.emit(Event{ID: req.ID, Kind: Progress, BytesDone: sent})
@@ -131,9 +131,16 @@ func (r *Runner) emit(event Event) {
 	}
 }
 
-func (r *Runner) done(id int) {
+// done retires one transfer's registration, but only its own: an ID that was
+// canceled and then started again is a different transfer with a different
+// stop channel, and deleting that one on the way out of the old run would
+// leave the new transfer with no entry in running — and so no way to cancel
+// it at all.
+func (r *Runner) done(id int, stop chan struct{}) {
 	r.mu.Lock()
-	delete(r.running, id)
+	if current, ok := r.running[id]; ok && current == stop {
+		delete(r.running, id)
+	}
 	r.mu.Unlock()
 }
 

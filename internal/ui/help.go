@@ -49,6 +49,7 @@ var helpEntries = []helpEntry{
 	{section: "View", key: "shift+up/down", label: "resize transfer pane"},
 	{section: "View", key: "ctrl+0", label: "reset layout"},
 	{section: "View", key: "1-6", label: "bottom tabs"},
+	{section: "View", key: "U", label: "update TideFTP (when one is available)"},
 	{section: "View", key: "q / ctrl+c", label: "quit"},
 }
 

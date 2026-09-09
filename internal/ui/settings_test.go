@@ -35,8 +35,10 @@ func TestSettingsCursorWrapsBothWays(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model = press(t, model, runes(","))
 
+	// Against the visible rows, not the enum: not every field is shown at
+	// once any more, and it is the drawn rows the cursor moves through.
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyUp})
-	if want := int(settingsFieldCount) - 1; model.settingsCursor != want {
+	if want := len(model.settingsVisibleFields()) - 1; model.settingsCursor != want {
 		t.Fatalf("cursor after up from row 0 = %d, want %d (wrapped to the last row)", model.settingsCursor, want)
 	}
 
@@ -53,7 +55,7 @@ func TestSettingsTogglesShadowAndIconsAndPersists(t *testing.T) {
 	cfg.Shadow = true
 	cfg.ShowIcons = true
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, cfg, save, nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, cfg, save, nil, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes(","))
@@ -120,7 +122,7 @@ func TestSettingsEditorCyclesAndPersists(t *testing.T) {
 	var saved []config.Config
 	save := func(c config.Config) error { saved = append(saved, c); return nil }
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil, "")
 	model.width, model.height = 120, 36
 
 	model = press(t, model, runes(","))

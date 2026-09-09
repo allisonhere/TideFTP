@@ -18,7 +18,7 @@ func TestAdjustMaxParallelClampsAtOneAndTheCap(t *testing.T) {
 	var saved []config.Config
 	save := func(c config.Config) error { saved = append(saved, c); return nil }
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
-	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil)
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil, "")
 	model.width, model.height = 120, 36
 
 	if model.maxParallel != defaultParallelTransfers {

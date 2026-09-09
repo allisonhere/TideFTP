@@ -45,18 +45,27 @@ func (FS) List(ctx context.Context, dirPath string, showHidden bool) ([]domain.E
 			continue
 		}
 		kind := domain.EntryFile
+		linksToDir := false
 		if item.IsDir() {
 			kind = domain.EntryDir
 		} else if info.Mode()&os.ModeSymlink != 0 {
 			kind = domain.EntrySymlink
+			// os.ReadDir reports the link itself, so a symlinked directory
+			// arrives looking like a file and the UI refuses to open it.
+			// Stat follows the link to settle that; a dangling one just
+			// fails and stays a plain symlink.
+			if target, err := os.Stat(filepath.Join(dirPath, item.Name())); err == nil {
+				linksToDir = target.IsDir()
+			}
 		}
 		entries = append(entries, domain.Entry{
-			Name:     item.Name(),
-			Kind:     kind,
-			Size:     info.Size(),
-			Mode:     info.Mode().String(),
-			Modified: info.ModTime(),
-			Hidden:   strings.HasPrefix(item.Name(), "."),
+			Name:       item.Name(),
+			Kind:       kind,
+			Size:       info.Size(),
+			Mode:       info.Mode().String(),
+			Modified:   info.ModTime(),
+			Hidden:     strings.HasPrefix(item.Name(), "."),
+			LinksToDir: linksToDir,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool {

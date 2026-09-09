@@ -708,6 +708,10 @@ func TestCancelStopsATransfer(t *testing.T) {
 	if event := awaitTerminal(t, conn.Engine(), 5); event.Kind != transfer.Canceled {
 		t.Fatalf("terminal event = %v (err %v), want Canceled", event.Kind, event.Err)
 	}
+	// A responsive transfer must cancel without dropping the shared session.
+	if _, err := conn.FS().List(context.Background(), server.root, true); err != nil {
+		t.Fatalf("browsing after cancellation: %v", err)
+	}
 }
 
 func TestCloseEndsTheConnectionWithNoReason(t *testing.T) {
@@ -767,4 +771,122 @@ func TestEngineCloseIsSafeToRepeat(t *testing.T) {
 	// A Start after Close must not send on the closed channel.
 	conn.Engine().Start(transfer.Request{ID: 99, Size: 10})
 	_ = errors.New("")
+}
+
+// A source that turns out shorter than the listing said is the one failure a
+// copy loop cannot see: it ends in an ordinary EOF, indistinguishable from a
+// finished transfer. Without the size check it was reported Completed — and
+// drawn at 100%, since the UI pins BytesDone to BytesTotal on completion.
+func TestShortTransferIsNotReportedComplete(t *testing.T) {
+	server := startTestServer(t)
+	conn := connect(t, server)
+
+	body := []byte("only forty-two bytes of this file exist!!!\n")
+	if err := os.WriteFile(server.path("short.bin"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "short.bin")
+
+	// Size is what the listing reported; the file on the server is smaller.
+	conn.Engine().Start(transfer.Request{
+		ID: 40, Direction: domain.Download,
+		Source: server.path("short.bin"), Destination: destination, Size: int64(len(body)) * 10,
+	})
+	event := awaitTerminal(t, conn.Engine(), 40)
+
+	if event.Kind != transfer.Failed {
+		t.Fatalf("terminal event = %v (err %v), want Failed for a truncated transfer", event.Kind, event.Err)
+	}
+	if !errors.Is(event.Err, transfer.ErrShort) {
+		t.Fatalf("error = %v, want ErrShort", event.Err)
+	}
+}
+
+// A transfer whose size matches must still complete — the guard above has to
+// not fire on the ordinary case.
+func TestFullTransferStillCompletes(t *testing.T) {
+	server := startTestServer(t)
+	conn := connect(t, server)
+
+	body := bytes.Repeat([]byte("exactly as listed\n"), 500)
+	if err := os.WriteFile(server.path("full.bin"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "full.bin")
+
+	conn.Engine().Start(transfer.Request{
+		ID: 41, Direction: domain.Download,
+		Source: server.path("full.bin"), Destination: destination, Size: int64(len(body)),
+	})
+	if event := awaitTerminal(t, conn.Engine(), 41); event.Kind != transfer.Completed {
+		t.Fatalf("terminal event = %v (err %v), want Completed", event.Kind, event.Err)
+	}
+}
+
+// Remove used to try the file call and fall back to the directory one, which
+// reported whichever error came last: a non-empty directory surfaced as the
+// file error rather than "directory not empty".
+func TestRemoveReportsTheRightErrorForADirectory(t *testing.T) {
+	server := startTestServer(t)
+	conn := connect(t, server)
+	ctx := context.Background()
+
+	if err := os.MkdirAll(server.path("occupied"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(server.path("occupied/keep.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := conn.FS().Remove(ctx, server.path("occupied"))
+	if err == nil {
+		t.Fatal("removing a non-empty directory must fail")
+	}
+	if _, statErr := os.Stat(server.path("occupied/keep.txt")); statErr != nil {
+		t.Fatalf("a failed remove must leave the contents alone: %v", statErr)
+	}
+
+	// The empty case still works, and so does a plain file.
+	if err := conn.FS().Remove(ctx, server.path("occupied/keep.txt")); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+	if err := conn.FS().Remove(ctx, server.path("occupied")); err != nil {
+		t.Fatalf("remove now-empty directory: %v", err)
+	}
+}
+
+// A symlink to a directory has to be marked so the UI can open it, while
+// staying a symlink for anything that walks or deletes a tree.
+func TestListMarksSymlinksToDirectories(t *testing.T) {
+	server := startTestServer(t)
+	conn := connect(t, server)
+
+	if err := os.MkdirAll(server.path("real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(server.path("real"), server.path("to-dir")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(server.path("nginx.conf"), server.path("to-file")); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := conn.FS().List(context.Background(), server.root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]domain.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+
+	if !byName["to-dir"].IsDirLike() || byName["to-dir"].Kind != domain.EntrySymlink {
+		t.Errorf("to-dir = %+v, want an openable symlink", byName["to-dir"])
+	}
+	if byName["to-dir"].IsDir() {
+		t.Error("IsDir must stay false for a symlink, whatever it points at")
+	}
+	if byName["to-file"].IsDirLike() {
+		t.Error("a symlink to a file must not look like a directory")
+	}
 }

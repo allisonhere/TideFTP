@@ -51,6 +51,9 @@ type syncPlan struct {
 	prune      bool // armed by the overlay's "p"
 
 	truncated bool // hit preflightScanCap; counts are a lower bound
+	// skippedLinks counts symlinked directories left alone by the walk, the
+	// same way preflightScan.skippedLinks does and for the same reasons.
+	skippedLinks int
 }
 
 func (p syncPlan) newCount() int    { return len(p.copies) - p.updates }
@@ -134,7 +137,7 @@ func (m *Model) startSync() tea.Cmd {
 		direction, srcFS, dstFS = domain.Download, m.remoteFS, m.localFS
 		srcBase, dstBase = m.remote.path, m.local.path
 	}
-	if entry, found := src.current(); found && entry.IsDir() && !isParentDirEntry(entry) {
+	if entry, found := src.current(); found && entry.IsDirLike() && !isParentDirEntry(entry) {
 		srcBase = srcFS.Child(srcBase, entry.Name)
 		dstBase = dstFS.Child(dstBase, entry.Name)
 	}
@@ -195,14 +198,25 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 				dstByName[e.Name] = e
 			}
 			srcNames := make(map[string]bool, len(srcChildren))
-
+			// Pruning must use the complete listing even if the copy scan
+			// reaches its cap partway through this directory.
 			for _, child := range srcChildren {
 				srcNames[child.Name] = true
+			}
+
+			for _, child := range srcChildren {
 				childSrc := srcFS.Child(it.srcDir, child.Name)
 				childDst := dstFS.Child(it.dstDir, child.Name)
 				if child.IsDir() {
 					existing, ok := dstByName[child.Name]
 					stack = append(stack, dirPair{childSrc, childDst, ok && existing.IsDir()})
+					continue
+				}
+				// A symlink to a directory is neither copied nor followed —
+				// see preflightScan.skippedLinks. It stays in srcNames, so it
+				// is not treated as an extra to prune either.
+				if child.LinksToDir {
+					plan.skippedLinks++
 					continue
 				}
 				if plan.count() >= preflightScanCap {
@@ -310,6 +324,14 @@ func (m *Model) handleSyncKey(msg tea.KeyMsg) tea.Cmd {
 		m.setStatus("mirror cancelled")
 	case "p":
 		if m.sync != nil {
+			// A truncated scan stopped before it had seen the whole source
+			// tree, so "has no source counterpart" is not something it can
+			// actually claim about anything. Deleting on that basis is the
+			// one operation here that destroys data on a partial picture.
+			if m.sync.truncated && !m.sync.prune {
+				m.setError("scan stopped early — prune needs a complete scan")
+				return nil
+			}
 			m.sync.prune = !m.sync.prune
 			if m.sync.prune {
 				m.setStatus("prune armed — extras will be deleted")
@@ -343,7 +365,9 @@ func (m *Model) confirmSync() tea.Cmd {
 	} else {
 		m.setStatus("nothing to transfer")
 	}
-	if plan.prune && len(plan.prunePaths) > 0 {
+	// Belt and braces against the "p" guard above: nothing is ever deleted on
+	// the strength of a scan that did not finish.
+	if plan.prune && !plan.truncated && len(plan.prunePaths) > 0 {
 		return syncPruneCmd(plan.dstFS, plan.prunePaths)
 	}
 	return nil

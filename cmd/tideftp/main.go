@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -26,7 +27,24 @@ import (
 // version is set via -ldflags "-X main.version=$(VERSION)" at build time.
 var version = "dev"
 
+// main keeps almost nothing of its own: the work is in run, so that an
+// update installed during the session can hand off to the new binary only
+// after every defer in run has completed. Exec'ing from inside the program
+// would replace the process while Bubble Tea still owned the terminal.
 func main() {
+	code, restart := run()
+	if restart != "" {
+		if err := execRestart(restart); err != nil {
+			fmt.Fprintf(os.Stderr, "tideftp: could not start the updated binary: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(code)
+}
+
+// run is everything main used to do. It returns the process exit code and,
+// when an update was installed, the path to exec once it has returned.
+func run() (code int, restartExec string) {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.BoolVar(showVersion, "v", false, "print the version and exit")
 	host := flag.String("host", "", "host for an initial target to auto-connect to; without it the app just opens, ready for the connect form")
@@ -44,7 +62,7 @@ func main() {
 
 	if *showVersion {
 		fmt.Println("tideftp " + version)
-		return
+		return 0, ""
 	}
 
 	// internal/ui and tideui both render through lipgloss's shared global
@@ -68,7 +86,7 @@ func main() {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
-		os.Exit(1)
+		return 1, ""
 	}
 
 	// Load settings from ~/.config/tideftp/config.toml (or the XDG location),
@@ -78,14 +96,37 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: warning: could not read %s: %v (using defaults)\n", configPath, err)
 		cfg = config.Default()
+		if errors.Is(err, config.ErrCorrupt) {
+			// The file is there and holds the user's saved profiles; it just
+			// does not parse. Starting on defaults is fine, but the first
+			// settings change would then write those defaults straight over
+			// the profiles — so the unreadable file is moved aside first and
+			// this run starts a new one. Nothing is deleted; the old content
+			// is one rename away.
+			backup := configPath + ".corrupt"
+			if renameErr := os.Rename(configPath, backup); renameErr != nil {
+				fmt.Fprintf(os.Stderr, "tideftp: could not set %s aside (%v) — settings will not be saved this run\n", configPath, renameErr)
+				configPath = ""
+			} else {
+				fmt.Fprintf(os.Stderr, "tideftp: moved it to %s; your saved profiles are still in there\n", backup)
+			}
+		}
 	}
-	saveConfig := func(c config.Config) error { return config.Save(configPath, c) }
+	var saveConfig config.SaveFunc
+	if configPath != "" {
+		saveConfig = func(c config.Config) error { return config.Save(configPath, c) }
+	}
 
-	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig, credstore.New()), tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := program.Run(); err != nil {
+	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig, credstore.New(), version), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	final, err := program.Run()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)
-		os.Exit(1)
+		return 1, ""
 	}
+	if model, ok := final.(ui.Model); ok {
+		restartExec = model.RestartExecPath()
+	}
+	return 0, restartExec
 }
 
 // buildSession wires up every real protocol adapter behind a router.Dialer,

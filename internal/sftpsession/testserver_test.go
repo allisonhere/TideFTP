@@ -31,10 +31,11 @@ type testServer struct {
 	listener net.Listener
 	wg       sync.WaitGroup
 
-	mu      sync.Mutex
-	closed  bool
-	refused bool       // when set, connections are accepted then dropped
-	conns   []net.Conn // accepted connections, closed on shutdown
+	mu       sync.Mutex
+	closed   bool
+	refused  bool       // when set, connections are accepted then dropped
+	conns    []net.Conn // accepted connections, closed on shutdown
+	handlers *sftp.Handlers
 }
 
 // path is the absolute path of name on the server. pkg/sftp's server is not
@@ -44,6 +45,10 @@ type testServer struct {
 func (s *testServer) path(name string) string { return filepath.Join(s.root, name) }
 
 func startTestServer(t *testing.T) *testServer {
+	return startTestServerWithHandlers(t, nil)
+}
+
+func startTestServerWithHandlers(t *testing.T, handlers *sftp.Handlers) *testServer {
 	t.Helper()
 
 	hostSigner, hostPub := newSigner(t)
@@ -74,6 +79,7 @@ func startTestServer(t *testing.T) *testServer {
 		clientPK:  keyPath,
 		clientKey: clientPriv,
 		listener:  listener,
+		handlers:  handlers,
 	}
 
 	server.wg.Add(1)
@@ -134,6 +140,12 @@ func (s *testServer) serve(conn net.Conn, config *ssh.ServerConfig) {
 		}()
 		go func(channel ssh.Channel) {
 			defer channel.Close()
+			if s.handlers != nil {
+				server := sftp.NewRequestServer(channel, *s.handlers)
+				defer server.Close()
+				_ = server.Serve()
+				return
+			}
 			server, err := sftp.NewServer(channel, sftp.WithServerWorkingDirectory(s.root))
 			if err != nil {
 				return

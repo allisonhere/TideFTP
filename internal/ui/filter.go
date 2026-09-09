@@ -106,11 +106,6 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	visible := m.filePaneVisibleRows()
 	switch msg.String() {
-	case "ctrl+c":
-		if m.conn != nil {
-			return tea.Sequence(closeConnCmd(m.conn), tea.Quit)
-		}
-		return tea.Quit
 	case "esc":
 		pane.clearFilter(visible)
 		m.setStatus("filter cleared")

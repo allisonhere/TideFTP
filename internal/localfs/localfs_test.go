@@ -174,3 +174,53 @@ func TestChildAndParent(t *testing.T) {
 		t.Fatalf("Parent(\"/\") = %q, want / so the UI stops walking up", got)
 	}
 }
+
+// A symlink pointing at a directory has to be marked as such, or the UI has
+// no way to tell it from a symlink to a file and enter does nothing on it.
+func TestListMarksSymlinksToDirectories(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "to-dir")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "file.txt"), filepath.Join(root, "to-file")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "nowhere"), filepath.Join(root, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := New().List(context.Background(), root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]domain.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+
+	for _, name := range []string{"to-dir", "to-file", "dangling"} {
+		if byName[name].Kind != domain.EntrySymlink {
+			t.Errorf("%s kind = %v, want EntrySymlink", name, byName[name].Kind)
+		}
+	}
+	if !byName["to-dir"].LinksToDir || !byName["to-dir"].IsDirLike() {
+		t.Error("a symlink to a directory must be openable")
+	}
+	if byName["to-file"].LinksToDir || byName["to-file"].IsDirLike() {
+		t.Error("a symlink to a file must not look like a directory")
+	}
+	if byName["dangling"].LinksToDir {
+		t.Error("a dangling symlink must not look like a directory")
+	}
+	// Everything that walks or deletes a tree keys off IsDir, and following a
+	// link there would let a recursive delete escape the tree it was given.
+	if byName["to-dir"].IsDir() {
+		t.Error("IsDir must stay false for a symlink, whatever it points at")
+	}
+}
