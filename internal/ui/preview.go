@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -108,7 +112,77 @@ func (m *Model) startPreview() tea.Cmd {
 	}
 	fs := m.fsByID(paneID)
 	m.setStatus("reading " + entry.Name + "…")
-	return previewCmd(fs, fs.Child(pane.path, entry.Name), entry.Name, entry.Size)
+	path := fs.Child(pane.path, entry.Name)
+	if isImageName(entry.Name) {
+		return imagePreviewCmd(fs, path, entry.Name, entry.Size, paneID == paneLocal)
+	}
+	return previewCmd(fs, path, entry.Name, entry.Size)
+}
+
+func isImageName(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".ico", ".avif", ".heic", ".heif":
+		return true
+	}
+	return false
+}
+
+type imageOpenedMsg struct{ name, tempPath string }
+
+// Desktop openers can return before the viewer reads the file. Keep remote
+// copies until TideFTP exits, rather than deleting them when the opener exits.
+func imagePreviewCmd(fs vfs.FS, path, name string, size int64, local bool) tea.Cmd {
+	return func() tea.Msg {
+		fallback := previewCmd(fs, path, name, size)
+		opener := "xdg-open"
+		if runtime.GOOS == "darwin" {
+			opener = "open"
+		} else if runtime.GOOS != "linux" || (os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "") {
+			return fallback()
+		}
+		command, err := exec.LookPath(opener)
+		if err != nil {
+			return fallback()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
+		defer cancel()
+		viewPath, tempPath := path, ""
+		if !local {
+			// Bound the download even if the directory listing has no size.
+			const maxImageBytes = 64 << 20
+			if size > maxImageBytes {
+				return fallback()
+			}
+			reader, err := fs.Open(ctx, path)
+			if err != nil {
+				return fallback()
+			}
+			tmp, err := os.CreateTemp("", "tideftp-image-*"+filepath.Ext(name))
+			if err != nil {
+				reader.Close()
+				return fallback()
+			}
+			n, copyErr := io.Copy(tmp, io.LimitReader(reader, maxImageBytes+1))
+			reader.Close()
+			closeErr := tmp.Close()
+			if copyErr != nil || closeErr != nil || n > maxImageBytes {
+				os.Remove(tmp.Name())
+				return fallback()
+			}
+			viewPath, tempPath = tmp.Name(), tmp.Name()
+		}
+		viewPath, err = filepath.Abs(viewPath)
+		if err == nil {
+			err = exec.CommandContext(ctx, command, viewPath).Run()
+		}
+		if err != nil {
+			if tempPath != "" {
+				os.Remove(tempPath)
+			}
+			return fallback()
+		}
+		return imageOpenedMsg{name: name, tempPath: tempPath}
+	}
 }
 
 // previewCmd reads at most previewMaxBytes from path. It asks for one byte

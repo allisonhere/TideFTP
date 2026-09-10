@@ -33,7 +33,7 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "f2", label: "rename item"},
 	{section: "Act", key: "m", label: "change permissions (chmod)"},
 	{section: "Act", key: "e", label: "edit file in your editor"},
-	{section: "Act", key: "v", label: "preview file (text or hex)"},
+	{section: "Act", key: "v", label: "view image / preview text or hex"},
 	{section: "Act", key: "y", label: "copy path(s) to clipboard"},
 	{section: "Act", key: "delete", label: "delete selected / highlighted"},
 	{section: "Act", key: "x", label: "cancel active transfer (queue pane) / all"},
@@ -42,7 +42,7 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: ".", label: "toggle hidden files"},
 	{section: "Act", key: "b", label: "bookmarks: jump to a saved directory"},
 	{section: "Act", key: "B", label: "bookmark / unbookmark this directory"},
-	{section: "View", key: "c", label: "connect / disconnect"},
+	{section: "View", key: "c", label: "open connection picker"},
 	{section: "View", key: "ctrl+k", label: "command palette"},
 	{section: "View", key: "t", label: "theme picker"},
 	{section: "View", key: ",", label: "settings"},
@@ -50,8 +50,9 @@ var helpEntries = []helpEntry{
 	{section: "View", key: "shift+left/right", label: "resize file panes"},
 	{section: "View", key: "shift+up/down", label: "resize transfer pane"},
 	{section: "View", key: "ctrl+0", label: "reset layout"},
-	{section: "View", key: "1-6", label: "bottom tabs (focuses the transfer pane)"},
+	{section: "View", key: "1-6", label: "Queue / Active / Failed / History / Log / Stats tabs"},
 	{section: "View", key: "U", label: "update TideFTP (when one is available)"},
+	{section: "View", key: "?", label: "open this help"},
 	{section: "View", key: "q / ctrl+c", label: "quit"},
 }
 

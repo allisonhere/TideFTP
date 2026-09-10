@@ -23,7 +23,7 @@
 ╭─────────────│    /                           filter listing (glob or substring)    │─────────────╮
 │Transfers    │    s                        cycle sort: name / size / date / type    │        queue│
 │  1 Queue (2x│                                                                      │             │
-│↑ [========= │  Rows  1-18/45                                                       │ transferring│
+│↑ [========= │  Rows  1-18/46                                                       │ transferring│
 │↓ [          │    type search   up/down scroll   ctrl+u clear   esc close           │    0% queued│
 │             │                                                                      │             │
 ╰─────────────╰──────────────────────────────────────────────────────────────────────╯─────────────╯

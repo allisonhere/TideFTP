@@ -291,6 +291,7 @@ type Model struct {
 	fileAction           *fileActionPrompt
 	pendingEdit          *pendingEdit
 	preview              *previewState
+	imageTempPaths       []string
 	editorSetting        string
 	// verifyChecksums re-reads both ends of every completed transfer and
 	// compares SHA-256 sums (see verify.go). Off by default: it doubles the
@@ -752,6 +753,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.requestListing(msg.pane, m.filePaneByID(msg.pane).path, listingRefresh)
 	case clipboardCopiedMsg:
 		m.applyClipboardCopied(msg)
+		return m, nil
+	case imageOpenedMsg:
+		if msg.tempPath != "" {
+			m.imageTempPaths = append(m.imageTempPaths, msg.tempPath)
+		}
+		m.setStatus("opened " + msg.name + " in the default image viewer")
 		return m, nil
 	case previewLoadedMsg:
 		if msg.err != nil {
@@ -1595,6 +1602,10 @@ func (m *Model) requestQuit() tea.Cmd {
 // quitNow ends the session unconditionally, closing the connection first so
 // the server sees a clean disconnect rather than a dropped socket.
 func (m *Model) quitNow() tea.Cmd {
+	for _, path := range m.imageTempPaths {
+		os.Remove(path)
+	}
+	m.imageTempPaths = nil
 	if m.conn != nil {
 		return tea.Sequence(closeConnCmd(m.conn), tea.Quit)
 	}

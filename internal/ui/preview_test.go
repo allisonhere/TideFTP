@@ -51,6 +51,16 @@ func TestPreviewShowsTheFileContents(t *testing.T) {
 	}
 }
 
+func TestImagePreviewFallsBackWithoutViewer(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("DISPLAY", ":0")
+	msg := imagePreviewCmd(fakefs.NewRemote(), "/public_html/robots.txt", "image.png", 0, false)()
+	loaded, ok := msg.(previewLoadedMsg)
+	if !ok || loaded.err != nil || !strings.Contains(string(loaded.state.data), "User-agent") {
+		t.Fatalf("missing viewer should load the built-in preview, got %#v", msg)
+	}
+}
+
 func TestPreviewTogglesToHex(t *testing.T) {
 	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), newScriptedEngine())
 	model = remoteAt(t, model, "/public_html", "robots.txt")

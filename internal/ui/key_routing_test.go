@@ -372,8 +372,8 @@ func TestHelpSearchAcceptsReservedLetters(t *testing.T) {
 		t.Fatalf("helpQuery = %q, want \"queue\"", model.helpQuery)
 	}
 	entries := model.filteredHelpEntries()
-	if len(entries) != 1 || entries[0].key != "x" {
-		t.Fatalf("filtered entries = %+v, want only the queue-pane row", entries)
+	if len(entries) != 2 || entries[0].key != "x" || entries[1].key != "1-6" {
+		t.Fatalf("filtered entries = %+v, want transfer cancellation and Queue-tab rows", entries)
 	}
 }
 

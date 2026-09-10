@@ -118,9 +118,12 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   The editor is the **Editor** row in Settings (`,`) — `auto` resolves `$VISUAL`,
   `$EDITOR`, `git config core.editor`, then a common editor on `PATH`. Set
   `editor` in `config.toml` to anything, including flags, e.g. `editor = "code -w"`
-- `v`: preview the highlighted file — reads the first 128 KB and shows it as
+- `v`: open images in the default desktop image viewer. Remote images up to
+  64 MB are downloaded to a temporary copy, removed when TideFTP exits.
+  If a viewer is unavailable or fails to launch, use the built-in preview.
+  For other files, preview reads the first 128 KB and shows it as
   syntax-highlighted text, or as a hexdump for binary content (`x` toggles,
-  `esc` closes). It never downloads the whole file. The header names the
+  `esc` closes). The built-in preview never downloads the whole file. The header names the
   language that was recognised, so a file that comes out uncoloured says why
 - `y`: copy the selection's full paths to the clipboard, one per line. Over SSH
   this uses OSC 52 so the paths land on *your* clipboard, not the server's;
@@ -130,11 +133,16 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   by size / a newer mtime, and shows a plan — new, updated, unchanged — to
   confirm. `p` in that overlay arms **prune**, which then also deletes
   anything at the destination with no source counterpart (off by default).
+- `r`: refresh the visible panes
+- `n`: create a folder in the focused pane
+- `F2`: rename the selection or highlighted item
+- `Delete`: delete the selection or highlighted item
 - `x`: cancel transfers — everything in flight from a file pane, or just the
   row under the cursor with the transfers pane focused
 - `R`: retry a failed transfer. From a file pane it focuses the transfers pane,
   switches to the Failed tab if the current one has no failures, and retries the
   first one; on a failed row already, it retries that row
+- `+` / `-`: increase / decrease the number of parallel transfers
 - `/`: filter the focused pane's listing — type to narrow it live, `enter`
   accepts the filter (normal keys resume, the listing stays narrowed), `esc`
   clears it. A query with `*`, `?` or `[` is matched as a glob against each
@@ -159,13 +167,17 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   need a saved profile; connect via `c` and save the server first. Local
   bookmarks are shared across every connection. Both live in `config.toml`, as
   `bookmarks` under a profile and `local_bookmarks` at the top level
-- `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
+- `c`: open the connection picker (Enter connects, `e` edits, `n` / the last row adds a new one)
+- `Ctrl+K`: command palette, including Disconnect while connected
 - `t`: theme picker
+- `,`: settings
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)
 - `.`: toggle hidden files
 - `Shift+Left` / `Shift+Right`: resize local/remote panes
 - `Shift+Up` / `Shift+Down`: resize transfer pane
-- `1`-`6`: bottom tabs (also focuses the transfers pane)
+- `Ctrl+0`: reset pane sizes
+- `1`-`6`: focus the transfers pane and open Queue, Active, Failed, History,
+  Log, or Stats respectively
 - `U`: install a waiting update
 - `?`: help
 - `q`: quit
@@ -193,8 +205,8 @@ Two settings in `,` change what happens around a transfer:
 
 ## Development
 
-`docs/handoff.md` carries the design notes, the adapter architecture, and the
-LAN test servers the real FTP/FTPS/SFTP adapters are verified against.
+The protocol adapter packages include hermetic tests and optional LAN tests
+for the real FTP, FTPS, and SFTP adapters.
 
 ```bash
 go test ./...             # hermetic; safe anywhere
