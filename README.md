@@ -3,6 +3,8 @@
 TideFTP is a keyboard-first, mouse-friendly terminal file transfer client for
 SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
 
+![TideFTP](docs/screenshot.png)
+
 - FileZilla-style layout: local pane, remote pane, wide transfer pane.
 - A real transfer queue — parallelism, per-file and overall ETA, retry,
   resume, conflict policies.
