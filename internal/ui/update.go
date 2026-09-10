@@ -80,7 +80,7 @@ func (m Model) updateNoticeText() string {
 	if !m.updateAvailable() {
 		return ""
 	}
-	return fmt.Sprintf("update %s  U", m.update.latest.Version)
+	return fmt.Sprintf("↑ UPDATE %s · U", m.update.latest.Version)
 }
 
 // updateCheckedMsg reports a finished check, successful or not.

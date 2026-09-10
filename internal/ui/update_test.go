@@ -99,9 +99,21 @@ func TestTopbarShowsTheUpdateNotice(t *testing.T) {
 	if !strings.Contains(model.updateNoticeText(), "v0.3.0") {
 		t.Fatalf("notice = %q, want it to name the version", model.updateNoticeText())
 	}
+	if notice := model.updateNoticeText(); !strings.Contains(notice, "↑ UPDATE") || !strings.Contains(notice, "· U") {
+		t.Fatalf("notice = %q, want an explicit update alert and shortcut", notice)
+	}
 	// It must not advertise `i`: that key is toggle-icons everywhere else.
 	if strings.Contains(model.updateNoticeText(), "i ignore") {
 		t.Fatal("the notice advertises i, which is already bound to icons")
+	}
+}
+
+func TestUpdateNoticeUsesAmberWarningColors(t *testing.T) {
+	if got := updateNoticeStyle.GetBackground(); got != updateNoticeBackground {
+		t.Fatalf("update notice background = %v, want orange %v", got, updateNoticeBackground)
+	}
+	if got := updateNoticeStyle.GetForeground(); got != updateNoticeForeground {
+		t.Fatalf("update notice foreground = %v, want %v", got, updateNoticeForeground)
 	}
 }
 

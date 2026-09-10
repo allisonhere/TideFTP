@@ -1,4 +1,4 @@
-   TideFTP    test  test.local:22              update v0.3.0  U  0 queued  tide-night  split 50/50
+   TideFTP    test  test.local:22           ↑ UPDATE v0.3.0 · U  0 queued  tide-night  split 50/50
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
 │Local                       /home/allie/projects││Remote                              /public_html│
 │mode        size        modified        name    ││mode        size        modified        name    │

@@ -12,6 +12,19 @@ import (
 	"tideftp/internal/domain"
 )
 
+// An available update needs more visual weight than an ordinary success
+// message. These fixed orange colors keep the alert legible even in themes
+// whose positive color is a quiet green.
+var (
+	updateNoticeBackground = lipgloss.Color("#C2410C")
+	updateNoticeForeground = lipgloss.Color("#FFF7ED")
+	updateNoticeStyle      = lipgloss.NewStyle().
+				Background(updateNoticeBackground).
+				Foreground(updateNoticeForeground).
+				Bold(true).
+				Padding(0, 1)
+)
+
 func (m Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
@@ -127,9 +140,7 @@ func (m Model) renderTopbar(renderer tideui.Renderer) string {
 	// Prepended, so that when align has to truncate the right side it is the
 	// split readout that goes and the update notice that survives.
 	if notice := m.updateNoticeText(); notice != "" {
-		// StatusSuccess is the theme's positive colour on the status bar
-		// background (green in tide-night), and it carries its own padding.
-		right = renderer.Styles.StatusSuccess.Render(notice) + right
+		right = updateNoticeStyle.Render(notice) + right
 	}
 	// The StatusBar style pads one column on each side, so the line it is
 	// given must be m.width-2. Laying out against m.width made the topbar
