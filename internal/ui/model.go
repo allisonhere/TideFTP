@@ -264,12 +264,19 @@ type Model struct {
 	connectIdentityBrowse bool
 	connectIdentityPane   filePane
 	serverListCursor      int
-	commandQuery          string
-	commandCursor         int
-	fileAction            *fileActionPrompt
-	pendingEdit           *pendingEdit
-	preview               *previewState
-	editorSetting         string
+	// serverDeleteIndex is the profile a first `d` has armed for deletion,
+	// and serverDeleteExpiry when that arming lapses. -1 means nothing is
+	// armed. The index is part of the state, not just a flag: arming is
+	// per-row, so moving the cursor between the two presses arms the new row
+	// rather than deleting a profile the user never armed.
+	serverDeleteIndex  int
+	serverDeleteExpiry time.Time
+	commandQuery       string
+	commandCursor      int
+	fileAction         *fileActionPrompt
+	pendingEdit        *pendingEdit
+	preview            *previewState
+	editorSetting      string
 	// verifyChecksums re-reads both ends of every completed transfer and
 	// compares SHA-256 sums (see verify.go). Off by default: it doubles the
 	// bytes a transfer costs.
@@ -464,29 +471,30 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 			sortKey:    parseSortKey(cfg.Sort.Key),
 			sortDesc:   cfg.Sort.Desc,
 		},
-		localFS:         local,
-		dialer:          dialer,
-		targets:         targets,
-		profiles:        profilesFromConfig(cfg.Profiles),
-		state:           connDisconnected,
-		nextTransferID:  1,
-		maxParallel:     maxParallel,
-		theme:           themeByName(cfg.Theme),
-		density:         density,
-		shadow:          cfg.Shadow,
-		showIcons:       cfg.ShowIcons,
-		editorSetting:   cfg.Editor,
-		verifyChecksums: cfg.VerifyChecksums,
-		autoReconnect:   cfg.AutoReconnect,
-		fileSplit:       tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
-		bottomSplit:     tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
-		save:            save,
-		creds:           creds,
-		version:         currentVersion,
-		updates:         cfg.Updates,
-		updater:         update.New(),
-		logs:            []string{"redacted logs enabled"},
-		status:          "ready",
+		localFS:           local,
+		dialer:            dialer,
+		targets:           targets,
+		profiles:          profilesFromConfig(cfg.Profiles),
+		state:             connDisconnected,
+		nextTransferID:    1,
+		maxParallel:       maxParallel,
+		theme:             themeByName(cfg.Theme),
+		density:           density,
+		shadow:            cfg.Shadow,
+		showIcons:         cfg.ShowIcons,
+		editorSetting:     cfg.Editor,
+		verifyChecksums:   cfg.VerifyChecksums,
+		autoReconnect:     cfg.AutoReconnect,
+		fileSplit:         tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
+		bottomSplit:       tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
+		save:              save,
+		creds:             creds,
+		serverDeleteIndex: -1,
+		version:           currentVersion,
+		updates:           cfg.Updates,
+		updater:           update.New(),
+		logs:              []string{"redacted logs enabled"},
+		status:            "ready",
 	}
 	if model.theme.Name == themeNameMatchOmarchy {
 		model.omarchySig = omarchySignatureNow()

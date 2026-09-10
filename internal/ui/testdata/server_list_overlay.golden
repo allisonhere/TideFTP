@@ -15,7 +15,7 @@
 │            │    backups                                     ftp · bob@nas.local:21  │            │
 │            │    ＋ New connection…                                                  │            │
 │            │                                                                        │            │
-│            │    enter connect   e edit   n new   d delete   esc close               │            │
+│            │    enter connect   e edit   n new   dd delete   esc close              │            │
 │            │                                                                        │            │
 │            ╰────────────────────────────────────────────────────────────────────────╯            │
 │                                                ││                                                │

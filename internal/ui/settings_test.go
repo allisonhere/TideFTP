@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allisonhere/tideui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -209,5 +210,104 @@ func TestSettingsOverlayRendersEveryRow(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Errorf("settings overlay is missing %q", want)
 		}
+	}
+}
+
+// serverListModel opens the saved-server picker over two profiles.
+func serverListModel(t *testing.T) Model {
+	t.Helper()
+	model := loadedModel(t, newScriptedEngine())
+	model.profiles = []session.Target{
+		{Name: "prod web", Protocol: "sftp", Host: "web1.example.com", Port: 22, User: "deploy"},
+		{Name: "backups", Protocol: "ftp", Host: "nas.local", Port: 21, User: "bob"},
+	}
+	model.serverListCursor = 0
+	model.disarmServerDelete()
+	model.overlay = overlayServerList
+	return model
+}
+
+// Deleting a saved server takes its stored password with it and cannot be
+// undone, and `d` sits right next to the j/k used to move around the list.
+func TestServerDeleteNeedsTwoPresses(t *testing.T) {
+	model := serverListModel(t)
+
+	model = press(t, model, runes("d"))
+	if len(model.profiles) != 2 {
+		t.Fatalf("one press deleted a profile: %d left", len(model.profiles))
+	}
+	if !strings.Contains(model.status, "press d again") {
+		t.Fatalf("status = %q, want it to ask for a second press", model.status)
+	}
+
+	model = press(t, model, runes("d"))
+	if len(model.profiles) != 1 || model.profiles[0].Name != "backups" {
+		t.Fatalf("second press did not delete the armed profile: %+v", model.profiles)
+	}
+}
+
+// The arming is per-row. Moving the cursor after the first press must arm the
+// new row, not delete it — otherwise the confirmation would itself be a way
+// to delete the wrong profile.
+func TestServerDeleteArmingDoesNotFollowTheCursor(t *testing.T) {
+	model := serverListModel(t)
+
+	model = press(t, model, runes("d")) // arm "prod web"
+	model = press(t, model, runes("j")) // move to "backups"
+	model = press(t, model, runes("d")) // must re-arm, not delete
+
+	if len(model.profiles) != 2 {
+		t.Fatalf("moving the cursor let a press delete a profile: %+v", model.profiles)
+	}
+	if !strings.Contains(model.status, "backups") {
+		t.Fatalf("status = %q, want the newly highlighted profile armed", model.status)
+	}
+
+	model = press(t, model, runes("d"))
+	if len(model.profiles) != 1 || model.profiles[0].Name != "prod web" {
+		t.Fatalf("deleted the wrong profile: %+v", model.profiles)
+	}
+}
+
+// An arming the user has walked away from must not still be live later.
+func TestServerDeleteArmingExpires(t *testing.T) {
+	model := serverListModel(t)
+	model = press(t, model, runes("d"))
+
+	model.serverDeleteExpiry = time.Now().Add(-time.Second)
+
+	model = press(t, model, runes("d"))
+	if len(model.profiles) != 2 {
+		t.Fatalf("a lapsed arming still deleted: %+v", model.profiles)
+	}
+	if !strings.Contains(model.status, "press d again") {
+		t.Fatalf("status = %q, want it to re-arm", model.status)
+	}
+}
+
+// Closing and reopening the list clears any arming.
+func TestServerDeleteDisarmsOnClose(t *testing.T) {
+	model := serverListModel(t)
+	model = press(t, model, runes("d"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	model = settle(t, model, model.openServerList())
+
+	model = press(t, model, runes("d"))
+	if len(model.profiles) != 2 {
+		t.Fatalf("an arming survived closing the list: %+v", model.profiles)
+	}
+}
+
+// The "new connection" row has nothing to delete and must not arm.
+func TestServerDeleteIgnoresTheNewRow(t *testing.T) {
+	model := serverListModel(t)
+	model.serverListCursor = len(model.profiles)
+
+	model = press(t, model, runes("d"))
+	if model.serverDeleteArmedFor(model.serverListCursor) {
+		t.Fatal("the new-connection row armed a delete")
+	}
+	if len(model.profiles) != 2 {
+		t.Fatal("profiles changed")
 	}
 }

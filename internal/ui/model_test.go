@@ -1776,6 +1776,12 @@ func TestConnectFormDeletesProfile(t *testing.T) {
 		t.Fatalf("c left overlay=%v, want the server list", model.overlay)
 	}
 
+	// Two presses: the first arms the highlighted row, the second deletes it.
+	// See TestServerDeleteNeedsTwoPresses for the confirmation itself.
+	model = press(t, model, runes("d"))
+	if len(model.profiles) != 1 {
+		t.Fatalf("one press deleted a profile: %d left", len(model.profiles))
+	}
 	model = press(t, model, runes("d"))
 
 	if len(model.profiles) != 0 {

@@ -830,13 +830,20 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			Text:     "＋ New connection…",
 			Selected: m.serverListCursor >= len(m.profiles),
 		}, contentWidth))
-		rows = append(rows, "", renderer.RenderSoftHints(contentWidth,
-			tideui.SoftHint{Key: "enter", Label: "connect"},
-			tideui.SoftHint{Key: "e", Label: "edit"},
-			tideui.SoftHint{Key: "n", Label: "new"},
-			tideui.SoftHint{Key: "d", Label: "delete"},
-			tideui.SoftHint{Key: "esc", Label: "close"},
-		))
+		// While a delete is armed the hints say so, and say it in the error
+		// style: the next `d` is destructive and the row is already chosen.
+		if m.serverDeleteArmedFor(m.serverListCursor) {
+			rows = append(rows, "", renderer.Styles.StatusError.Width(contentWidth).Render(
+				"press d again to delete "+m.profiles[m.serverListCursor].Label()))
+		} else {
+			rows = append(rows, "", renderer.RenderSoftHints(contentWidth,
+				tideui.SoftHint{Key: "enter", Label: "connect"},
+				tideui.SoftHint{Key: "e", Label: "edit"},
+				tideui.SoftHint{Key: "n", Label: "new"},
+				tideui.SoftHint{Key: "dd", Label: "delete"},
+				tideui.SoftHint{Key: "esc", Label: "close"},
+			))
+		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlayFileAction:

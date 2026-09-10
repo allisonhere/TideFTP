@@ -1,11 +1,18 @@
 package ui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"tideftp/internal/credstore"
 	"tideftp/internal/session"
 )
+
+// serverDeleteWindow is how long a first `d` stays armed. Long enough to be a
+// deliberate second press, short enough that an arming the user has forgotten
+// about cannot still be live when they next reach for the key.
+const serverDeleteWindow = 5 * time.Second
 
 // The server list is the first thing `c` shows: a picker over saved profiles
 // plus a trailing "new connection" row. Enter connects to the highlighted
@@ -20,6 +27,7 @@ func (m *Model) openServerList() tea.Cmd {
 		return m.openConnectForm()
 	}
 	m.serverListCursor = min(max(m.serverListCursor, 0), len(m.profiles))
+	m.disarmServerDelete()
 	m.overlay = overlayServerList
 	return nil
 }
@@ -35,15 +43,20 @@ func (m Model) serverListOnNewRow() bool { return m.serverListCursor >= len(m.pr
 func (m *Model) handleServerListKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "q":
+		m.disarmServerDelete()
 		m.overlay = overlayNone
 		m.setStatus("cancelled")
 	case "up", "k":
+		m.disarmServerDelete()
 		m.serverListCursor = max(0, m.serverListCursor-1)
 	case "down", "j":
+		m.disarmServerDelete()
 		m.serverListCursor = min(m.serverListRows()-1, m.serverListCursor+1)
 	case "home":
+		m.disarmServerDelete()
 		m.serverListCursor = 0
 	case "end":
+		m.disarmServerDelete()
 		m.serverListCursor = m.serverListRows() - 1
 	case "n":
 		return m.openConnectForm()
@@ -61,6 +74,17 @@ func (m *Model) handleServerListKey(msg tea.KeyMsg) tea.Cmd {
 		if m.serverListOnNewRow() {
 			return nil
 		}
+		// Deleting a saved server takes a password with it and cannot be
+		// undone, and `d` sits right next to the j/k the user is navigating
+		// with. The first press arms the row under the cursor; only a second
+		// press on that same row goes through.
+		if !m.serverDeleteArmedFor(m.serverListCursor) {
+			m.serverDeleteIndex = m.serverListCursor
+			m.serverDeleteExpiry = time.Now().Add(serverDeleteWindow)
+			m.setStatus("press d again to delete " + m.profiles[m.serverListCursor].Label())
+			return nil
+		}
+		m.disarmServerDelete()
 		cmd := m.deleteProfileAt(m.serverListCursor)
 		if len(m.profiles) == 0 {
 			return tea.Batch(cmd, m.openConnectForm())
@@ -69,6 +93,23 @@ func (m *Model) handleServerListKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 	return nil
+}
+
+// serverDeleteArmedFor reports whether a first `d` has armed exactly this row
+// and has not yet lapsed.
+//
+// The index matters as much as the timer: arming is per-row, so moving the
+// cursor after the first press and pressing `d` again arms the new row rather
+// than deleting it. Without that, a double-press could delete a profile the
+// user never armed — the very mistake this is here to prevent.
+func (m Model) serverDeleteArmedFor(index int) bool {
+	return m.serverDeleteIndex == index && time.Now().Before(m.serverDeleteExpiry)
+}
+
+// disarmServerDelete cancels a pending confirmation.
+func (m *Model) disarmServerDelete() {
+	m.serverDeleteIndex = -1
+	m.serverDeleteExpiry = time.Time{}
 }
 
 // connectToServer dials profile i. An SFTP profile authenticates with the
