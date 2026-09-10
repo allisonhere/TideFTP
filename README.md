@@ -136,9 +136,16 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `r`: refresh the visible panes
 - `n`: create a folder in the focused pane
 - `F2`: rename the selection or highlighted item
-- `Delete`: delete the selection or highlighted item
-- `x`: cancel transfers — everything in flight from a file pane, or just the
-  row under the cursor with the transfers pane focused
+- `Delete`: delete the selection or highlighted item. A selection with a folder
+  in it is counted first, so the prompt says how many files and folders are
+  about to go rather than just "and their contents". The delete then runs as a
+  job with a progress row pinned above the transfers pane — a running count, the
+  path being removed, and `x` to cancel — and every removed path is written to
+  the Log tab. A file that will not delete is counted and skipped rather than
+  stopping the rest
+- `x`: cancel a running delete; failing that, cancel transfers — everything in
+  flight from a file pane, or just the row under the cursor with the transfers
+  pane focused
 - `R`: retry a failed transfer. From a file pane it focuses the transfers pane,
   switches to the Failed tab if the current one has no failures, and retries the
   first one; on a failed row already, it retries that row

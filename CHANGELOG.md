@@ -68,6 +68,27 @@ feature batches and may change behaviour.
   couple of seconds when you switch your desktop theme. Falls back to
   `tide-night` when Omarchy isn't installed. Pick it with `t` or in Settings.
 
+- **Recursive delete is a visible, cancellable job.** Deleting a folder with
+  thousands of files used to set the status line to "delete..." and then say
+  nothing until the whole tree was gone — no count, no current path, no way to
+  stop. It now counts the selection before asking, so the prompt reads "Delete
+  4000 file(s) in 80 folder(s)?" instead of leaving "and their contents" to
+  cover any number, and past a cap it says "at least N" rather than stalling on
+  a slow scan. The delete then streams: a progress row is pinned above the
+  bottom pane's tabs — visible whichever tab is open — with a running count, the
+  path being removed, a spinner that keeps moving through a server stall, and
+  `x` to cancel. Every removed path is written to the Log tab.
+
+  Two long-standing faults in the same path went with it. The whole recursive
+  walk shared **one 60-second deadline**, so a large tree aborted partway
+  through and reported "context deadline exceeded" against a folder it had
+  half-emptied; each listing and each removal now carries its own deadline and
+  the walk as a whole carries none. And a **single unremovable file abandoned
+  every item after it** — one permission-denied file in one subdirectory left
+  the rest of the tree untouched; a failed removal is now counted and the walk
+  continues, the way the mirror's prune already worked, with the count of
+  failures and the first error reported at the end.
+
 ### Changed
 
 - **The Stats graph is one green instrument panel now.** The plot box carries a
