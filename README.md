@@ -151,6 +151,14 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
   mode and echoes back the `rw-r--r--` it decodes to. Works on the local
   pane and over SFTP; plain FTP has no portable permission command, so it
   reports "not supported" there
+- `b` / `B`: bookmarks. `B` bookmarks the focused pane's current directory, or
+  removes it if it is already bookmarked; `b` opens the picker, where `enter`
+  jumps to a bookmark, `shift+b` adds the current directory without leaving,
+  and `dd` removes the highlighted one. Remote bookmarks are saved **per
+  server** — `/var/www` means something different on another host — so they
+  need a saved profile; connect via `c` and save the server first. Local
+  bookmarks are shared across every connection. Both live in `config.toml`, as
+  `bookmarks` under a profile and `local_bookmarks` at the top level
 - `c`: connect (opens the server list: Enter connects, `e` edits, `n` / the last row adds a new one)
 - `t`: theme picker
 - `i`: toggle icons (falls back to ASCII glyphs, same as the vt52 theme)

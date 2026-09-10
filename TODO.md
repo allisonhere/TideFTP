@@ -52,8 +52,17 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
       SFTP implement it, FTP returns the new `vfs.ErrUnsupported` (no
       portable permission command, and jlaffaye/ftp exposes no SITE CHMOD).
       Multi-select applies one mode to every entry.
-- [ ] **Per-connection bookmarks** — favourite directories beyond the start path;
-      jump straight to `/var/www` etc.
+- [x] **Per-connection bookmarks** — `B` bookmarks the focused pane's current
+      directory (and un-bookmarks it: it is a toggle), `b` opens a picker where
+      `enter` jumps, `shift+b` adds the current directory without leaving, and
+      `dd` removes a row. Remote bookmarks hang off the saved profile they were
+      taken on, so they need one — a CLI-dialled connection has nowhere to keep
+      them and `B` says so rather than inventing a profile. Local bookmarks are
+      global. A bookmark is just a path; `navigateTo` already refuses to commit
+      a listing that fails, so a stale one leaves the pane put
+      (`internal/ui/bookmarks.go`). Persisted as `bookmarks` per profile and
+      `local_bookmarks` at the top level. Note this made `session.Target`
+      non-comparable — `==` on it became `SameConnection`.
 - [ ] **Ignore patterns for recursive queue** — skip `.git`, `node_modules`,
       `*.log` when queuing a folder.
 - [ ] **Bandwidth limit** — client-side throttle so a big transfer doesn't

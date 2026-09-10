@@ -36,6 +36,8 @@ const (
 	commandSortKey
 	commandSortReverse
 	commandChmod
+	commandBookmarks
+	commandToggleBookmark
 )
 
 type paletteCommand struct {
@@ -83,6 +85,8 @@ func (m Model) paletteCommands() []paletteCommand {
 	}
 	if pane := m.focusedFilePane(); pane != nil {
 		commands = append(commands,
+			paletteCommand{id: commandBookmarks, title: "Bookmarks", hint: "jump to a saved directory in this pane"},
+			paletteCommand{id: commandToggleBookmark, title: "Bookmark this directory", hint: "add or remove the pane's current directory"},
 			paletteCommand{id: commandFilter, title: "Filter listing", hint: "narrow the pane by glob or substring"},
 			paletteCommand{id: commandSortKey, title: "Sort listing", hint: "cycle name / size / date / type"},
 			paletteCommand{id: commandSortReverse, title: "Reverse sort", hint: "flip ascending / descending"},
@@ -198,6 +202,10 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		m.connectCursor = len([]rune(m.connectFieldValue(connectFieldIdentity)))
 		m.openConnectIdentityBrowser()
 		return cmd
+	case commandBookmarks:
+		return m.openBookmarks()
+	case commandToggleBookmark:
+		return m.toggleBookmark()
 	case commandRefresh:
 		return m.refresh()
 	case commandToggleHidden:

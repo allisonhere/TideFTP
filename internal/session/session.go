@@ -33,6 +33,26 @@ type Target struct {
 	// prompt; "off" skips host-key verification entirely. Empty is the
 	// default ask-once-then-remember behaviour. It persists with the profile.
 	HostKeyPolicy string
+	// Bookmarks are absolute directories on this server the remote pane can
+	// jump to, beyond StartPath. They persist with the profile.
+	Bookmarks []string
+}
+
+// SameConnection reports whether two targets describe the same connection.
+//
+// Target holds a slice, so it is not comparable with == and callers that used
+// to compare it that way use this instead. Bookmarks are deliberately not part
+// of the answer: they are what the user saved *about* a server, not part of
+// which server it is, and a dial result must still match the target it was
+// dialled for after a bookmark is added mid-connect.
+func (t Target) SameConnection(other Target) bool {
+	return t.Name == other.Name &&
+		t.Protocol == other.Protocol &&
+		t.Host == other.Host &&
+		t.Port == other.Port &&
+		t.User == other.User &&
+		t.StartPath == other.StartPath &&
+		t.HostKeyPolicy == other.HostKeyPolicy
 }
 
 // Host-key verification policies for Target.HostKeyPolicy.

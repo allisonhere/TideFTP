@@ -1,0 +1,30 @@
+   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50
+[;m╭────────────────────────────────────────────────╮[0m[;m╭────────────────────────────────────────────────╮[0m
+[;m│[0mLocal                       /home/allie/projects[;m│[0m[;m│[0mRemote                              /public_html[;m│[0m
+[;m│[0mmode        size        modified        name    [;m│[0m[;m│[0mmode        size        modified        name    [;m│[0m
+[;m│[0m  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   [;m│[0m[;m│[0m  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  [;m│[0m
+[;m│[0m    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md[;m│[0m[;m│[0m    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm[;m│[0m
+[;m│[0m    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  [;m│[0m[;m│[0m                                                [;m│[0m
+[;m│[0m                                                [;m│[0m[;m│[0m                                                [;m│[0m
+[;m│[0m                                                [;m│[0m[;m│[0m                                                [;m│[0m
+[;m│[0m                                                [;m│[0m[;m│[0m                                                [;m│[0m
+[;m│[0m            [;m[0m[;m[0m[;m[0m╭─ tideftp · bookmarks ──────────────────────────────────────────────────╮[;m[0m[;m[0m[;m[0m            [;m│[0m
+│            [;m│[0m                                                                        [;m│[0m            │
+│            [;m│[0m  Local bookmarks                                                       [;m│[0m            │
+│            [;m│[0m                                                                        [;m│[0m            │
+│            [;m│[0m  ▌ /home/allie/Projects                                                [;m│[0m            │
+│            [;m│[0m    /etc/nginx                                                          [;m│[0m            │
+│            [;m│[0m                                                                        [;m│[0m            │
+│            [;m│[0m    enter go   dd remove   shift+b add current   esc close              [;m│[0m            │
+│            [;m│[0m                                                                        [;m│[0m            │
+│            [;m╰────────────────────────────────────────────────────────────────────────╯[0m            │
+│                                                ││                                                │
+[;m╰────────────────────────────────────────────────╯[0m[;m╰────────────────────────────────────────────────╯[0m
+[;m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮[0m
+[;m│[0mTransfers                                                                                    queue[;m│[0m
+[;m│[0m  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               [;m│[0m
+[;m│[0m↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main.go      50% transferring[;m│[0m
+[;m│[0m↓ [                  ]  /public_html/index.html -> /home/allie/projects/index.html       0% queued[;m│[0m
+[;m│[0m                                                                                                  [;m│[0m
+[;m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯[0m
+   ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

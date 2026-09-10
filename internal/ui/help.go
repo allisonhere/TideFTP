@@ -40,6 +40,8 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "R", label: "retry failed transfer (jumps to it)"},
 	{section: "Act", key: "+/-", label: "more/fewer parallel transfers"},
 	{section: "Act", key: ".", label: "toggle hidden files"},
+	{section: "Act", key: "b", label: "bookmarks: jump to a saved directory"},
+	{section: "Act", key: "B", label: "bookmark / unbookmark this directory"},
 	{section: "View", key: "c", label: "connect / disconnect"},
 	{section: "View", key: "ctrl+k", label: "command palette"},
 	{section: "View", key: "t", label: "theme picker"},

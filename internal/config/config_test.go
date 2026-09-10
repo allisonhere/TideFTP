@@ -78,8 +78,13 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 		Editor:      "nvim",
 		Layout:      Layout{FileSplit: 0.63, BottomSplit: 0.21},
 		Sort:        Sort{Key: "size", Desc: true},
+		// One profile carries bookmarks and the other leaves them nil, so this
+		// covers both the round trip and the omitempty case. The assertion
+		// below is a whole-struct DeepEqual, which would catch a nil coming
+		// back as an empty slice.
+		LocalBookmarks: []string{"/home/bob/projects", "/etc/nginx"},
 		Profiles: []Profile{
-			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob"},
+			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob", Bookmarks: []string{"/var/www", "/var/log/nginx"}},
 			{Name: "locked-down", Protocol: "sftp", Host: "secure.example.com", Port: 22, User: "ops", StartPath: "/srv", HostKeyPolicy: "strict"},
 		},
 	}

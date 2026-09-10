@@ -35,11 +35,15 @@ type Config struct {
 	VerifyChecksums bool `toml:"verify_checksums"`
 	// AutoReconnect redials, with backoff, after a connection drops on its
 	// own. It never fires for a disconnect the user asked for.
-	AutoReconnect bool      `toml:"auto_reconnect"`
-	Layout        Layout    `toml:"layout"`
-	Sort          Sort      `toml:"sort"`
-	Updates       Updates   `toml:"updates"`
-	Profiles      []Profile `toml:"profiles"`
+	AutoReconnect bool    `toml:"auto_reconnect"`
+	Layout        Layout  `toml:"layout"`
+	Sort          Sort    `toml:"sort"`
+	Updates       Updates `toml:"updates"`
+	// LocalBookmarks are directories on this machine the local pane can jump
+	// to. They are global rather than per-profile: the local pane is not a
+	// property of whichever server you happened to dial.
+	LocalBookmarks []string  `toml:"local_bookmarks,omitempty"`
+	Profiles       []Profile `toml:"profiles"`
 }
 
 // Updates is the self-update behaviour: whether to look for a newer release
@@ -95,6 +99,11 @@ type Profile struct {
 	// HostKeyPolicy is SFTP-only: "" (ask), "strict", or "off". Omitted from
 	// the file when it is the ask default.
 	HostKeyPolicy string `toml:"host_key_policy,omitempty"`
+	// Bookmarks are absolute directories on this server that the remote pane
+	// can jump to. go-toml emits a table's keys in declaration order, so
+	// keeping this last leaves the scalars grouped at the top of each
+	// [[profiles]] table rather than split around an array.
+	Bookmarks []string `toml:"bookmarks,omitempty"`
 }
 
 // SaveFunc persists a Config. It is a seam so callers — the UI — never have

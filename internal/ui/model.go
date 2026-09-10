@@ -57,6 +57,7 @@ const (
 	overlaySync
 	overlayQuitConfirm
 	overlayUpdate
+	overlayBookmarks
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -271,12 +272,26 @@ type Model struct {
 	// rather than deleting a profile the user never armed.
 	serverDeleteIndex  int
 	serverDeleteExpiry time.Time
-	commandQuery       string
-	commandCursor      int
-	fileAction         *fileActionPrompt
-	pendingEdit        *pendingEdit
-	preview            *previewState
-	editorSetting      string
+	// localBookmarks are the local pane's saved directories. Remote bookmarks
+	// ride on the matching profile in m.profiles, but the local list belongs
+	// to no server, so it is held whole here — snapshotConfig rebuilds the
+	// entire config from model fields, and a config field with nothing behind
+	// it is zeroed on the next save (see the note on `updates`).
+	localBookmarks []string
+	// bookmarkPane is the pane the open picker acts on, captured when it
+	// opens so a focus change cannot move the target underneath it.
+	bookmarkPane   paneID
+	bookmarkCursor int
+	// bookmarkDeleteIndex and bookmarkDeleteExpiry arm a two-press delete,
+	// exactly as the server list's pair does.
+	bookmarkDeleteIndex  int
+	bookmarkDeleteExpiry time.Time
+	commandQuery         string
+	commandCursor        int
+	fileAction           *fileActionPrompt
+	pendingEdit          *pendingEdit
+	preview              *previewState
+	editorSetting        string
 	// verifyChecksums re-reads both ends of every completed transfer and
 	// compares SHA-256 sums (see verify.go). Off by default: it doubles the
 	// bytes a transfer costs.
@@ -471,30 +486,32 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 			sortKey:    parseSortKey(cfg.Sort.Key),
 			sortDesc:   cfg.Sort.Desc,
 		},
-		localFS:           local,
-		dialer:            dialer,
-		targets:           targets,
-		profiles:          profilesFromConfig(cfg.Profiles),
-		state:             connDisconnected,
-		nextTransferID:    1,
-		maxParallel:       maxParallel,
-		theme:             themeByName(cfg.Theme),
-		density:           density,
-		shadow:            cfg.Shadow,
-		showIcons:         cfg.ShowIcons,
-		editorSetting:     cfg.Editor,
-		verifyChecksums:   cfg.VerifyChecksums,
-		autoReconnect:     cfg.AutoReconnect,
-		fileSplit:         tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
-		bottomSplit:       tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
-		save:              save,
-		creds:             creds,
-		serverDeleteIndex: -1,
-		version:           currentVersion,
-		updates:           cfg.Updates,
-		updater:           update.New(),
-		logs:              []string{"redacted logs enabled"},
-		status:            "ready",
+		localFS:             local,
+		dialer:              dialer,
+		targets:             targets,
+		profiles:            profilesFromConfig(cfg.Profiles),
+		state:               connDisconnected,
+		nextTransferID:      1,
+		maxParallel:         maxParallel,
+		theme:               themeByName(cfg.Theme),
+		density:             density,
+		shadow:              cfg.Shadow,
+		showIcons:           cfg.ShowIcons,
+		editorSetting:       cfg.Editor,
+		verifyChecksums:     cfg.VerifyChecksums,
+		autoReconnect:       cfg.AutoReconnect,
+		fileSplit:           tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
+		bottomSplit:         tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
+		save:                save,
+		creds:               creds,
+		serverDeleteIndex:   -1,
+		localBookmarks:      append([]string(nil), cfg.LocalBookmarks...),
+		bookmarkDeleteIndex: -1,
+		version:             currentVersion,
+		updates:             cfg.Updates,
+		updater:             update.New(),
+		logs:                []string{"redacted logs enabled"},
+		status:              "ready",
 	}
 	if model.theme.Name == themeNameMatchOmarchy {
 		model.omarchySig = omarchySignatureNow()
@@ -535,8 +552,9 @@ func (m Model) snapshotConfig() config.Config {
 			Key:  m.sortDefaultPane().sortKey.String(),
 			Desc: m.sortDefaultPane().sortDesc,
 		},
-		Updates:  m.updates,
-		Profiles: profilesToConfig(m.profiles),
+		Updates:        m.updates,
+		LocalBookmarks: append([]string(nil), m.localBookmarks...),
+		Profiles:       profilesToConfig(m.profiles),
 	}
 }
 
@@ -552,6 +570,9 @@ func profilesFromConfig(profiles []config.Profile) []session.Target {
 			Name: p.Name, Protocol: p.Protocol, Host: p.Host,
 			Port: p.Port, User: p.User, StartPath: p.StartPath,
 			HostKeyPolicy: session.NormalizeHostKeyPolicy(p.HostKeyPolicy),
+			// Copied, not shared: m.profiles and any config snapshot taken
+			// from it must never write through to the same backing array.
+			Bookmarks: append([]string(nil), p.Bookmarks...),
 		}
 	}
 	return targets
@@ -569,6 +590,7 @@ func profilesToConfig(targets []session.Target) []config.Profile {
 			Name: t.Name, Protocol: t.Protocol, Host: t.Host,
 			Port: t.Port, User: t.User, StartPath: t.StartPath,
 			HostKeyPolicy: session.NormalizeHostKeyPolicy(t.HostKeyPolicy),
+			Bookmarks:     append([]string(nil), t.Bookmarks...),
 		}
 	}
 	return profiles
@@ -890,6 +912,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayServerList {
 		return m, m.handleServerListKey(msg)
 	}
+	if m.overlay == overlayBookmarks {
+		return m, m.handleBookmarksKey(msg)
+	}
 	if m.overlay == overlayHelp {
 		return m, m.handleHelpKey(msg)
 	}
@@ -1039,6 +1064,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		cmd = m.refresh()
 	case "c":
 		cmd = m.openServerList()
+	case "b":
+		cmd = m.openBookmarks()
+	case "B":
+		cmd = m.toggleBookmark()
 	case "U":
 		m.openUpdateOverlay()
 	case "t":
@@ -1219,7 +1248,7 @@ func closeConnCmd(conn session.Conn) tea.Cmd {
 // transfer engine, the event pump, the drop watcher, and the first listing.
 func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
 	// A connection that arrives after the user moved on is closed, not used.
-	if m.state != connConnecting || msg.target != m.target {
+	if m.state != connConnecting || !msg.target.SameConnection(m.target) {
 		return closeConnCmd(msg.conn)
 	}
 	m.conn = msg.conn
@@ -1252,7 +1281,7 @@ func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
 // it needs an answer from the user, and redialling behind a prompt they have
 // not answered would just raise it again.
 func (m *Model) applyConnectFailed(msg connectFailedMsg) tea.Cmd {
-	if m.state != connConnecting || msg.target != m.target {
+	if m.state != connConnecting || !msg.target.SameConnection(m.target) {
 		return nil
 	}
 	m.state = connFailed

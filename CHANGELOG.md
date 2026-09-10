@@ -9,6 +9,32 @@ feature batches and may change behaviour.
 
 ### Added
 
+- **Bookmarks.** `B` bookmarks the focused pane's current directory and `b`
+  opens a picker to jump back to one, so the directories a session actually
+  lives in are two keys away instead of a walk down the tree every time. A
+  profile's `start_path` already covered one such directory, but only one, and
+  only by reconnecting.
+
+  Remote bookmarks belong to the **saved server profile** they were taken on,
+  not to the app: `/var/www` names something different on every host, and a
+  list that followed you between them would be a way to land in the wrong
+  place on a machine where that matters. The consequence is that a connection
+  with no saved profile — one dialled straight from the command line — has
+  nowhere to keep them, and `B` says so rather than quietly creating a saved
+  server the user never asked for. Local bookmarks are global for the
+  mirror-image reason: the local pane is not a property of whichever server
+  you happened to dial.
+
+  `B` is a toggle, so the same key takes a directory off the list, and it
+  works inside the picker too (`shift+b`) — building a list up is one key
+  repeated rather than a close-navigate-reopen cycle. `dd` in the picker
+  removes the highlighted entry, matching the server list's two-press
+  confirmation. A bookmark is just a path, so there is no name to invent or
+  keep in step with a directory that moved, and jumping to one that has since
+  gone leaves the pane where it was and reports the error. They persist as
+  `bookmarks` under each `[[profiles]]` table and `local_bookmarks` at the top
+  level of `config.toml`.
+
 - **Implicit FTPS (`ftps-implicit`).** A fourth protocol alongside
   `sftp`/`ftp`/`ftps`, for servers that expect the TLS handshake before any
   FTP command rather than an `AUTH TLS` upgrade — the older port-990 flavour

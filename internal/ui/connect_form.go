@@ -636,6 +636,12 @@ func (m *Model) upsertProfile(target session.Target) int {
 	key := targetKey(target)
 	for i, p := range m.profiles {
 		if targetKey(p) == key {
+			// The connect form has no bookmark field, so a target built from
+			// it carries none — and this replaces the profile wholesale.
+			// Carry the bookmarks across or editing a server throws them away.
+			// A key-changing edit falls through to the append below and
+			// correctly starts empty: that is a different server.
+			target.Bookmarks = p.Bookmarks
 			m.profiles[i] = target
 			return i
 		}

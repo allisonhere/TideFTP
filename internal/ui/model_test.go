@@ -835,7 +835,7 @@ func TestInitLoadsLocalAndDialsTheFirstTarget(t *testing.T) {
 	if model.local.loading || len(model.local.entries) == 0 {
 		t.Fatalf("local pane did not load: loading=%v entries=%d", model.local.loading, len(model.local.entries))
 	}
-	if len(dialer.calls) != 1 || dialer.calls[0] != testTarget {
+	if len(dialer.calls) != 1 || !dialer.calls[0].SameConnection(testTarget) {
 		t.Fatalf("dialer calls = %v, want one for the first target", dialer.calls)
 	}
 	if !model.connected() {
@@ -1353,7 +1353,7 @@ func TestConnectFailureWithAnUnknownHostKeyOpensThePrompt(t *testing.T) {
 	if model.hostKeyPrompt == nil || model.hostKeyPrompt.err != hostKeyErr {
 		t.Fatalf("hostKeyPrompt = %+v, want it to carry the UntrustedHostKeyError", model.hostKeyPrompt)
 	}
-	if model.hostKeyPrompt.target != testTarget {
+	if !model.hostKeyPrompt.target.SameConnection(testTarget) {
 		t.Fatalf("hostKeyPrompt.target = %v, want %v", model.hostKeyPrompt.target, testTarget)
 	}
 	if model.statusErr {

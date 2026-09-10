@@ -846,6 +846,52 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "connect", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
+	case overlayBookmarks:
+		width := min(72, max(48, m.width-8))
+		contentWidth := width - 4
+		paths, writable := m.bookmarksFor(m.bookmarkPane)
+		side := "Local"
+		if m.bookmarkPane == paneRemote {
+			side = "Remote"
+		}
+		// No scroll offset: bookmark lists are hand-curated and a screenful is
+		// far more than anyone keeps. If that stops being true, overlayHelp
+		// above has the offset/visibleRows pattern to copy.
+		rows := make([]string, 0, len(paths)+4)
+		rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render(side+" bookmarks"), "")
+		if len(paths) == 0 {
+			// An empty list still opens, so this line is the only place the
+			// user is told what fills it.
+			rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render("No bookmarks yet — B adds the current directory."))
+		}
+		for i, path := range paths {
+			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
+				Text:     path,
+				Selected: i == m.bookmarkCursor,
+			}, contentWidth))
+		}
+		switch {
+		case m.bookmarkArmedFor(m.bookmarkCursor) && m.bookmarkCursor < len(paths):
+			rows = append(rows, "", renderer.Styles.StatusError.Width(contentWidth).Render(
+				"press d again to remove "+paths[m.bookmarkCursor]))
+		case !writable:
+			reason := "save this server to bookmark its directories"
+			if m.bookmarkPane == paneRemote && !m.connected() {
+				reason = "not connected"
+			}
+			rows = append(rows, "", renderer.Styles.DetailMeta.Width(contentWidth).Render(reason))
+		default:
+			hints := []tideui.SoftHint{{Key: "enter", Label: "go"}}
+			if len(paths) > 0 {
+				hints = append(hints, tideui.SoftHint{Key: "dd", Label: "remove"})
+			}
+			// "shift+b", not "B": RenderSoftHints lowercases every key, so a
+			// bare capital would render as `b` — which closes the picker.
+			hints = append(hints, tideui.SoftHint{Key: "shift+b", Label: "add current"}, tideui.SoftHint{Key: "esc", Label: "close"})
+			rows = append(rows, "", renderer.RenderSoftHints(contentWidth, hints...))
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "bookmarks", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
+		return &overlay
 	case overlayFileAction:
 		if m.fileAction == nil {
 			return nil
