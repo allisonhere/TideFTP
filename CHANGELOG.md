@@ -61,6 +61,23 @@ feature batches and may change behaviour.
 
 ### Fixed
 
+- **Every FTP and FTPS connection dropped the instant it opened**, reporting
+  "operation was canceled". Taking over the control dial to bound the greeting
+  (see the implicit FTPS entry above) meant handing jlaffaye/ftp a dial
+  function — and it reuses that function for every *data* connection too, not
+  just the control connection it was written for. So each data connection was
+  opened with the connect context, which the UI cancels as soon as the dial
+  returns, since it is there to bound connecting and nothing more. The first
+  listing after connect needed a data connection and failed immediately.
+
+  Data connections now dial on their own terms: no connect context, and no
+  socket deadline. Both mattered — the deadline is an absolute time chosen at
+  dial, so a transfer still running when it passed would have been cut off
+  mid-stream on a connection the pool considered healthy. Supplying a dial
+  function also stopped the library from wrapping data connections in TLS
+  itself, so that moved with them; without it an explicit-FTPS data channel
+  would have gone out in the clear after `PROT P`.
+
 - **Explicit FTPS defaulted to port 990, which cannot work.** A `ftps` target
   with no port dialled 990 — implicit FTPS's port — while the client only ever
   spoke explicit FTPS (`AUTH TLS`). That put an upgrade-in-place client in

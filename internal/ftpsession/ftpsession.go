@@ -155,11 +155,26 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 
 		// control is the raw socket, kept so the deadline dialControl set
 		// can be cleared once the connection is up.
+		//
+		// jlaffaye/ftp reuses this one dial function for every data
+		// connection as well as the control connection (see openDataConn),
+		// and the two need opposite treatment, so the first call — always the
+		// control connection, dialled by ftp.Dial below before any data
+		// connection can exist — is the only one that gets the connect
+		// context and the greeting deadline. A data connection given either
+		// would be born broken: the caller cancels the connect context as
+		// soon as the dial returns, and the deadline is an absolute time that
+		// would land in the middle of a later transfer.
 		var control net.Conn
+		controlDialed := false
 		options = append(options, ftp.DialWithDialFunc(func(_, addr string) (net.Conn, error) {
-			conn, err := dialControl(ctx, addr, timeout, tlsConfig, d.cfg.ImplicitTLS)
-			control = conn
-			return conn, err
+			if !controlDialed {
+				controlDialed = true
+				conn, err := dialControl(ctx, addr, timeout, tlsConfig, d.cfg.ImplicitTLS)
+				control = conn
+				return conn, err
+			}
+			return dialData(addr, timeout, tlsConfig)
 		}))
 
 		conn, err := ftp.Dial(address, options...)
@@ -234,6 +249,30 @@ func dialControl(ctx context.Context, address string, timeout time.Duration, tls
 		return nil, fmt.Errorf("tls handshake: %w", err)
 	}
 	return secure, nil
+}
+
+// dialData opens a data connection. It shares nothing with dialControl on
+// purpose: no connect context, because the caller cancels that as soon as the
+// dial returns, and no deadline on the socket, because a transfer is bounded
+// by its own context and an absolute deadline set here would cut it off
+// mid-stream. Only the TCP connect is bounded, by the dialer's own timeout.
+//
+// Supplying a dial function at all means jlaffaye/ftp stops wrapping data
+// connections in TLS itself — openDataConn returns whatever the dial function
+// gives it — so that has to happen here for both FTPS flavours, or the data
+// channel would go out in the clear after PROT P. The handshake is left to the
+// first read or write, which is what the library does and what proftpd and
+// pureftpd need.
+func dialData(address string, timeout time.Duration, tlsConfig *tls.Config) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.Dial("tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	if tlsConfig == nil {
+		return conn, nil
+	}
+	return tls.Client(conn, tlsConfig), nil
 }
 
 // tlsConfig builds the FTPS client configuration. Verification is on unless
