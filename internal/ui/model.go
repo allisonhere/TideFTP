@@ -346,13 +346,18 @@ type Model struct {
 
 	// stats, statsHistory, statsLastBytes, and statsLastSampleAt back the
 	// Stats tab (see internal/ui/stats.go). In-memory only, like
-	// sessionConflictPolicy: they reset on restart, and also on leaving and
-	// re-entering the tab, since sampling only runs while it's open.
-	stats             statsSnapshot
-	statsHistory      []int64
-	statsLastBytes    int64
-	statsLastSampleAt time.Time
-	logs              []string
+	// sessionConflictPolicy. Their lifetime is the connection's: sampling
+	// runs from connect to disconnect whether or not the tab is visible, so
+	// the graph can show what happened while the user was looking elsewhere.
+	stats        statsSnapshot
+	statsHistory []int64
+	// statsBytes is a short trailing record of the byte counter, used to
+	// measure throughput across statsRateWindow rather than between two
+	// consecutive ticks — see statsRateWindow for why that matters.
+	statsBytes []statsByteSample
+	// statsSampling gates the tick chain — see startStatsSampling.
+	statsSampling bool
+	logs          []string
 
 	theme       tideui.Theme
 	themePicker tideui.ThemePicker
@@ -1102,27 +1107,27 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "1":
 		tabSwitch = true
 		m.focus = focusQueue
-		cmd = m.setBottomTab(tabQueue)
+		m.setBottomTab(tabQueue)
 	case "2":
 		tabSwitch = true
 		m.focus = focusQueue
-		cmd = m.setBottomTab(tabActive)
+		m.setBottomTab(tabActive)
 	case "3":
 		tabSwitch = true
 		m.focus = focusQueue
-		cmd = m.setBottomTab(tabFailed)
+		m.setBottomTab(tabFailed)
 	case "4":
 		tabSwitch = true
 		m.focus = focusQueue
-		cmd = m.setBottomTab(tabHistory)
+		m.setBottomTab(tabHistory)
 	case "5":
 		tabSwitch = true
 		m.focus = focusQueue
-		cmd = m.setBottomTab(tabLog)
+		m.setBottomTab(tabLog)
 	case "6":
 		tabSwitch = true
 		m.focus = focusQueue
-		cmd = m.setBottomTab(tabStats)
+		m.setBottomTab(tabStats)
 	}
 	m.clampCursors()
 	return m, cmd
@@ -1271,6 +1276,9 @@ func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
 	return tea.Batch(
 		waitForTransferEvent(msg.conn.Engine().Events()),
 		watchConnCmd(msg.conn),
+		// Sampling starts with the connection, not with the Stats tab, so
+		// the graph covers everything this connection did.
+		m.startStatsSampling(),
 		m.requestListing(paneRemote, openPath, listingNavigate),
 	)
 }
@@ -1354,6 +1362,8 @@ func (m *Model) clearConnection(reason string) {
 	m.remoteFS = nil
 	m.engine = nil
 	m.state = connDisconnected
+	// The graph belongs to the connection that produced it.
+	m.stopStatsSampling()
 	m.remote.entries = nil
 	m.remote.path = ""
 	m.remote.loading = false
@@ -2285,7 +2295,7 @@ func (m *Model) reachFailedTransfer() bool {
 	if m.bottomTab != tabFailed {
 		// tabFailed is neither tabLog nor tabStats, so this never has a
 		// command to run.
-		_ = m.setBottomTab(tabFailed)
+		m.setBottomTab(tabFailed)
 		if i := firstRetryable(); i >= 0 {
 			m.bottomCursor = i
 			return true
@@ -2404,10 +2414,12 @@ func (m *Model) clampBottomCursor() {
 // setBottomTab switches the focused bottom-pane tab and resets its scroll
 // position and row cursor. The log tab opens scrolled to the latest
 // entries, matching a tail view; the transfer tabs open scrolled to the top.
-// Opening tabStats (re)starts its sampling from scratch — see
-// resetStatsSampling — and returns the tea.Cmd that kicks off ticking;
-// every other tab returns nil.
-func (m *Model) setBottomTab(tab bottomTab) tea.Cmd {
+//
+// Opening tabStats deliberately does nothing to the sampling: it runs for as
+// long as the connection does (see startStatsSampling), so the graph shown
+// here is continuous across tab switches rather than restarting empty every
+// time the user looks back at it.
+func (m *Model) setBottomTab(tab bottomTab) {
 	m.bottomTab = tab
 	m.bottomCursor = 0
 	if tab == tabLog {
@@ -2415,10 +2427,6 @@ func (m *Model) setBottomTab(tab bottomTab) tea.Cmd {
 	} else {
 		m.bottomOffset = 0
 	}
-	if tab == tabStats {
-		return m.resetStatsSampling()
-	}
-	return nil
 }
 
 func (m *Model) clampBottomOffset() {

@@ -70,6 +70,31 @@ feature batches and may change behaviour.
 
 ### Changed
 
+- **The Stats graph now samples for as long as the connection lasts**, rather
+  than only while its tab is on screen, and samples four times a second
+  instead of once. Switching to the queue while a transfer ran and then
+  switching back used to show an empty graph starting from the moment you
+  returned — the stretch worth looking at was exactly the stretch it threw
+  away. The history belongs to the connection now: it survives every tab
+  switch, and a disconnect is what clears it and stops the sampler.
+
+  Each reading now measures across a one-second window rather than between
+  two consecutive ticks, which is what makes sampling that fast meaningful. A
+  running transfer only updates its byte count every 200 ms, so a reading
+  taken between two ticks depended on how many of those updates happened to
+  land in that particular tick — and at any tick interval that is not an exact
+  multiple of the reporting interval, the two beat against each other. At
+  250 ms against 200 ms a perfectly constant transfer read 0.8×, 0.8×, 0.8×,
+  1.6×, forever. The graph scaled itself to a 1.6× that was pure artifact and
+  drew the real rate as a flat band two thirds up the box, with no peaks at
+  all. Measuring across several reports averages that beat out.
+
+  The graph's ceiling also comes from a bounded lookback now rather than the
+  whole history, and from the smoothed curve that actually gets drawn rather
+  than the raw maximum. With sampling running for the life of the connection,
+  a ceiling anchored to all of history let one early spike flatten every later
+  transfer into the bottom row.
+
 - **`Tab` now toggles between the local and remote panes** instead of cycling
   through the transfer pane as a third stop. The two file panes are what a
   session is spent moving between, and passing through the queue on the way

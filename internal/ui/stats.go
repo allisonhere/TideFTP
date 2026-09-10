@@ -82,53 +82,107 @@ type protocolStats struct {
 	bytes        int64
 }
 
-// statsHistoryCap bounds how many throughput samples the Stats tab keeps —
-// 5 minutes of 1-second samples, deliberately more than any realistic
+// statsHistoryCap bounds how many throughput samples the graph keeps —
+// 5 minutes at statsTickInterval, deliberately more than any realistic
 // graph width, so history isn't truncated by the display before it's
 // truncated by the cap.
-const statsHistoryCap = 300
+const statsHistoryCap = int(5 * time.Minute / statsTickInterval)
 
-const statsTickInterval = time.Second
+// statsTickInterval is how often a new point is added to the graph. It says
+// nothing about how far back each point measures — that is statsRateWindow —
+// so it can be short enough to feel live without the reading getting noisy.
+const statsTickInterval = 250 * time.Millisecond
 
-// statsTickMsg drives the Stats tab's sampling. It's the only periodic
-// ticker anywhere in internal/ui — everything else redraws only in
-// response to a key, a transfer event, a listing reply, or a resize.
+// statsByteSample is one reading of the running total of bytes transferred,
+// timestamped so a rate can be measured across several of them.
+type statsByteSample struct {
+	at    time.Time
+	bytes int64
+}
+
+// statsRateWindow is how far back each throughput reading measures.
+//
+// It exists because a running transfer only updates its byte count every
+// transfer.ProgressInterval. Measuring between two consecutive ticks meant
+// the reading depended on how many of those updates happened to land in that
+// particular tick, and at any tick interval that is not an exact multiple of
+// the reporting interval the two beat against each other: at 250ms against
+// 200ms reporting, a perfectly constant transfer read 0.8x, 0.8x, 0.8x, 1.6x,
+// forever. The graph then scaled itself to a 1.6x that was pure artifact and
+// drew the real rate as a flat band two thirds up the box, with no peaks.
+//
+// Measuring across a window several reports wide averages that beat out: the
+// count of updates inside the window barely changes from tick to tick, so
+// what is left is the actual rate.
+const statsRateWindow = time.Second
+
+// peakLookbackWindows is how many screenfuls back renderThroughputLine looks
+// when deciding the graph's ceiling. One would mean the scale jumped every
+// time a high reading scrolled off; the whole history means a single early
+// spike flattens the graph for the rest of the connection. Two holds the
+// scale steady for as long as a record is visible, then lets it recover.
+const peakLookbackWindows = 2
+
+// statsTickMsg drives throughput sampling. It's the only periodic ticker
+// anywhere in internal/ui — everything else redraws only in response to a
+// key, a transfer event, a listing reply, or a resize.
 type statsTickMsg struct{}
 
 func statsTickCmd() tea.Cmd {
 	return tea.Tick(statsTickInterval, func(time.Time) tea.Msg { return statsTickMsg{} })
 }
 
-// resetStatsSampling (re)starts the Stats tab's sampling from scratch —
-// called whenever the tab is opened, including switching back to it after
-// looking away. This is why the graph shows a gap rather than continuous
-// history across tab switches: sampling only runs while the tab is open,
-// so there is nothing to resume from.
-func (m *Model) resetStatsSampling() tea.Cmd {
+// startStatsSampling begins sampling for a new connection, from scratch.
+//
+// Sampling is tied to the connection rather than to the Stats tab being
+// visible: the graph is a record of what this connection did, and a user who
+// looks at the queue while a transfer runs and then looks back expects to see
+// the part they missed, not an empty graph starting from the moment they
+// returned. It stops at disconnect, which is also the only thing that clears
+// the history — see stopStatsSampling.
+func (m *Model) startStatsSampling() tea.Cmd {
 	m.statsHistory = nil
-	m.statsLastBytes = 0
-	m.statsLastSampleAt = time.Time{}
+	m.statsBytes = nil
 	m.stats = m.computeStats()
+	// statsSampling gates the self-perpetuating tick chain, so setting it
+	// here and checking it in applyStatsTick is what stops a reconnect from
+	// leaving two chains running and sampling everything twice.
+	if m.statsSampling {
+		return nil
+	}
+	m.statsSampling = true
 	return statsTickCmd()
 }
 
+// stopStatsSampling ends sampling and clears the graph. The chain itself
+// winds down on the next tick, when applyStatsTick sees the flag is off.
+func (m *Model) stopStatsSampling() {
+	m.statsSampling = false
+	m.statsHistory = nil
+	m.statsBytes = nil
+	m.stats = m.computeStats()
+}
+
 // applyStatsTick recomputes the snapshot and appends one throughput
-// sample, then re-arms itself only if the Stats tab is still open — the
-// self-terminating chain that makes the ticker cost nothing once the user
-// looks away.
+// sample, then re-arms itself for as long as the connection lasts. It keeps
+// sampling with the Stats tab hidden — that is the point, so the graph has
+// the history to show when the user looks back — and the chain terminates on
+// disconnect, when stopStatsSampling clears the flag.
 func (m *Model) applyStatsTick() tea.Cmd {
-	if m.bottomTab != tabStats {
+	if !m.statsSampling {
 		return nil
 	}
 	now := time.Now()
 	snapshot := m.computeStats()
-	if !m.statsLastSampleAt.IsZero() {
-		if elapsed := now.Sub(m.statsLastSampleAt).Seconds(); elapsed > 0 {
-			rate := int64(float64(snapshot.bytesTransferred-m.statsLastBytes) / elapsed)
+	m.statsBytes = append(m.statsBytes, statsByteSample{at: now, bytes: snapshot.bytesTransferred})
+	m.trimStatsBytes(now)
+	if oldest := m.statsBytes[0]; len(m.statsBytes) > 1 {
+		if elapsed := now.Sub(oldest.at).Seconds(); elapsed > 0 {
+			rate := int64(float64(snapshot.bytesTransferred-oldest.bytes) / elapsed)
 			if rate < 0 {
 				// Can happen if a queued Resume transfer (BytesDone already
 				// counting its resume offset) was cancelled and removed
-				// between ticks, momentarily shrinking the total. Never a
+				// within the window, momentarily shrinking the total. Never a
 				// real negative rate.
 				rate = 0
 			}
@@ -139,9 +193,25 @@ func (m *Model) applyStatsTick() tea.Cmd {
 			}
 		}
 	}
-	m.statsLastBytes, m.statsLastSampleAt = snapshot.bytesTransferred, now
 	m.stats = snapshot
 	return statsTickCmd()
+}
+
+// trimStatsBytes drops byte readings that have aged out of the rate window,
+// keeping the newest one that is already older than it so the measurement
+// still spans the full window rather than shrinking to whatever is left
+// inside it.
+func (m *Model) trimStatsBytes(now time.Time) {
+	cut := 0
+	for i, sample := range m.statsBytes {
+		if now.Sub(sample.at) <= statsRateWindow {
+			break
+		}
+		cut = i
+	}
+	if cut > 0 {
+		m.statsBytes = m.statsBytes[cut:]
+	}
 }
 
 // computeStats aggregates m.transfers into a fresh statsSnapshot.
@@ -293,15 +363,25 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 	copy(window[subWidth-len(visible):], visible)
 	smoothed := smoothSamples(window)
 
-	// peak scales both height and color, and is deliberately measured
-	// across the whole session history (samples), not just what's visible
-	// right now — otherwise the instant an old high value scrolls out of
-	// the window, everything still on screen would rescale taller/hotter
-	// relative to a new, lower ceiling, every tick. Anchoring it to the
-	// full history means it only moves on a genuine new record, not as a
-	// side effect of the window sliding.
+	// peak scales both height and colour, and is measured over more than is
+	// on screen: if it were only the visible window, the instant a high
+	// value scrolled off the left edge everything still showing would
+	// rescale taller and hotter, every tick.
+	//
+	// It is deliberately not the whole history either. Sampling runs for the
+	// life of the connection now, so history outlasts the view by minutes,
+	// and a ceiling anchored to all of it lets one early spike flatten every
+	// later transfer into the bottom row — the graph stops showing peaks at
+	// all. Looking back a couple of windows keeps the scale steady while a
+	// record is on screen, and lets it fall back once that record has been
+	// gone for as long again.
+	// The ceiling is taken from the smoothed series, because that is what
+	// gets drawn. Scaling a smoothed curve against a raw maximum it can never
+	// reach — smoothing pulls every spike down — just leaves the top of the
+	// box permanently empty.
+	peakFrom := max(0, len(samples)-subWidth*peakLookbackWindows)
 	peak := int64(1)
-	for _, v := range samples {
+	for _, v := range smoothSamples(samples[peakFrom:]) {
 		if v > peak {
 			peak = v
 		}

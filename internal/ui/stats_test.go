@@ -11,7 +11,10 @@ import (
 
 	"tideftp/internal/config"
 	"tideftp/internal/domain"
+	"tideftp/internal/fakefs"
 	"tideftp/internal/localfs"
+	"tideftp/internal/session"
+	"tideftp/internal/transfer"
 )
 
 func statsTestModel(t *testing.T) Model {
@@ -70,26 +73,46 @@ func TestComputeStatsWithNoCompletedTransfersHasZeroAverages(t *testing.T) {
 	}
 }
 
-func TestApplyStatsTickIsANoOpOffTheStatsTab(t *testing.T) {
+// The chain terminates on disconnect, not on looking away from the tab.
+func TestApplyStatsTickIsANoOpOnceSamplingStops(t *testing.T) {
 	model := statsTestModel(t)
-	model.bottomTab = tabQueue
+	model.statsSampling = false
 	model.transfers = []domain.Transfer{{ID: 1, Status: domain.Done, BytesDone: 100, BytesTotal: 100}}
 
 	cmd := model.applyStatsTick()
 
 	if cmd != nil {
-		t.Fatalf("applyStatsTick off the Stats tab returned a cmd, want nil (self-terminating)")
+		t.Fatalf("applyStatsTick with sampling stopped returned a cmd, want nil (self-terminating)")
 	}
 	if len(model.statsHistory) != 0 {
-		t.Fatalf("statsHistory = %v, want untouched while off the Stats tab", model.statsHistory)
+		t.Fatalf("statsHistory = %v, want untouched once sampling has stopped", model.statsHistory)
+	}
+}
+
+// Sampling with the Stats tab hidden is the whole point: the graph has to
+// have the history to show when the user looks back at it.
+func TestApplyStatsTickSamplesWhileTheStatsTabIsHidden(t *testing.T) {
+	model := statsTestModel(t)
+	model.statsSampling = true
+	model.bottomTab = tabQueue // looking at something else
+	model.statsBytes = []statsByteSample{{at: time.Now().Add(-time.Second), bytes: 1000}}
+	model.transfers = []domain.Transfer{{ID: 1, Status: domain.Active, BytesDone: 3000, BytesTotal: 10000}}
+
+	cmd := model.applyStatsTick()
+
+	if cmd == nil {
+		t.Fatalf("applyStatsTick off the Stats tab returned nil, want a re-armed tick cmd")
+	}
+	if len(model.statsHistory) != 1 {
+		t.Fatalf("statsHistory = %v, want a sample taken even off the tab", model.statsHistory)
 	}
 }
 
 func TestApplyStatsTickSamplesThroughputBetweenTicks(t *testing.T) {
 	model := statsTestModel(t)
+	model.statsSampling = true
 	model.bottomTab = tabStats
-	model.statsLastSampleAt = time.Now().Add(-time.Second)
-	model.statsLastBytes = 1000
+	model.statsBytes = []statsByteSample{{at: time.Now().Add(-time.Second), bytes: 1000}}
 	model.transfers = []domain.Transfer{{ID: 1, Status: domain.Active, BytesDone: 3000, BytesTotal: 10000}}
 
 	cmd := model.applyStatsTick()
@@ -109,29 +132,185 @@ func TestApplyStatsTickSamplesThroughputBetweenTicks(t *testing.T) {
 	}
 }
 
-func TestSetBottomTabResetsStatsSamplingOnEveryEntry(t *testing.T) {
+// Looking away and back used to wipe the graph. It must not: the history
+// belongs to the connection, not to the tab being on screen.
+func TestSwitchingBottomTabsKeepsTheGraph(t *testing.T) {
 	model := statsTestModel(t)
+	model.statsSampling = true
 	model.statsHistory = []int64{111, 222}
-	model.statsLastBytes = 999
-	model.statsLastSampleAt = time.Now()
+	anchor := time.Now()
+	model.statsBytes = []statsByteSample{{at: anchor, bytes: 999}}
 
-	cmd := model.setBottomTab(tabStats)
+	model.setBottomTab(tabStats)
+	model.setBottomTab(tabQueue)
+	model.setBottomTab(tabStats)
 
-	if cmd == nil {
-		t.Fatalf("setBottomTab(tabStats) returned nil, want the tick-starting cmd")
+	if len(model.statsHistory) != 2 {
+		t.Fatalf("statsHistory = %v, want the two samples kept across tab switches", model.statsHistory)
 	}
-	if len(model.statsHistory) != 0 {
-		t.Fatalf("statsHistory = %v, want reset to empty on entering the tab", model.statsHistory)
+	if len(model.statsBytes) != 1 || model.statsBytes[0].bytes != 999 || !model.statsBytes[0].at.Equal(anchor) {
+		t.Fatalf("tab switching disturbed the byte readings: %+v", model.statsBytes)
 	}
-	if model.statsLastBytes != 0 || !model.statsLastSampleAt.IsZero() {
-		t.Fatalf("stats sample anchors were not reset: bytes=%d at=%v", model.statsLastBytes, model.statsLastSampleAt)
+	if !model.statsSampling {
+		t.Fatal("tab switching stopped sampling")
 	}
 }
 
-func TestSetBottomTabReturnsNilForNonStatsTabs(t *testing.T) {
+// Disconnecting is what ends a graph, and what clears it.
+func TestDisconnectStopsSamplingAndClearsTheGraph(t *testing.T) {
 	model := statsTestModel(t)
-	if cmd := model.setBottomTab(tabQueue); cmd != nil {
-		t.Fatalf("setBottomTab(tabQueue) returned a cmd, want nil")
+	model.statsSampling = true
+	model.statsHistory = []int64{111, 222}
+	model.statsBytes = []statsByteSample{{at: time.Now(), bytes: 999}}
+
+	model.clearConnection("dropped")
+
+	if model.statsSampling {
+		t.Fatal("sampling still running after a disconnect")
+	}
+	if len(model.statsHistory) != 0 {
+		t.Fatalf("statsHistory = %v, want cleared on disconnect", model.statsHistory)
+	}
+	if len(model.statsBytes) != 0 {
+		t.Fatalf("byte readings survived a disconnect: %+v", model.statsBytes)
+	}
+	if model.applyStatsTick() != nil {
+		t.Fatal("the tick chain re-armed itself after a disconnect")
+	}
+}
+
+// The end-to-end wiring: connecting starts sampling, without the user ever
+// opening the Stats tab.
+//
+// This drives the real connect path rather than using loadedModel, which
+// wires a connection in directly and never runs applyConnected — see
+// connectModel's comment.
+func TestConnectingStartsStatsSampling(t *testing.T) {
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil, "")
+	model.width, model.height = 120, 36
+
+	if model.statsSampling {
+		t.Fatal("sampling started before anything connected")
+	}
+
+	model = settle(t, model, model.Init())
+
+	if !model.connected() {
+		t.Fatalf("test model did not connect: state=%v", model.state)
+	}
+	if !model.statsSampling {
+		t.Fatal("a live connection is not sampling throughput")
+	}
+	if model.bottomTab == tabStats {
+		t.Fatal("this test is meaningless if the Stats tab is the default")
+	}
+}
+
+// A reconnect must not leave two chains running and sample everything twice.
+func TestStartStatsSamplingDoesNotStackTickChains(t *testing.T) {
+	model := statsTestModel(t)
+
+	if cmd := model.startStatsSampling(); cmd == nil {
+		t.Fatal("the first start returned no tick cmd")
+	}
+	if cmd := model.startStatsSampling(); cmd != nil {
+		t.Fatal("a second start armed another tick chain, which would double-sample")
+	}
+	if !model.statsSampling {
+		t.Fatal("sampling flag was cleared by the second start")
+	}
+}
+
+// The rate window has to span several progress reports. If it spans only
+// one or two, how many happened to land inside it changes from tick to tick
+// and that beat is what gets drawn instead of the transfer rate.
+func TestStatsRateWindowSpansSeveralProgressReports(t *testing.T) {
+	const wantReports = 4
+	if statsRateWindow < wantReports*transfer.ProgressInterval {
+		t.Fatalf("statsRateWindow %v spans fewer than %d progress reports of %v",
+			statsRateWindow, wantReports, transfer.ProgressInterval)
+	}
+}
+
+// simulateReportedBytes plays back the byte counter of a transfer running at
+// rateFor(tick), advancing only every transfer.ProgressInterval the way a
+// real one does, and returns the throughput series applyStatsTick's own
+// windowed maths produces from it.
+//
+// The reporting granularity is the whole point: a reading taken between two
+// consecutive ticks depends on how many reports landed in that tick, and at
+// 250ms sampling against 200ms reporting a perfectly constant transfer used
+// to read 0.8x, 0.8x, 0.8x, 1.6x forever.
+func simulateReportedBytes(t *testing.T, rateFor func(tick int) int64, ticks int) []int64 {
+	t.Helper()
+	model := statsTestModel(t)
+	model.statsSampling = true
+	model.transfers = []domain.Transfer{{ID: 1, Status: domain.Active, BytesTotal: 1 << 62}}
+
+	base := time.Now()
+	var reported int64
+	nextReport := transfer.ProgressInterval
+
+	for i := 1; i <= ticks; i++ {
+		now := time.Duration(i) * statsTickInterval
+		for nextReport <= now {
+			reported += int64(float64(rateFor(int(nextReport/statsTickInterval))) * transfer.ProgressInterval.Seconds())
+			nextReport += transfer.ProgressInterval
+		}
+		// applyStatsTick's own window arithmetic, against simulated clock
+		// readings rather than time.Now().
+		at := base.Add(now)
+		model.statsBytes = append(model.statsBytes, statsByteSample{at: at, bytes: reported})
+		cut := 0
+		for j, sample := range model.statsBytes {
+			if at.Sub(sample.at) <= statsRateWindow {
+				break
+			}
+			cut = j
+		}
+		model.statsBytes = model.statsBytes[cut:]
+		if oldest := model.statsBytes[0]; len(model.statsBytes) > 1 {
+			if elapsed := at.Sub(oldest.at).Seconds(); elapsed > 0 {
+				model.statsHistory = append(model.statsHistory, int64(float64(reported-oldest.bytes)/elapsed))
+			}
+		}
+	}
+	return model.statsHistory
+}
+
+// A transfer running at a dead-constant rate must read as a constant rate.
+func TestThroughputOfAConstantTransferIsSteady(t *testing.T) {
+	const rate = 1_000_000
+	samples := simulateReportedBytes(t, func(int) int64 { return rate }, 240)
+
+	var lo, hi int64 = 1 << 62, 0
+	for _, v := range samples[8:] { // past the initial window fill
+		lo, hi = min(lo, v), max(hi, v)
+	}
+	if spread := float64(hi-lo) / float64(hi); spread > 0.25 {
+		t.Fatalf("a constant %d B/s transfer read between %d and %d (%.0f%% spread) — the sampler is beating against the reporting interval", rate, lo, hi, spread*100)
+	}
+}
+
+// The symptom that prompted all of this: with a real reporting pattern
+// underneath, bursty traffic has to actually draw peaks.
+func TestGraphDrawsPeaksForBurstyTraffic(t *testing.T) {
+	const width, height = 60, 8
+	samples := simulateReportedBytes(t, func(tick int) int64 {
+		if (tick/20)%2 == 0 {
+			return 200_000
+		}
+		return 1_000_000
+	}, 240)
+
+	ink := rowsWithInk(renderThroughputLine(samples, width, height))
+
+	if len(ink) < height-2 {
+		t.Fatalf("bursty traffic drew on rows %v of 0..%d — the graph is flattened, not showing peaks", ink, height-1)
+	}
+	if ink[0] != 0 {
+		t.Fatalf("nothing reaches the top row: ink starts at row %d", ink[0])
 	}
 }
 
@@ -230,17 +409,86 @@ func TestRenderThroughputLineFlatZeroDrawsABaseline(t *testing.T) {
 // still set the scale. If the scale were recomputed from only what's
 // visible, the flat 100s would each be their own local peak and pin the
 // line at the very top instead of low, near the baseline.
-func TestRenderThroughputLinePeakIsScopedToTheWholeHistoryNotJustTheWindow(t *testing.T) {
-	samples := append([]int64{5000}, make([]int64, 20)...)
+// rowsWithInk reports which rendered rows carry any braille dot, top first.
+func rowsWithInk(rows []string) []int {
+	var with []int
+	for i, row := range rows {
+		for _, r := range ansi.Strip(row) {
+			if r > 0x2800 && r <= 0x28FF { // 0x2800 is the blank cell
+				with = append(with, i)
+				break
+			}
+		}
+	}
+	return with
+}
+
+// A peak that has only just scrolled off the left edge still sets the
+// ceiling. Otherwise the whole graph would rescale taller and hotter the
+// instant it went, every tick.
+func TestRenderThroughputLineKeepsTheCeilingOfAJustDepartedPeak(t *testing.T) {
+	// width 4 -> 8 sub-columns visible, 16 within the peak lookback.
+	samples := make([]int64, 12)
+	samples[0] = 5000
 	for i := 1; i < len(samples); i++ {
 		samples[i] = 100
 	}
+
 	rows := renderThroughputLine(samples, 4, 3)
+
 	top := ansi.Strip(rows[0])
-	for _, r := range []rune(top) {
+	for _, r := range top {
 		if r != 0x2800 {
-			t.Fatalf("top row = %q, want entirely blank — a flat low value must not be pinned at the top just because it's the tallest thing currently in the window", top)
+			t.Fatalf("top row = %q, want blank — a flat low value must not be pinned at the top just because the recent peak has left the window", top)
 		}
+	}
+}
+
+// But a peak long gone must stop setting it, or one early spike flattens
+// every later transfer into the bottom row for the rest of the connection.
+func TestRenderThroughputLineRecoversFromALongGonePeak(t *testing.T) {
+	samples := make([]int64, 40) // well beyond the 16-sample lookback
+	samples[0] = 5000
+	for i := 1; i < len(samples); i++ {
+		samples[i] = 100
+	}
+
+	rows := renderThroughputLine(samples, 4, 3)
+
+	if len(rowsWithInk(rows)) == 0 {
+		t.Fatal("nothing drawn at all")
+	}
+	if ink := rowsWithInk(rows); ink[0] != 0 {
+		t.Fatalf("ink starts on row %d, want row 0 — steady traffic should use the graph's full height once an ancient spike has aged out", ink[0])
+	}
+}
+
+// The symptom that prompted this: with sampling now running for the life of
+// the connection, history outlives the view, and an early spike used to
+// flatten everything after it so no peaks were drawn at all.
+func TestRenderThroughputLineStillShowsPeaksAfterAnEarlySpike(t *testing.T) {
+	const width, height = 60, 8
+	subWidth := width * 2
+
+	varying := make([]int64, subWidth)
+	for i := range varying {
+		if i%20 < 10 {
+			varying[i] = 200
+		} else {
+			varying[i] = 2000
+		}
+	}
+	clean := rowsWithInk(renderThroughputLine(varying, width, height))
+
+	withSpike := append([]int64{50000}, make([]int64, 600)...)
+	withSpike = append(withSpike, varying...)
+	after := rowsWithInk(renderThroughputLine(withSpike, width, height))
+
+	if len(clean) < height {
+		t.Fatalf("the control case only used rows %v; this test cannot detect flattening", clean)
+	}
+	if len(after) != len(clean) {
+		t.Fatalf("an old spike flattened the graph to rows %v, want the full range %v", after, clean)
 	}
 }
 
