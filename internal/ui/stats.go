@@ -27,21 +27,37 @@ var (
 	statsMeta       = lipgloss.Color("#1F9D4A")
 )
 
-// statsGradient is a low-to-high intensity ramp used to color the
-// throughput graph's columns by how close each one is to the visible
-// window's peak — blue at the quiet end, through violet and magenta, up to
-// hot pink at the busiest — brighter/hotter means more throughput, not
-// just a taller point on the line.
-var statsGradient = []lipgloss.Color{
-	"#1E2A78",
-	"#33267F",
-	"#4C2394",
-	"#6B21A8",
-	"#8B21B3",
-	"#B21FAE",
-	"#D91FA0",
-	"#F23FA6",
-	"#FF69B4",
+// statsGlow is the top of the throughput graph's backdrop, which fades to
+// black at the bottom of the plot box. The tint is a fixed vertical
+// reference rather than a property of the data: a line rising into the green
+// is a line running fast.
+//
+// It is deliberately very dark. It sits behind the brightest, most
+// interesting part of the graph, so this is exactly where the line has the
+// least contrast to work with — see
+// TestStatsGraphStaysReadableAgainstItsBackdrop, which is what stops anyone
+// lightening it until the peaks wash out.
+var statsGlow = lipgloss.Color("#0A2A12")
+
+// statsRowBackground is the backdrop for one row of the plot box, row 0 at
+// the top. It interpolates statsGlow down to black rather than indexing a
+// fixed ramp because the graph's height follows the pane's.
+func statsRowBackground(row, height int) lipgloss.Color {
+	if height <= 1 || row <= 0 {
+		return statsGlow
+	}
+	r, g, b, ok := hexToRGB(statsGlow)
+	if !ok {
+		return statsBackground
+	}
+	// Linear in sRGB: the ramp only has a handful of rows to cover, and a
+	// perceptual curve would spend most of them near-black.
+	remaining := 1 - float64(min(row, height-1))/float64(height-1)
+	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X",
+		int(r*255*remaining+0.5),
+		int(g*255*remaining+0.5),
+		int(b*255*remaining+0.5),
+	))
 }
 
 // statsLine renders one full-width row of Stats content on the tab's fixed
@@ -347,10 +363,11 @@ func abs(n int) int {
 // (right-aligned, left-padded with zeros if there aren't enough yet),
 // lightly smoothed, then connected sub-pixel to sub-pixel with
 // bresenhamRun so a steep jump between readings still looks like one
-// stroke. Each terminal column is tinted along statsGradient by its own
-// value. Returns exactly height ANSI-styled lines, each width printable
-// columns wide, on the Stats tab's fixed black background, or nil if
-// width or height isn't positive.
+// stroke. The line is drawn in one colour over a backdrop that fades from
+// statsGlow at the top of the box to black at the bottom, so height is the
+// only thing encoding magnitude and the tint is a fixed reference behind it.
+// Returns exactly height ANSI-styled lines, each width printable columns
+// wide, or nil if width or height isn't positive.
 func renderThroughputLine(samples []int64, width, height int) []string {
 	if width <= 0 || height <= 0 {
 		return nil
@@ -409,15 +426,12 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 		bresenhamRun(i-1, y[i-1], i, y[i], plot)
 	}
 
-	colorFor := func(cellX int) lipgloss.Color {
-		level := max(y[cellX*2], y[cellX*2+1])
-		frac := float64(level) / float64(subHeight-1)
-		idx := int(frac * float64(len(statsGradient)-1))
-		return statsGradient[min(max(idx, 0), len(statsGradient)-1)]
-	}
-
 	rows := make([]string, height)
 	for r := range height {
+		// One backdrop per row, used for the cells and for whatever padding
+		// clampView adds — pad with anything else and every row ends in a
+		// notch of the wrong colour.
+		bg := statsRowBackground(r, height)
 		var line strings.Builder
 		for c := range width {
 			bits := 0
@@ -428,9 +442,9 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 					}
 				}
 			}
-			line.WriteString(segment(statsBackground, colorFor(c), string(rune(brailleBase+bits))))
+			line.WriteString(segment(bg, statsForeground, string(rune(brailleBase+bits))))
 		}
-		rows[r] = clampView(line.String(), width, 1, statsBackground)
+		rows[r] = clampView(line.String(), width, 1, bg)
 	}
 	return rows
 }

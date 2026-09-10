@@ -70,6 +70,19 @@ feature batches and may change behaviour.
 
 ### Changed
 
+- **The Stats graph is one green instrument panel now.** The plot box carries a
+  backdrop fading from a dark green at the top to black at the bottom, and the
+  line is drawn in a single bright green over it. Previously each column was
+  tinted along a blue-to-pink ramp by its own height — a second channel
+  carrying exactly what the line's height already said, and at odds with the
+  tab's stated black-on-green palette. The tint is now a fixed vertical
+  reference instead: a line rising into the green is a line running fast.
+
+  The backdrop's top is deliberately very dark, because it sits behind the
+  brightest and most interesting part of the graph — the peaks are where the
+  line has the least contrast to work with. A test holds every row to at least
+  7:1 against the line so nobody lightens it until the peaks wash out.
+
 - **The Stats graph now samples for as long as the connection lasts**, rather
   than only while its tab is on screen, and samples four times a second
   instead of once. Switching to the queue while a transfer ran and then

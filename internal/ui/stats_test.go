@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -496,6 +497,51 @@ func TestRenderThroughputLineStillShowsPeaksAfterAnEarlySpike(t *testing.T) {
 // test's stdout isn't a terminal, so lipgloss otherwise auto-detects "no
 // color" and segment would silently render plain text) to prove
 // renderThroughputLine actually emits color codes, not just glyphs.
+// The backdrop is lightest at the top of the plot box, which is exactly
+// where the peaks are — so that row is the worst case for reading the line
+// against it. This is the test that stops anyone lightening statsGlow until
+// the peaks wash out.
+func TestStatsGraphStaysReadableAgainstItsBackdrop(t *testing.T) {
+	const minimumRatio = 7.0 // WCAG AAA for body text; the line is thinner
+	for _, height := range []int{1, 2, 3, 5, 8, 13} {
+		for row := range height {
+			bg := statsRowBackground(row, height)
+			if got := contrastRatio(statsForeground, bg); got < minimumRatio {
+				t.Errorf("height %d row %d: contrast of %s on %s is %.1f:1, want at least %.1f:1",
+					height, row, statsForeground, bg, got, minimumRatio)
+			}
+		}
+	}
+}
+
+// The tint is a vertical reference, so it has to actually descend.
+func TestStatsRowBackgroundDarkensDownThePane(t *testing.T) {
+	const height = 8
+
+	if got := statsRowBackground(0, height); got != statsGlow {
+		t.Fatalf("top row = %s, want statsGlow %s", got, statsGlow)
+	}
+	if got := relativeLuminance(statsRowBackground(height-1, height)); got != 0 {
+		t.Fatalf("bottom row luminance = %v, want 0 (black)", got)
+	}
+
+	previous := relativeLuminance(statsRowBackground(0, height)) + 1
+	for row := range height {
+		lum := relativeLuminance(statsRowBackground(row, height))
+		if lum > previous {
+			t.Fatalf("row %d is lighter than row %d (%v > %v); the backdrop must fade downwards", row, row-1, lum, previous)
+		}
+		previous = lum
+	}
+}
+
+// A one-row graph has nowhere to fade to, and must not divide by zero.
+func TestStatsRowBackgroundHandlesASingleRow(t *testing.T) {
+	if got := statsRowBackground(0, 1); got != statsGlow {
+		t.Fatalf("single-row backdrop = %s, want statsGlow %s", got, statsGlow)
+	}
+}
+
 func TestRenderThroughputLineProducesRealANSIColor(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -505,6 +551,39 @@ func TestRenderThroughputLineProducesRealANSIColor(t *testing.T) {
 	joined := strings.Join(rows, "\n")
 	if !strings.Contains(joined, "\x1b[") {
 		t.Fatalf("rows = %q, want ANSI escape codes present", rows)
+	}
+}
+
+// The golden files are rendered under the Ascii colour profile and contain no
+// escape sequences at all, so they cannot see a palette change. This is the
+// test that actually checks the backdrop reaches the output: without it,
+// wiring the rows to a flat background again would go unnoticed until someone
+// looked at the running app.
+func TestRenderThroughputLinePaintsTheGradientBackdrop(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previous)
+
+	const height = 6
+	rows := renderThroughputLine([]int64{0, 500, 2000, 8000}, 8, height)
+
+	// lipgloss writes a truecolor background as ESC[48;2;R;G;Bm.
+	bgCode := func(c lipgloss.Color) string {
+		r, g, b, ok := hexToRGB(c)
+		if !ok {
+			t.Fatalf("could not parse %s", c)
+		}
+		return fmt.Sprintf("48;2;%d;%d;%d", int(r*255+0.5), int(g*255+0.5), int(b*255+0.5))
+	}
+
+	if want := bgCode(statsGlow); !strings.Contains(rows[0], want) {
+		t.Errorf("top row does not carry the statsGlow background %q", want)
+	}
+	if want := bgCode(statsRowBackground(height-1, height)); !strings.Contains(rows[height-1], want) {
+		t.Errorf("bottom row does not carry its faded background %q", want)
+	}
+	if rows[0] == rows[height-1] {
+		t.Error("top and bottom rows are identical; the backdrop is not a gradient")
 	}
 }
 
