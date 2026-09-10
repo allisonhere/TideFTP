@@ -337,3 +337,34 @@ func TestGoldenUpdateOverlayInProgress(t *testing.T) {
 	model.update.percent = 45
 	assertGolden(t, "update_overlay_progress", ansi.Strip(model.View()))
 }
+
+func TestGoldenDeleteConfirmOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.focus = focusRemote
+	model.overlay = overlayFileAction
+	model.fileAction = &fileActionPrompt{
+		kind:    fileActionDelete,
+		pane:    paneRemote,
+		entries: []domain.Entry{{Name: "uploads", Kind: domain.EntryDir, Mode: "drwxr-xr-x"}},
+		scan:    &deleteScan{files: 3910, folders: 212, bytes: 4509715660},
+	}
+	assertGolden(t, "delete_confirm_overlay", ansi.Strip(model.View()))
+}
+
+// A fixed frame and start time, so the spinner and the elapsed clock cannot
+// drift the file from run to run.
+func TestGoldenDeleteProgressRow(t *testing.T) {
+	model := goldenModel(t)
+	model.focus = focusQueue
+	model.deleteJob = &deleteJob{
+		pane:      paneRemote,
+		label:     "uploads",
+		total:     3910,
+		done:      1248,
+		current:   "/public_html/uploads/2019/raw/IMG_4471.CR2",
+		startedAt: time.Date(2026, 1, 15, 9, 30, 0, 0, time.UTC),
+		frame:     3,
+		cancel:    func() {},
+	}
+	assertGolden(t, "delete_progress_row", ansi.Strip(model.View()))
+}

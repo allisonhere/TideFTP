@@ -227,7 +227,10 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 	case commandMirror:
 		return m.startSync()
 	case commandCancelTransfers:
-		m.cancelActiveTransfers()
+		// Same precedence as the x key: a running delete goes first.
+		if !m.cancelDeleteJob() {
+			m.cancelActiveTransfers()
+		}
 	case commandResetLayout:
 		m.fileSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.5, Min: 0.25, Max: 0.75, Step: 0.03})
 		m.bottomSplit = tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: 0.28, Min: 0.15, Max: 0.50, Step: 0.03})
@@ -242,7 +245,7 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 	case commandChmod:
 		m.openChmodPrompt()
 	case commandDelete:
-		m.openDeletePrompt()
+		return m.openDeletePrompt()
 	case commandEditFile:
 		return m.startEdit()
 	case commandPreviewFile:

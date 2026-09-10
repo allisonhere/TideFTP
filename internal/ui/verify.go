@@ -114,7 +114,7 @@ func (m *Model) applyVerifyDone(msg verifyDoneMsg) {
 		m.setError(fmt.Sprintf("verify transfer %d: %v", row.ID, msg.err))
 	case msg.match:
 		row.Message = "verified"
-		m.logs = append(m.logs, fmt.Sprintf("transfer %d verified (sha256)", row.ID))
+		m.appendLog(fmt.Sprintf("transfer %d verified (sha256)", row.ID))
 	default:
 		row.Status = domain.Failed
 		row.Message = "checksum mismatch"

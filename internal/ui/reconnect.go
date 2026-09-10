@@ -107,7 +107,7 @@ func (m *Model) applyReconnectTick(msg reconnectTickMsg) tea.Cmd {
 		return nil
 	}
 	state.attempt++
-	m.logs = append(m.logs, fmt.Sprintf("auto-reconnect attempt %d to %s", state.attempt, state.target.Address()))
+	m.appendLog(fmt.Sprintf("auto-reconnect attempt %d to %s", state.attempt, state.target.Address()))
 	// connectFor, not connect: connect cancels the campaign, which is right
 	// for a connection the user asked for and wrong for this one.
 	return m.connectFor(state.target, state.creds)

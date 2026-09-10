@@ -36,7 +36,7 @@ var helpEntries = []helpEntry{
 	{section: "Act", key: "v", label: "view image / preview text or hex"},
 	{section: "Act", key: "y", label: "copy path(s) to clipboard"},
 	{section: "Act", key: "delete", label: "delete selected / highlighted"},
-	{section: "Act", key: "x", label: "cancel active transfer (queue pane) / all"},
+	{section: "Act", key: "x", label: "cancel running delete, else transfer (queue pane) / all"},
 	{section: "Act", key: "R", label: "retry failed transfer (jumps to it)"},
 	{section: "Act", key: "+/-", label: "more/fewer parallel transfers"},
 	{section: "Act", key: ".", label: "toggle hidden files"},

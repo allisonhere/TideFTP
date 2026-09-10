@@ -279,7 +279,7 @@ func (m *Model) finishUpdateInstall(msg updateInstalledMsg) tea.Cmd {
 	}
 	// The version just installed is by definition not one to be nagged about.
 	m.updates.DismissedVersion = ""
-	m.logs = append(m.logs, "updated to "+m.update.latest.Version)
+	m.appendLog("updated to " + m.update.latest.Version)
 	m.setStatus("updated to " + m.update.latest.Version + " — restart to use it")
 	return m.persist()
 }

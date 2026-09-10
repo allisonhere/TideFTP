@@ -167,6 +167,11 @@ type fileActionPrompt struct {
 	cursor  int
 	oldName string
 	entries []domain.Entry
+	// scan is the count of everything a confirmed delete would remove, for
+	// kind fileActionDelete over a selection that includes a folder. Nil for
+	// every other kind, and for a delete of plain files where the listing
+	// already has the numbers.
+	scan *deleteScan
 }
 
 type fileActionMsg struct {
@@ -344,6 +349,10 @@ type Model struct {
 	// the user whether to trust it, and what target/creds to resume
 	// connecting with if they do. Nil the rest of the time.
 	hostKeyPrompt *hostKeyPrompt
+	// deleteJob is the recursive delete running right now, rendered as a
+	// pinned progress row above the bottom pane's tabs. Nil the rest of the
+	// time, and only ever one at a time — openDeletePrompt refuses a second.
+	deleteJob *deleteJob
 
 	// stats, statsHistory, statsLastBytes, and statsLastSampleAt back the
 	// Stats tab (see internal/ui/stats.go). In-memory only, like
@@ -826,6 +835,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case transferStreamClosed:
 		return m, nil
+	case deleteScanMsg:
+		m.applyDeleteScan(msg)
+		return m, nil
+	case deleteEvent:
+		// Each batch can add a pile of lines to the Log tab, so the same
+		// auto-follow the transfer tabs get applies here.
+		wasAtBottom := m.isAtBottomPane()
+		cmd := m.applyDeleteEvent(msg)
+		m.settleBottomOffset(wasAtBottom)
+		return m, cmd
+	case deleteStreamClosed:
+		wasAtBottom := m.isAtBottomPane()
+		cmd := m.applyDeleteDone()
+		m.settleBottomOffset(wasAtBottom)
+		m.clampBottomCursor()
+		return m, cmd
+	case deleteTickMsg:
+		return m, m.applyDeleteTick()
 	case updateCheckedMsg:
 		return m, m.applyUpdateChecked(msg)
 	case updateDownloadedMsg:
@@ -1030,7 +1057,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "m":
 		m.openChmodPrompt()
 	case "delete":
-		m.openDeletePrompt()
+		cmd = m.openDeletePrompt()
 	case " ":
 		m.toggleSelection()
 	case "esc":
@@ -1065,7 +1092,11 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "y":
 		cmd = m.copySelectedPaths()
 	case "x":
-		m.cancelActiveTransfers()
+		// A running delete is the more urgent thing to be able to stop, and it
+		// has no queue row of its own to aim at.
+		if !m.cancelDeleteJob() {
+			m.cancelActiveTransfers()
+		}
 	case "R":
 		cmd = m.retrySelectedTransfer()
 	case "+":
@@ -1212,7 +1243,7 @@ func (m *Model) connectFor(target session.Target, creds session.Credentials) tea
 	m.state = connConnecting
 	m.connErr = nil
 	m.setStatus("connecting to " + target.Label())
-	m.logs = append(m.logs, "connect "+target.Address()+" as "+target.User+" (credentials redacted)")
+	m.appendLog("connect " + target.Address() + " as " + target.User + " (credentials redacted)")
 	return tea.Batch(append(cmds, dialCmd(m.dialer, target, creds))...)
 }
 
@@ -1269,7 +1300,7 @@ func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
 	m.state = connConnected
 	m.connErr = nil
 	m.setStatus("connected to " + msg.target.Label())
-	m.logs = append(m.logs, "connected "+msg.target.Address())
+	m.appendLog("connected " + msg.target.Address())
 
 	m.remote.reset()
 	m.remote.path = ""
@@ -1329,7 +1360,7 @@ func (m *Model) applyDisconnected(msg disconnectedMsg) tea.Cmd {
 	// so an auto-reconnect can put the user back where they were.
 	resumePath := m.remote.path
 	m.clearConnection(reason)
-	m.logs = append(m.logs, "connection ended: "+reason)
+	m.appendLog("connection ended: " + reason)
 	if msg.err == nil {
 		m.state = connDisconnected
 		m.setStatus("disconnected")
@@ -1364,6 +1395,13 @@ func (m *Model) clearConnection(reason string) {
 			m.transfers[i].FinishedAt = time.Now()
 			m.transfers[i].Message = reason
 		}
+	}
+	// A delete walking the remote tree cannot continue without the adapter it
+	// was given. It is cancelled rather than cleared: its event stream still
+	// has to drain before applyDeleteDone can report how far it got.
+	if m.deleteJob != nil && m.deleteJob.pane == paneRemote {
+		m.deleteJob.canceled = true
+		m.deleteJob.cancel()
 	}
 	m.conn = nil
 	m.remoteFS = nil
@@ -2161,7 +2199,7 @@ func (m *Model) applyTransferEvent(event transfer.Event) tea.Cmd {
 		row.Status = domain.Canceled
 		row.FinishedAt = time.Now()
 		row.Message = "canceled"
-		m.logs = append(m.logs, fmt.Sprintf("transfer %d canceled", row.ID))
+		m.appendLog(fmt.Sprintf("transfer %d canceled", row.ID))
 	}
 	return nil
 }
@@ -2478,7 +2516,23 @@ func (m *Model) setStatus(value string) {
 
 func (m *Model) setError(value string) {
 	m.status, m.statusErr = value, true
-	m.logs = append(m.logs, "error: "+value)
+	m.appendLog("error: " + value)
+}
+
+// maxLogLines bounds the Log tab. It could be unbounded while the only writers
+// were connects, cancels and errors; a recursive delete streams a line per
+// removed file, which turns that into a real leak on a large tree.
+const maxLogLines = 5000
+
+// appendLog adds lines to the Log tab, dropping the oldest once it is full.
+func (m *Model) appendLog(lines ...string) {
+	if len(lines) == 0 {
+		return
+	}
+	m.logs = append(m.logs, lines...)
+	if excess := len(m.logs) - maxLogLines; excess > 0 {
+		m.logs = append(m.logs[:0], m.logs[excess:]...)
+	}
 }
 
 func (p *filePane) current() (domain.Entry, bool) {

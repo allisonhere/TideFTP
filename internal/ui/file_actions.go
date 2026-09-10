@@ -86,31 +86,40 @@ func (m *Model) openRenamePrompt() {
 	m.setStatus("rename " + entry.Name)
 }
 
-func (m *Model) openDeletePrompt() {
+// openDeletePrompt asks the user to confirm a delete. A selection that
+// includes a folder is counted first (see beginDeleteScan) so the prompt can
+// say whether this is five files or fifty thousand, and so the progress bar
+// has a denominator; the overlay opens when that count lands.
+func (m *Model) openDeletePrompt() tea.Cmd {
+	if m.deleteJob != nil {
+		m.setError("a delete is already running")
+		return nil
+	}
 	paneID, pane, ok := m.focusedMutablePane()
 	if !ok {
-		return
+		return nil
 	}
 	entries := pane.actionEntries()
 	if len(entries) == 0 {
 		m.setError("highlight or select item(s) to delete")
-		return
+		return nil
 	}
-	m.fileAction = &fileActionPrompt{kind: fileActionDelete, pane: paneID, entries: entries}
-	m.overlay = overlayFileAction
-	folders := 0
+	hasDir := false
 	for _, entry := range entries {
 		if entry.IsDir() {
-			folders++
+			hasDir = true
+			break
 		}
 	}
-	if folders > 0 {
-		// The overlay spells out that a folder goes with everything inside
-		// it; the status line should not undersell it either.
-		m.setStatus(fmt.Sprintf("delete %d item(s), including %d folder(s) and their contents?", len(entries), folders))
-	} else {
+	if !hasDir {
+		// Nothing to walk: the listing already knows how many items are going.
+		m.fileAction = &fileActionPrompt{kind: fileActionDelete, pane: paneID, entries: entries}
+		m.overlay = overlayFileAction
 		m.setStatus(fmt.Sprintf("delete %d item(s)?", len(entries)))
+		return nil
 	}
+	m.setStatus("scanning…")
+	return beginDeleteScan(m.fsByID(paneID), pane.path, paneID, entries)
 }
 
 func (m *Model) openChmodPrompt() {
@@ -246,6 +255,12 @@ func (m *Model) submitFileAction() tea.Cmd {
 	}
 	m.fileAction = nil
 	m.overlay = overlayNone
+	// A delete is the one action that can run for minutes, so it becomes a
+	// streamed job with its own progress row instead of a single blocking
+	// command that reports nothing until it is finished.
+	if prompt.kind == fileActionDelete {
+		return m.startDelete(*prompt)
+	}
 	m.setStatus(fileActionLabel(prompt.kind) + "...")
 	return fileActionCmd(fs, m.filePaneByID(prompt.pane).path, *prompt)
 }
@@ -262,14 +277,11 @@ func validFileActionName(name string) bool {
 
 func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 	return func() tea.Msg {
-		// A recursive delete can visit thousands of entries over a slow link,
-		// so it gets the longer walk budget; the single-shot actions keep the
-		// tight one so a hung rename or mkdir surfaces quickly.
-		timeout := listTimeout
-		if prompt.kind == fileActionDelete {
-			timeout = preflightScanTimeout
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		// Every action routed here is a single round trip or a short batch of
+		// them, so the tight budget is right: a hung rename, mkdir or chmod
+		// surfaces quickly. Delete does not come through here — see
+		// startDeleteJob, which has no whole-walk deadline at all.
+		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 		defer cancel()
 		var err error
 		newName := strings.TrimSpace(prompt.text)
@@ -281,21 +293,6 @@ func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 		case fileActionRenameForce:
 			if err = fs.Remove(ctx, fs.Child(base, newName)); err == nil {
 				err = fs.Rename(ctx, fs.Child(base, prompt.oldName), fs.Child(base, newName))
-			}
-		case fileActionDelete:
-			for _, entry := range prompt.entries {
-				if isParentDirEntry(entry) {
-					continue
-				}
-				target := fs.Child(base, entry.Name)
-				if entry.IsDir() {
-					err = removeTree(ctx, fs, target)
-				} else {
-					err = fs.Remove(ctx, target)
-				}
-				if err != nil {
-					break
-				}
 			}
 		case fileActionChmod:
 			mode, perr := parseChmodMode(prompt.text)
@@ -314,33 +311,4 @@ func fileActionCmd(fs vfs.FS, base string, prompt fileActionPrompt) tea.Cmd {
 		}
 		return fileActionMsg{kind: prompt.kind, pane: prompt.pane, err: err, oldName: prompt.oldName, newName: newName}
 	}
-}
-
-// removeTree deletes root and everything under it, depth-first: every file
-// and subdirectory goes before the directory that holds it, because
-// vfs.FS.Remove — like rmdir — only takes an empty directory. Hidden
-// entries are included; symlinks are removed as the link, never followed. A
-// listing or delete that fails aborts with that error rather than leaving a
-// half-emptied tree reported as a clean delete.
-func removeTree(ctx context.Context, fs vfs.FS, root string) error {
-	entries, err := fs.List(ctx, root, true)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if isParentDirEntry(entry) {
-			continue
-		}
-		child := fs.Child(root, entry.Name)
-		if entry.IsDir() {
-			if err := removeTree(ctx, fs, child); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := fs.Remove(ctx, child); err != nil {
-			return err
-		}
-	}
-	return fs.Remove(ctx, root)
 }

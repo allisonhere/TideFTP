@@ -230,6 +230,14 @@ func (m Model) renderRemotePane(renderer tideui.Renderer, width, height int) str
 func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) string {
 	width, height = max(1, width), max(1, height)
 	rows := []string{m.renderBottomTabs(renderer, width)}
+	// A running delete is pinned under the tab bar rather than living in one
+	// tab, so it stays visible wherever the user is looking. It takes its rows
+	// out of the height the tab content gets — bottomVisibleRows subtracts the
+	// same deleteRows(), which is what keeps the scroll arithmetic and this
+	// renderer agreeing on where the rows are.
+	pinned := m.renderDeleteRows(renderer, width)
+	rows = append(rows, pinned...)
+	height = max(1, height-len(pinned))
 	switch m.bottomTab {
 	case tabLog:
 		visible := height - 1
@@ -243,7 +251,7 @@ func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) str
 	default:
 		rows = append(rows, m.renderTransferRows(renderer, width, height-1)...)
 	}
-	if len(rows) == 1 {
+	if len(rows) == 1+len(pinned) {
 		rows = append(rows, fitRow(renderer.Styles.DetailMeta, width, "no rows yet"))
 	}
 	return strings.Join(rows, "\n")
@@ -948,8 +956,14 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 					names = append(names, entry.Name)
 				}
 			}
+			headline := fmt.Sprintf("Delete %d item(s)?", len(prompt.entries))
+			if prompt.scan != nil {
+				// The count is in, so say what is actually going rather than
+				// leaving "and their contents" to stand for any number.
+				headline = "Delete " + deleteScanCounts(*prompt.scan) + "?"
+			}
 			rows = append(rows,
-				renderer.Styles.DetailBody.Width(contentWidth).Render(fmt.Sprintf("Delete %d item(s)?", len(prompt.entries))),
+				renderer.Styles.DetailBody.Width(contentWidth).Render(headline),
 				renderer.Styles.DetailMeta.Width(contentWidth).Render(strings.Join(names, ", ")),
 			)
 			if hasDir {
@@ -1056,7 +1070,7 @@ func (m Model) filePaneVisibleRows() int {
 // can actually show for the current terminal size.
 func (m Model) bottomVisibleRows() int {
 	bodyHeight := max(1, m.bottomPaneHeight()-3)
-	return max(0, bodyHeight-1)
+	return max(0, bodyHeight-1-m.deleteRows())
 }
 
 // bottomRowCount returns how many rows exist for the currently selected
