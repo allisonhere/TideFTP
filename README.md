@@ -242,3 +242,6 @@ Either way the tag push is what starts `.github/workflows/release.yml`, which
 cross-compiles Linux and macOS (x86_64 + aarch64) binaries, writes
 `SHA256SUMS`, and publishes a GitHub release with notes pulled from that
 changelog section. `install.sh` fetches from `releases/latest`.
+
+
+![TIDE logo](images/TIDE-small.png)
