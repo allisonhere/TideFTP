@@ -35,10 +35,18 @@ type Config struct {
 	VerifyChecksums bool `toml:"verify_checksums"`
 	// AutoReconnect redials, with backoff, after a connection drops on its
 	// own. It never fires for a disconnect the user asked for.
-	AutoReconnect bool    `toml:"auto_reconnect"`
-	Layout        Layout  `toml:"layout"`
-	Sort          Sort    `toml:"sort"`
-	Updates       Updates `toml:"updates"`
+	AutoReconnect bool `toml:"auto_reconnect"`
+	// RecoverInterruptedTransfers checks and resumes compatible transfers after
+	// auto-reconnect. It is separate from AutoReconnect so a user can restore
+	// browsing without restarting work automatically.
+	RecoverInterruptedTransfers bool `toml:"recover_interrupted_transfers"`
+	// CheckConnectivity probes the connection when transfers fail in a row, so
+	// a dead link pauses the queue with a clear reason instead of failing every
+	// remaining file in turn.
+	CheckConnectivity bool    `toml:"check_connectivity"`
+	Layout            Layout  `toml:"layout"`
+	Sort              Sort    `toml:"sort"`
+	Updates           Updates `toml:"updates"`
 	// LocalBookmarks are directories on this machine the local pane can jump
 	// to. They are global rather than per-profile: the local pane is not a
 	// property of whichever server you happened to dial.
@@ -116,15 +124,17 @@ type SaveFunc func(Config) error
 // run looks identical to a run that later saved these same values.
 func Default() Config {
 	return Config{
-		Theme:         "tide-night",
-		Density:       "compact",
-		Shadow:        true,
-		ShowIcons:     true,
-		MaxParallel:   2,
-		AutoReconnect: true,
-		Layout:        Layout{FileSplit: 0.5, BottomSplit: 0.28},
-		Sort:          Sort{Key: "name"},
-		Updates:       Updates{CheckOnStartup: true},
+		Theme:                       "tide-night",
+		Density:                     "compact",
+		Shadow:                      true,
+		ShowIcons:                   true,
+		MaxParallel:                 2,
+		AutoReconnect:               true,
+		RecoverInterruptedTransfers: true,
+		CheckConnectivity:           true,
+		Layout:                      Layout{FileSplit: 0.5, BottomSplit: 0.28},
+		Sort:                        Sort{Key: "name"},
+		Updates:                     Updates{CheckOnStartup: true},
 	}
 }
 

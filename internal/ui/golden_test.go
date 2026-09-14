@@ -241,6 +241,18 @@ func TestGoldenStatsTabWithGraph(t *testing.T) {
 	assertGolden(t, "stats_tab_with_graph", ansi.Strip(model.View()))
 }
 
+func TestGoldenQueueProgressMeter(t *testing.T) {
+	model := goldenModel(t)
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+	model.transfers = []domain.Transfer{
+		{ID: 1, Direction: domain.Upload, Source: "/home/allie/projects/assets/logo.svg", Destination: "/public_html/assets/logo.svg", BytesDone: 75, BytesTotal: 100, Status: domain.Active, Message: "transferring"},
+		{ID: 2, Direction: domain.Download, Source: "/public_html/releases/app.tar.gz", Destination: "/home/allie/Downloads/app.tar.gz", BytesDone: 25, BytesTotal: 100, Status: domain.Active, Message: "transferring"},
+		{ID: 3, Direction: domain.Upload, Source: "/home/allie/projects/assets/video.mp4", Destination: "/public_html/assets/video.mp4", BytesTotal: 200, Status: domain.Queued, Message: "queued"},
+	}
+	assertGolden(t, "queue_progress_meter", ansi.Strip(model.View()))
+}
+
 func TestGoldenPreflightOverlay(t *testing.T) {
 	model := goldenModel(t)
 	model.overlay = overlayPreflight
@@ -251,6 +263,29 @@ func TestGoldenPreflightOverlay(t *testing.T) {
 		totalBytes: 4447702,
 	}
 	assertGolden(t, "preflight_overlay", ansi.Strip(model.View()))
+}
+
+func TestGoldenScanningOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.overlay = overlayScanning
+	model.scanActivity = &scanActivity{
+		title:     "Preparing upload",
+		phase:     "Checking destination conflicts",
+		startedAt: time.Now(),
+		frame:     3,
+		files:     1248,
+		folders:   67,
+		bytes:     1700000000,
+		current:   "/home/allie/projects/site/assets/hero-images/summer-launch/banner-final.webp",
+	}
+	assertGolden(t, "scanning_overlay", ansi.Strip(model.View()))
+}
+
+func TestGoldenTransferLabOverlay(t *testing.T) {
+	model := goldenModel(t)
+	model.transferLab = true
+	model.overlay = overlayTransferLab
+	assertGolden(t, "transfer_lab_overlay", ansi.Strip(model.View()))
 }
 
 func TestGoldenSyncOverlay(t *testing.T) {
@@ -349,6 +384,40 @@ func TestGoldenDeleteConfirmOverlay(t *testing.T) {
 		scan:    &deleteScan{files: 3910, folders: 212, bytes: 4509715660},
 	}
 	assertGolden(t, "delete_confirm_overlay", ansi.Strip(model.View()))
+}
+
+// TestGoldenRecoveryPanel snapshots the post-reconnect review panel with all
+// four outcomes present: the safe batch, the decisions, and the rows recovery
+// leaves in Failed.
+func TestGoldenRecoveryPanel(t *testing.T) {
+	model := goldenModel(t)
+	model.width, model.height = 100, 30
+	model.overlay = overlayRecovery
+	model.recoverySummary = &recoverySummary{
+		partial: []recoveryRetry{
+			{originalID: 1, direction: domain.Upload, source: "/home/allie/projects/site/big.iso", destination: "/public_html/site/big.iso", size: 2000000, offset: 512000, protocol: "sftp"},
+		},
+		missing: []recoveryRetry{
+			{originalID: 2, direction: domain.Upload, source: "/home/allie/projects/site/app.tar.gz", destination: "/public_html/site/app.tar.gz", size: 900000, protocol: "sftp"},
+		},
+		mismatched:  map[int]string{3: "partial could not be verified; retry with R"},
+		unreachable: map[int]string{4: "could not inspect destination; retry with R"},
+	}
+	// The panel is the only thing on screen worth comparing, so give it
+	// several of each category rather than a single row.
+	for i := 0; i < 71; i++ {
+		model.recoverySummary.partial = append(model.recoverySummary.partial, recoveryRetry{originalID: 100 + i})
+	}
+	for i := 0; i < 17; i++ {
+		model.recoverySummary.missing = append(model.recoverySummary.missing, recoveryRetry{originalID: 200 + i})
+	}
+	for i := 0; i < 6; i++ {
+		model.recoverySummary.mismatched[300+i] = "partial could not be verified; retry with R"
+	}
+	for i := 0; i < 2; i++ {
+		model.recoverySummary.unreachable[400+i] = "could not inspect destination; retry with R"
+	}
+	assertGolden(t, "recovery_panel", ansi.Strip(model.View()))
 }
 
 // A fixed frame and start time, so the spinner and the elapsed clock cannot

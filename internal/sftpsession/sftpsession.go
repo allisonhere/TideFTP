@@ -69,9 +69,19 @@ type Config struct {
 	// Timeout bounds the TCP connect and SSH handshake. Zero means
 	// DefaultTimeout.
 	Timeout time.Duration
+	// KeepaliveInterval is how often an idle connection sends a keepalive
+	// request. Zero means DefaultKeepaliveInterval.
+	KeepaliveInterval time.Duration
 }
 
 const DefaultTimeout = 30 * time.Second
+
+// DefaultKeepaliveInterval is how often a live SFTP connection proves the
+// server is still there. SSH sends nothing when idle, so without this a
+// connection whose TCP path dies silently — no FIN, no RST — stays "up" from
+// the client's point of view indefinitely. Thirty seconds matches FTP's own
+// keepalive cadence.
+const DefaultKeepaliveInterval = 30 * time.Second
 
 type Dialer struct {
 	cfg Config
@@ -183,7 +193,16 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 		}
 	}
 
-	return newConn(sshClient, client), nil
+	return newConn(sshClient, client, d.keepaliveInterval()), nil
+}
+
+// keepaliveInterval resolves the configured cadence, falling back to the
+// default so a zero Config field never produces a zero-duration ticker.
+func (d *Dialer) keepaliveInterval() time.Duration {
+	if d.cfg.KeepaliveInterval <= 0 {
+		return DefaultKeepaliveInterval
+	}
+	return d.cfg.KeepaliveInterval
 }
 
 // authMethods builds the auth methods to offer, in the order they are tried.
@@ -425,15 +444,17 @@ type Conn struct {
 	fs     *FS
 	engine *Engine
 	done   chan error
+	stop   chan struct{}
 	once   sync.Once
 }
 
-func newConn(sshClient *ssh.Client, client *sftp.Client) *Conn {
+func newConn(sshClient *ssh.Client, client *sftp.Client, keepalive time.Duration) *Conn {
 	conn := &Conn{
 		ssh:    sshClient,
 		client: client,
 		fs:     &FS{client: client},
 		done:   make(chan error, 1),
+		stop:   make(chan struct{}),
 	}
 	conn.engine = newEngine(client, sshClient.Close)
 
@@ -446,7 +467,30 @@ func newConn(sshClient *ssh.Client, client *sftp.Client) *Conn {
 		}
 		conn.end(err)
 	}()
+	if keepalive > 0 {
+		go conn.keepalive(keepalive)
+	}
 	return conn
+}
+
+// keepalive turns a silently dead TCP path into a reported drop. SSH carries
+// no traffic when idle and sends no notification when the link underneath it
+// disappears, so sshClient.Wait can park for as long as the socket lingers. A
+// request that expects a reply is what forces the question.
+func (c *Conn) keepalive(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stop:
+			return
+		case <-ticker.C:
+			if _, _, err := c.ssh.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				c.end(err)
+				return
+			}
+		}
+	}
 }
 
 func (c *Conn) FS() vfs.FS              { return c.fs }
@@ -464,6 +508,7 @@ func (c *Conn) Close() error {
 
 func (c *Conn) end(reason error) {
 	c.once.Do(func() {
+		close(c.stop)
 		c.done <- reason
 		close(c.done)
 	})

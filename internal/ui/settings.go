@@ -24,6 +24,8 @@ const (
 	settingsFieldEditor
 	settingsFieldVerify
 	settingsFieldReconnect
+	settingsFieldRecoverInterrupted
+	settingsFieldCheckConnectivity
 	// The update rows sit last so the settings people change often stay at
 	// the top. UpdateStatus is an action row whose meaning depends on the
 	// update state (check / install / restart), and UpdateIgnore only exists
@@ -78,6 +80,10 @@ func settingsFieldLabel(field settingsField) string {
 		return "Verify"
 	case settingsFieldReconnect:
 		return "Reconnect"
+	case settingsFieldRecoverInterrupted:
+		return "Recover interrupted"
+	case settingsFieldCheckConnectivity:
+		return "Connectivity check"
 	case settingsFieldUpdateCheck:
 		return "Check for updates"
 	case settingsFieldUpdateStatus:
@@ -86,6 +92,25 @@ func settingsFieldLabel(field settingsField) string {
 		return "Ignore this version"
 	}
 	return ""
+}
+
+// settingsCategory groups related rows in the overlay without changing the
+// underlying field order or cursor semantics. Headers are presentation-only:
+// arrows still move only through settings a user can act on.
+func settingsCategory(field settingsField) string {
+	switch field {
+	case settingsFieldTheme, settingsFieldDensity, settingsFieldShadow, settingsFieldIcons:
+		return "Appearance"
+	case settingsFieldMaxParallel:
+		return "Transfer performance"
+	case settingsFieldEditor:
+		return "Workflow"
+	case settingsFieldVerify, settingsFieldReconnect, settingsFieldRecoverInterrupted, settingsFieldCheckConnectivity:
+		return "Reliability"
+	case settingsFieldUpdateCheck, settingsFieldUpdateStatus, settingsFieldUpdateIgnore:
+		return "Updates"
+	}
+	return "Settings"
 }
 
 func (m Model) settingsFieldValue(field settingsField) string {
@@ -111,7 +136,20 @@ func (m Model) settingsFieldValue(field settingsField) string {
 	case settingsFieldVerify:
 		return settingsToggleChoices[boolToIndex(m.verifyChecksums)]
 	case settingsFieldReconnect:
-		return settingsToggleChoices[boolToIndex(m.autoReconnect)]
+		if !m.autoReconnect {
+			return "off"
+		}
+		return fmt.Sprintf("on · %d tries / %s", len(reconnectDelays), reconnectWindowLabel())
+	case settingsFieldRecoverInterrupted:
+		if !m.recoverInterruptedTransfers {
+			return "off"
+		}
+		return "on · verified only"
+	case settingsFieldCheckConnectivity:
+		if !m.checkConnectivity {
+			return "off"
+		}
+		return "on · pauses when offline"
 	case settingsFieldUpdateCheck:
 		return settingsToggleChoices[boolToIndex(m.updates.CheckOnStartup)]
 	case settingsFieldUpdateStatus:
@@ -284,6 +322,23 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 		m.autoReconnect = !m.autoReconnect
 		if !m.autoReconnect {
 			m.cancelReconnect()
+		}
+	case settingsFieldRecoverInterrupted:
+		m.recoverInterruptedTransfers = !m.recoverInterruptedTransfers
+		if !m.recoverInterruptedTransfers {
+			for i := range m.transfers {
+				if m.transfers[i].RetryOnReconnect {
+					m.transfers[i].RetryOnReconnect = false
+					m.transfers[i].Message = "interrupted — retry with R"
+				}
+			}
+		}
+	case settingsFieldCheckConnectivity:
+		m.checkConnectivity = !m.checkConnectivity
+		if !m.checkConnectivity {
+			// Turning the check off must also release a queue it is holding;
+			// otherwise the setting reads "off" while the queue stays paused.
+			m.resetConnectivity()
 		}
 	}
 	m.setStatus(fmt.Sprintf("%s: %s", settingsFieldLabel(field), m.settingsFieldValue(field)))

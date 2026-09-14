@@ -68,6 +68,11 @@ type Transfer struct {
 	Message    string
 	StartedAt  time.Time
 	FinishedAt time.Time
+	// RetryOnReconnect marks a transfer interrupted by an unexpected dropped
+	// connection. TideFTP clears it after one safe destination check on the
+	// next successful reconnect; deliberate cancels and ordinary failures
+	// never set it.
+	RetryOnReconnect bool
 	// Protocol is the connection protocol ("sftp", "ftp", "ftps",
 	// "ftps-implicit") this
 	// transfer ran over, captured at queue time. The connection's own

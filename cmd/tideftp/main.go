@@ -49,6 +49,7 @@ func run() (code int, restartExec string) {
 	flag.BoolVar(showVersion, "v", false, "print the version and exit")
 	host := flag.String("host", "", "host for an initial target to auto-connect to; without it the app just opens, ready for the connect form")
 	demo := flag.Bool("demo", false, "run against the simulated demo adapter instead of real servers, regardless of --host")
+	transferLab := flag.Bool("transfer-lab", false, "enable developer-only deterministic transfer scenarios (uses the demo adapter)")
 	protocol := flag.String("protocol", "sftp", "sftp, ftp, ftps (explicit, AUTH TLS), or ftps-implicit")
 	port := flag.Int("port", 0, "port (default: 22 for sftp, 21 for ftp and ftps, 990 for ftps-implicit)")
 	username := flag.String("user", "", "username (default: the current user)")
@@ -80,7 +81,7 @@ func run() (code int, restartExec string) {
 	}
 
 	dialer, targets, err := buildSession(sessionOptions{
-		demo: *demo, protocol: *protocol, host: *host, port: *port, username: *username,
+		demo: *demo || *transferLab, protocol: *protocol, host: *host, port: *port, username: *username,
 		startPath: *startPath, identity: *identity, knownHosts: *knownHosts,
 		ftpsCA: *ftpsCA, ftpsInsecure: *ftpsInsecure, ftpsAllowTLS13: *ftpsTLS13,
 	})
@@ -117,7 +118,11 @@ func run() (code int, restartExec string) {
 		saveConfig = func(c config.Config) error { return config.Save(configPath, c) }
 	}
 
-	program := tea.NewProgram(ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig, credstore.New(), version), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	model := ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig, credstore.New(), version)
+	if *transferLab {
+		model.EnableTransferLab()
+	}
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := program.Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "tideftp: %v\n", err)

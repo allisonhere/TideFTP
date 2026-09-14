@@ -184,11 +184,10 @@ func TestBottomTabKeysFocusTheQueuePane(t *testing.T) {
 		want bottomTab
 	}{
 		{"1", tabQueue},
-		{"2", tabActive},
-		{"3", tabFailed},
-		{"4", tabHistory},
-		{"5", tabLog},
-		{"6", tabStats},
+		{"2", tabFailed},
+		{"3", tabHistory},
+		{"4", tabLog},
+		{"5", tabStats},
 	} {
 		model := loadedModel(t, newScriptedEngine())
 		model.focus = focusLocal
@@ -240,17 +239,17 @@ func TestBackspaceStillGoesToParentAfterHWasRebound(t *testing.T) {
 	}
 }
 
-// TestSixOpensTheStatsTab confirms the number key alongside 1-5 reaches the
+// TestFiveOpensTheStatsTab confirms the number key alongside 1-4 reaches the
 // Stats tab and its cursor/scroll are inert, the same treatment tabLog gets.
-func TestSixOpensTheStatsTab(t *testing.T) {
+func TestFiveOpensTheStatsTab(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusQueue
 	model.bottomTab = tabQueue
 
-	model = press(t, model, runes("6"))
+	model = press(t, model, runes("5"))
 
 	if model.bottomTab != tabStats {
-		t.Fatalf("bottomTab = %v after 6, want tabStats", model.bottomTab)
+		t.Fatalf("bottomTab = %v after 5, want tabStats", model.bottomTab)
 	}
 	before := model.bottomCursor
 	model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
@@ -372,7 +371,7 @@ func TestHelpSearchAcceptsReservedLetters(t *testing.T) {
 		t.Fatalf("helpQuery = %q, want \"queue\"", model.helpQuery)
 	}
 	entries := model.filteredHelpEntries()
-	if len(entries) != 2 || entries[0].key != "x" || entries[1].key != "1-6" {
+	if len(entries) != 2 || entries[0].key != "x" || entries[1].key != "1-5" {
 		t.Fatalf("filtered entries = %+v, want transfer cancellation and Queue-tab rows", entries)
 	}
 }

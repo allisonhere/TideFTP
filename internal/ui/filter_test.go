@@ -79,6 +79,43 @@ func TestFilterKeystrokesDoNotFireBindings(t *testing.T) {
 	}
 }
 
+// TestCommandPaletteOpensFromOpenFilter carves out the one global chord a
+// filter input must not swallow. Every printable key belongs to the query,
+// but ctrl+k is not text, and the palette is the reliable way out of a
+// key-capturing input.
+func TestCommandPaletteOpensFromOpenFilter(t *testing.T) {
+	model := filteredRemote(t)
+	model = press(t, model, runes("/"))
+	model = press(t, model, runes("css"))
+
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlK})
+
+	if model.overlay != overlayCommandPalette {
+		t.Fatalf("ctrl+k with a filter open left overlay=%v, want the command palette", model.overlay)
+	}
+	if model.remote.filter != "css" {
+		t.Fatalf("ctrl+k typed into the filter: query = %q", model.remote.filter)
+	}
+}
+
+// TestFilterInputClosesOnDisconnect guards against a reconnect stranding the
+// UI in a key-capturing state: a live filter input would otherwise keep
+// eating every command the user pressed after the connection came back.
+func TestFilterInputClosesOnDisconnect(t *testing.T) {
+	model := filteredRemote(t)
+	model = press(t, model, runes("/"))
+	model = press(t, model, runes("css"))
+
+	model = dropped(model, "connection reset by peer")
+
+	if model.remote.filtering {
+		t.Fatal("a live filter input survived the drop and would keep swallowing keys")
+	}
+	if model.remote.filter != "css" {
+		t.Fatalf("disconnect dropped the applied filter: query = %q", model.remote.filter)
+	}
+}
+
 func TestFilterEnterAcceptsAndKeepsIt(t *testing.T) {
 	model := filteredRemote(t)
 

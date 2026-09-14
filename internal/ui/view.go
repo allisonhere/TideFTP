@@ -58,6 +58,9 @@ func (m Model) View() string {
 
 // connectionSummary is the topbar's account of the remote side.
 func (m Model) connectionSummary() string {
+	if m.reconnect != nil {
+		return fmt.Sprintf("reconnecting %s · attempt %d/%d", m.target.Label(), m.reconnect.attempt+1, len(reconnectDelays))
+	}
 	switch m.state {
 	case connConnecting:
 		return "connecting to " + m.target.Label() + "…"
@@ -230,12 +233,14 @@ func (m Model) renderRemotePane(renderer tideui.Renderer, width, height int) str
 func (m Model) renderBottomPane(renderer tideui.Renderer, width, height int) string {
 	width, height = max(1, width), max(1, height)
 	rows := []string{m.renderBottomTabs(renderer, width)}
-	// A running delete is pinned under the tab bar rather than living in one
-	// tab, so it stays visible wherever the user is looking. It takes its rows
-	// out of the height the tab content gets — bottomVisibleRows subtracts the
-	// same deleteRows(), which is what keeps the scroll arithmetic and this
-	// renderer agreeing on where the rows are.
+	// Long-running tree work is pinned under the tab bar rather than living in
+	// one tab, so it stays visible wherever the user is looking. It takes its
+	// rows out of the height the tab content gets — bottomVisibleRows subtracts
+	// the same counts, keeping scroll arithmetic and rendering aligned.
 	pinned := m.renderDeleteRows(renderer, width)
+	pinned = append(pinned, m.renderQueueProgressRows(renderer, width)...)
+	pinned = append(pinned, m.renderActiveProgressRows(renderer, width)...)
+	pinned = append(pinned, m.renderConnectivityBannerRows(renderer, width)...)
 	rows = append(rows, pinned...)
 	height = max(1, height-len(pinned))
 	switch m.bottomTab {
@@ -273,6 +278,112 @@ func (m Model) renderTransferRows(renderer tideui.Renderer, width, limit int) []
 		rows = append(rows, m.renderTransferRow(renderer, all[i], cursor, width, now))
 	}
 	return rows
+}
+
+// queueProgressRows keeps the full currently pending batch above the live
+// meter: queued files count toward the denominator even before a worker has
+// started them, so this answers how far the whole request has progressed.
+func (m Model) queueProgressRows() int {
+	if m.bottomTab != tabQueue || !m.queueBusy() {
+		return 0
+	}
+	return 1
+}
+
+func (m Model) renderQueueProgressRows(renderer tideui.Renderer, width int) []string {
+	if m.queueProgressRows() == 0 {
+		return nil
+	}
+	var queued, unknown int
+	var done, total int64
+	for _, transfer := range m.queueBatchTransfers() {
+		if transfer.Status != domain.Queued && transfer.Status != domain.Active && transfer.Status != domain.Done && transfer.Status != domain.Failed && transfer.Status != domain.Canceled {
+			continue
+		}
+		queued++
+		done += transfer.BytesDone
+		if transfer.BytesTotal > 0 {
+			total += transfer.BytesTotal
+		} else {
+			unknown++
+		}
+	}
+	return m.renderProgressMeter(renderer, width, "Queue", queued, unknown, done, total)
+}
+
+func (m Model) queueBatchTransfers() []domain.Transfer {
+	if !m.queueBatchActive {
+		return m.bottomTabTransfers()
+	}
+	batch := make([]domain.Transfer, 0, len(m.transfers))
+	for _, transfer := range m.transfers {
+		if transfer.ID >= m.queueBatchStartID {
+			batch = append(batch, transfer)
+		}
+	}
+	return batch
+}
+
+// activeProgressRows keeps the answer to "how far are the files currently in
+// flight?" directly below the full Queue meter. Individual rows retain their
+// own bars; this is the truthful aggregate rather than a decorative activity
+// graph.
+func (m Model) activeProgressRows() int {
+	if m.bottomTab != tabQueue {
+		return 0
+	}
+	for _, transfer := range m.transfers {
+		if transfer.Status == domain.Active {
+			return 1
+		}
+	}
+	return 0
+}
+
+func (m Model) renderActiveProgressRows(renderer tideui.Renderer, width int) []string {
+	if m.activeProgressRows() == 0 {
+		return nil
+	}
+	var active, unknown int
+	var done, total int64
+	for _, transfer := range m.transfers {
+		if transfer.Status != domain.Active {
+			continue
+		}
+		active++
+		done += transfer.BytesDone
+		if transfer.BytesTotal > 0 {
+			total += transfer.BytesTotal
+		} else {
+			unknown++
+		}
+	}
+
+	return m.renderProgressMeter(renderer, width, "Active", active, unknown, done, total)
+}
+
+func (m Model) renderProgressMeter(renderer tideui.Renderer, width int, name string, count, unknown int, done, total int64) []string {
+	bg, fg := rowSurface(renderer, renderer.Styles.DetailBody)
+	label := fmt.Sprintf(" %s %d · %s / %s", name, count, formatSize(done), formatSize(total))
+	if unknown > 0 {
+		label = fmt.Sprintf(" %s %d · %s moved · %d size unknown", name, count, formatSize(done), unknown)
+	}
+	barWidth := min(30, max(4, width-lipgloss.Width(label)-10))
+	filled := 0
+	if total > 0 {
+		filled = min(barWidth, max(0, int(float64(done)/float64(total)*float64(barWidth))))
+	}
+	full, empty := m.glyph(renderer, "▰", "="), m.glyph(renderer, "▱", "-")
+	if total == 0 {
+		empty = m.glyph(renderer, "·", ".")
+	}
+	bar := segment(bg, renderer.Styles.Theme.BorderFocus, strings.Repeat(full, filled)) +
+		segment(bg, renderer.Styles.Theme.Dimmed, strings.Repeat(empty, barWidth-filled))
+	percent := "  —"
+	if total > 0 {
+		percent = fmt.Sprintf(" %3.0f%%", float64(done)/float64(total)*100)
+	}
+	return []string{clampView(segment(bg, fg, " ")+bar+segment(bg, fg, percent+label), width, 1, bg)}
 }
 
 // rowSurface resolves the background/foreground pair a row style paints,
@@ -441,10 +552,16 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 	const barWidth = 18
 	progress := min(max(transfer.Progress(), 0), 1)
 	filled := int(progress * float64(barWidth))
-	bar := segment(bg, fg, "[") +
-		segment(bg, statusColor, strings.Repeat("=", filled)) +
-		segment(bg, fg, strings.Repeat(" ", max(0, barWidth-filled))) +
-		segment(bg, fg, "]")
+	filledCell := m.glyph(renderer, "▰", "=")
+	emptyCell := m.glyph(renderer, "▱", "-")
+	if transfer.BytesTotal <= 0 {
+		emptyCell = m.glyph(renderer, "·", ".")
+	}
+	// A segmented meter reads as intentional progress rather than an ASCII
+	// placeholder, while the paired text percentage keeps it understandable
+	// in monochrome and reduced-Unicode terminals.
+	bar := segment(bg, statusColor, strings.Repeat(filledCell, filled)) +
+		segment(bg, renderer.Styles.Theme.Dimmed, strings.Repeat(emptyCell, max(0, barWidth-filled)))
 
 	// The right-hand meta is built first so the path can be truncated to
 	// whatever is actually left over. It is not a fixed width — a running
@@ -453,8 +570,8 @@ func (m Model) renderTransferRow(renderer tideui.Renderer, transfer domain.Trans
 	// let the two halves collide.
 	meta := fmt.Sprintf("%s %3.0f%% %s", statusIcon, transfer.Progress()*100, transferMetaLabel(transfer, now))
 	right := segment(bg, statusColor, meta)
-	// dir and the two spaces around the bar, plus the bar and its brackets.
-	const rowChrome = 2 + barWidth + 2 + 2
+	// Direction marker, spacing, meter, and the gap before the path.
+	const rowChrome = 2 + barWidth + 2
 	name := short(transfer.Source+" -> "+transfer.Destination, max(12, width-rowChrome-lipgloss.Width(meta)))
 
 	left := segment(bg, statusColor, dir+" ") + bar + segment(bg, fg, "  "+name)
@@ -498,7 +615,7 @@ func (m Model) renderPreviewRows(renderer tideui.Renderer, offset, visible, widt
 }
 
 func (m Model) renderBottomTabs(renderer tideui.Renderer, width int) string {
-	labels := []string{fmt.Sprintf("1 Queue (%dx)", m.maxParallel), "2 Active", "3 Failed", "4 History", "5 Log", "6 Stats"}
+	labels := []string{fmt.Sprintf("1 Queue (%dx)", m.maxParallel), "2 Failed", "3 History", "4 Log", "5 Stats"}
 	parts := make([]string, 0, len(labels))
 	for index, label := range labels {
 		style := renderer.Styles.DetailMeta
@@ -666,6 +783,33 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 			renderer.RenderSoftHints(64, tideui.SoftHint{Key: "enter", Label: "queue"}, tideui.SoftHint{Key: "esc", Label: "cancel"}),
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "queue folder", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
+		return &overlay
+	case overlayScanning:
+		activity := m.scanActivity
+		if activity == nil {
+			return nil
+		}
+		width := min(70, max(42, m.width-8))
+		contentWidth := width - 4
+		spinner := m.glyph(renderer,
+			deleteSpinnerFrames[activity.frame%len(deleteSpinnerFrames)],
+			deleteSpinnerASCII[activity.frame%len(deleteSpinnerASCII)])
+		counts := fmt.Sprintf("%d files · %d folders", activity.files, activity.folders)
+		if activity.bytes > 0 {
+			counts += " · " + formatSize(activity.bytes)
+		}
+		current := activity.current
+		if current == "" {
+			current = "Inspecting folders before it is safe to continue"
+		}
+		rows := []string{
+			renderer.Styles.DetailBody.Width(contentWidth).Render(spinner + " " + activity.phase + "…"),
+			renderer.Styles.DetailBody.Width(contentWidth).Render(counts),
+			renderer.Styles.DetailMeta.Width(contentWidth).Render(short(current, contentWidth)),
+			"",
+			renderer.RenderSoftHints(contentWidth, tideui.SoftHint{Key: "esc", Label: "cancel"}, tideui.SoftHint{Key: "working", Label: scanElapsed(activity.startedAt)}),
+		}
+		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: activity.title, Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
 	case overlaySync:
 		if m.sync == nil {
@@ -1024,8 +1168,13 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		width := min(60, max(36, m.width-8))
 		contentWidth := width - 4
 		visible := m.settingsVisibleFields()
-		rows := make([]string, 0, len(visible)+2)
+		rows := make([]string, 0, len(visible)+6)
+		category := ""
 		for row, field := range visible {
+			if next := settingsCategory(field); next != category {
+				category = next
+				rows = append(rows, renderer.Styles.DetailMeta.Width(contentWidth).Render(category))
+			}
 			rows = append(rows, renderer.RenderSoftRow(tideui.SoftRow{
 				Text:     settingsFieldLabel(field),
 				Suffix:   m.settingsFieldValue(field),
@@ -1039,6 +1188,10 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		))
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "settings", Width: width, Content: renderer.RenderSoftBody(width, strings.Join(rows, "\n"))})
 		return &overlay
+	case overlayTransferLab:
+		return m.renderTransferLab(renderer)
+	case overlayRecovery:
+		return m.renderRecoveryOverlay(renderer)
 	default:
 		return nil
 	}
@@ -1070,7 +1223,7 @@ func (m Model) filePaneVisibleRows() int {
 // can actually show for the current terminal size.
 func (m Model) bottomVisibleRows() int {
 	bodyHeight := max(1, m.bottomPaneHeight()-3)
-	return max(0, bodyHeight-1-m.deleteRows())
+	return max(0, bodyHeight-1-m.deleteRows()-m.queueProgressRows()-m.activeProgressRows()-m.connectivityBannerRows())
 }
 
 // bottomRowCount returns how many rows exist for the currently selected

@@ -100,6 +100,46 @@ func TestSettingsCyclesDensity(t *testing.T) {
 	}
 }
 
+func TestSettingsSeparatesInterruptedTransferRecoveryFromReconnect(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model = press(t, model, runes(","))
+	for model.settingsFieldAt(model.settingsCursor) != settingsFieldRecoverInterrupted {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	if model.recoverInterruptedTransfers {
+		t.Fatal("Recover interrupted remained on after toggling")
+	}
+	if !model.autoReconnect {
+		t.Fatal("turning off recovery should not disable reconnecting")
+	}
+	if model.snapshotConfig().RecoverInterruptedTransfers {
+		t.Fatal("recovery preference was not persisted in the config snapshot")
+	}
+}
+
+func TestSettingsConnectivityCheckTogglesAndReleasesAPause(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.connectivity = connectivityState{phase: connectivityPaused}
+	model.transferFailureStreak = 2
+
+	model = press(t, model, runes(","))
+	for model.settingsFieldAt(model.settingsCursor) != settingsFieldCheckConnectivity {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.checkConnectivity {
+		t.Fatal("Connectivity check remained on after toggling")
+	}
+	if model.snapshotConfig().CheckConnectivity {
+		t.Fatal("connectivity preference was not persisted in the config snapshot")
+	}
+	if model.connectivity.phase != connectivityIdle || model.transferFailureStreak != 0 {
+		t.Fatal("turning the check off did not release the paused queue")
+	}
+}
+
 func TestSettingsMaxParallelRespectsDirectionAndClamps(t *testing.T) {
 	model := loadedModel(t, newScriptedEngine())
 	model.maxParallel = 1
@@ -206,7 +246,7 @@ func TestSettingsOverlayRendersEveryRow(t *testing.T) {
 	model = press(t, model, runes(","))
 
 	plain := ansi.Strip(model.View())
-	for _, want := range []string{"settings", "Theme", "Density", "Shadow", "Icons", "Max Parallel"} {
+	for _, want := range []string{"settings", "Appearance", "Transfer performance", "Workflow", "Reliability", "Updates", "Theme", "Density", "Shadow", "Icons", "Max Parallel"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("settings overlay is missing %q", want)
 		}

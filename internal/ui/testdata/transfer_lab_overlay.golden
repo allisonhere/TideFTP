@@ -5,21 +5,21 @@
 │  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
 │    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
 │    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
-│            ╭─ tideftp · mirror directory ───────────────────────────────────────────╮            │
+│                                                ││                                                │
+│                                                ││                                                │
+│            ╭─ tideftp · transfer lab ───────────────────────────────────────────────╮            │
 │            │                                                                        │            │
-│            │  local → remote                                                        │            │
-│            │  /home/allie/projects/site  →  /public_html/site                       │            │
+│            │  Developer-only simulated transfers — no real files or server.         │            │
 │            │                                                                        │            │
-│            │     1 new          47.1 KB                                             │            │
-│            │     1 updated                                                          │            │
-│            │   118 unchanged                                                        │            │
+│            │  ▌ Tiny-file storm     120 × 4 KB uploads · queue and redraw pressure  │            │
+│            │    Large-file batch             4 × 2 GB uploads · aggregate progress  │            │
+│            │    Mixed batch                           24 files from 8 KB to 512 MB  │            │
+│            │    Drop mid-transfer              8 × 64 MB · disconnect after 900 ms  │            │
 │            │                                                                        │            │
-│            │     1 extra file(s), 1 dir(s)   5.0 KB                                 │            │
-│            │  prune: OFF — extras kept                                              │            │
+│            │    up/down select   enter run   esc close                              │            │
 │            │                                                                        │            │
-│            │    enter mirror   p toggle prune   esc cancel                          │            │
-│            │                                                                        │            │
-╰────────────╰────────────────────────────────────────────────────────────────────────╯────────────╯
+│            ╰────────────────────────────────────────────────────────────────────────╯            │
+╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
 │  1 Queue (2x)    2 Failed   3 History   4 Log   5 Stats                                          │

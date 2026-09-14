@@ -38,6 +38,7 @@ const (
 	commandChmod
 	commandBookmarks
 	commandToggleBookmark
+	commandTransferLab
 )
 
 type paletteCommand struct {
@@ -82,6 +83,9 @@ func (m Model) paletteCommands() []paletteCommand {
 	}
 	if hasCancelableTransfer(m.transfers) {
 		commands = append(commands, paletteCommand{id: commandCancelTransfers, title: "Cancel active transfers", hint: "stop current work"})
+	}
+	if m.transferLab && m.connected() {
+		commands = append(commands, paletteCommand{id: commandTransferLab, title: "Transfer Lab", hint: "run a deterministic test-transfer scenario"})
 	}
 	if pane := m.focusedFilePane(); pane != nil {
 		commands = append(commands,
@@ -204,6 +208,8 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		return cmd
 	case commandBookmarks:
 		return m.openBookmarks()
+	case commandTransferLab:
+		m.openTransferLab()
 	case commandToggleBookmark:
 		return m.toggleBookmark()
 	case commandRefresh:

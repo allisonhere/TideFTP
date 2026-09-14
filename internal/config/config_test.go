@@ -22,6 +22,10 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.MaxParallel != 2 {
 		t.Fatalf("default maxParallel = %d, want 2", cfg.MaxParallel)
 	}
+	if !cfg.AutoReconnect || !cfg.RecoverInterruptedTransfers || !cfg.CheckConnectivity {
+		t.Fatalf("reliability defaults = reconnect=%v recovery=%v connectivity=%v, want all true",
+			cfg.AutoReconnect, cfg.RecoverInterruptedTransfers, cfg.CheckConnectivity)
+	}
 	if cfg.Layout.FileSplit != 0.5 || cfg.Layout.BottomSplit != 0.28 {
 		t.Fatalf("default layout = %+v, want 0.5/0.28", cfg.Layout)
 	}

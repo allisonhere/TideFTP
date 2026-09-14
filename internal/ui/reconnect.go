@@ -19,6 +19,17 @@ var reconnectDelays = []time.Duration{
 	8 * time.Second,
 	15 * time.Second,
 	30 * time.Second,
+	1 * time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+}
+
+func reconnectWindowLabel() string {
+	var total time.Duration
+	for _, delay := range reconnectDelays {
+		total += delay
+	}
+	return fmt.Sprintf("~%dm", int(total.Round(time.Minute).Minutes()))
 }
 
 // reconnectState tracks one auto-reconnect campaign: everything needed to

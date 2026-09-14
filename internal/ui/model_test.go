@@ -357,7 +357,7 @@ func TestLogTabOpensScrolledToLatest(t *testing.T) {
 		model.logs = append(model.logs, "line")
 	}
 
-	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
+	updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
 	model = updated.(Model)
 	want := len(model.logs) - model.bottomVisibleRows()
 	if model.bottomOffset != want {
@@ -375,8 +375,6 @@ func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		model.transfers = append(model.transfers, domain.Transfer{ID: i, Status: domain.Queued})
 	}
-	visible := model.bottomVisibleRows()
-
 	for i := 0; i < 100; i++ {
 		updated, _ := model.updateKey(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
@@ -394,7 +392,7 @@ func TestBottomPaneAutoFollowsWhenAlreadyAtBottom(t *testing.T) {
 		t.Fatalf("expected queueUpload to add exactly one transfer, got %d total", len(model.transfers))
 	}
 
-	wantOffset := len(model.transfers) - visible
+	wantOffset := len(model.transfers) - model.bottomVisibleRows()
 	if model.bottomOffset != wantOffset {
 		t.Fatalf("bottomOffset after queuing a transfer while at bottom = %d, want %d (auto-follow)", model.bottomOffset, wantOffset)
 	}
@@ -489,7 +487,7 @@ func TestViewContainsThreeOperationalRegions(t *testing.T) {
 	model.width = 120
 	model.height = 36
 	view := model.View()
-	for _, want := range []string{"Local", "Remote", "Transfers", "Queue", "Active", "Failed", "History", "Log"} {
+	for _, want := range []string{"Local", "Remote", "Transfers", "Queue", "Failed", "History", "Log", "Stats"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q\n%s", want, view)
 		}
@@ -1511,8 +1509,8 @@ func TestDroppedConnectionFailsInFlightTransfers(t *testing.T) {
 		if row.Status != domain.Failed {
 			t.Fatalf("transfer %d status = %v after the drop, want Failed", id, row.Status)
 		}
-		if row.Message != "connection reset by peer" {
-			t.Fatalf("transfer %d message = %q, want the drop reason", id, row.Message)
+		if row.Message != "interrupted — waiting to reconnect" || !row.RetryOnReconnect {
+			t.Fatalf("transfer %d recovery state = message %q retry=%v, want an interrupted transfer queued for reconnect", id, row.Message, row.RetryOnReconnect)
 		}
 	}
 	if model.transfers[2].Status != domain.Done {

@@ -158,8 +158,11 @@ func statsTickCmd() tea.Cmd {
 // the history — see stopStatsSampling.
 func (m *Model) startStatsSampling() tea.Cmd {
 	m.statsHistory = nil
-	m.statsBytes = nil
 	m.stats = m.computeStats()
+	// Seed the rate window immediately. Without this baseline, a batch of
+	// tiny files that all completes before the first 250ms tick has no earlier
+	// reading to compare against, so the graph can miss the entire batch.
+	m.statsBytes = []statsByteSample{{at: time.Now(), bytes: m.stats.bytesTransferred}}
 	// statsSampling gates the self-perpetuating tick chain, so setting it
 	// here and checking it in applyStatsTick is what stops a reconnect from
 	// leaving two chains running and sampling everything twice.
@@ -188,7 +191,15 @@ func (m *Model) applyStatsTick() tea.Cmd {
 	if !m.statsSampling {
 		return nil
 	}
-	now := time.Now()
+	m.sampleStats(time.Now())
+	return statsTickCmd()
+}
+
+// sampleStats takes one cumulative-byte reading. It is used by the periodic
+// ticker and by completed-transfer events: the latter makes short bursts
+// visible instead of waiting for a tick that may arrive after the whole batch
+// has finished.
+func (m *Model) sampleStats(now time.Time) {
 	snapshot := m.computeStats()
 	m.statsBytes = append(m.statsBytes, statsByteSample{at: now, bytes: snapshot.bytesTransferred})
 	m.trimStatsBytes(now)
@@ -210,7 +221,6 @@ func (m *Model) applyStatsTick() tea.Cmd {
 		}
 	}
 	m.stats = snapshot
-	return statsTickCmd()
 }
 
 // trimStatsBytes drops byte readings that have aged out of the rate window,

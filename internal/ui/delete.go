@@ -67,6 +67,7 @@ type deleteScanMsg struct {
 	pane    paneID
 	entries []domain.Entry
 	scan    deleteScan
+	token   int
 }
 
 // beginDeleteScan counts everything a delete of entries would remove, walking
@@ -75,58 +76,91 @@ type deleteScanMsg struct {
 // it anyway, and that is where the error belongs.
 func beginDeleteScan(fs vfs.FS, base string, pane paneID, entries []domain.Entry) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), deleteScanBudget)
-		defer cancel()
+		return runDeleteScan(fs, base, pane, entries, nil, nil, 0)
+	}
+}
 
-		msg := deleteScanMsg{pane: pane, entries: entries}
-		var stack []string
-		for _, entry := range entries {
-			if isParentDirEntry(entry) {
-				continue
-			}
-			if entry.IsDir() {
-				msg.scan.folders++
-				stack = append(stack, fs.Child(base, entry.Name))
-				continue
-			}
-			msg.scan.files++
-			msg.scan.bytes += entry.Size
+func runDeleteScan(fs vfs.FS, base string, pane paneID, entries []domain.Entry, report func(scanProgressMsg), parent context.Context, token int) deleteScanMsg {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, deleteScanBudget)
+	defer cancel()
+
+	msg := deleteScanMsg{pane: pane, entries: entries, token: token}
+	emit := func(current string) {
+		if report != nil {
+			report(scanProgressMsg{token: token, phase: "Counting items for deletion", files: msg.scan.files, folders: msg.scan.folders, bytes: msg.scan.bytes, current: current})
 		}
+	}
+	var stack []string
+	for _, entry := range entries {
+		if isParentDirEntry(entry) {
+			continue
+		}
+		if entry.IsDir() {
+			msg.scan.folders++
+			stack = append(stack, fs.Child(base, entry.Name))
+			continue
+		}
+		msg.scan.files++
+		msg.scan.bytes += entry.Size
+	}
+	emit(base)
 
-		for len(stack) > 0 {
-			if msg.scan.total() >= deleteScanCap || ctx.Err() != nil {
+	for len(stack) > 0 {
+		if msg.scan.total() >= deleteScanCap || ctx.Err() != nil {
+			msg.scan.truncated = true
+			return msg
+		}
+		dir := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		children, err := fs.List(ctx, dir, true)
+		if err != nil {
+			emit(dir)
+			continue
+		}
+		for _, child := range children {
+			if isParentDirEntry(child) {
+				continue
+			}
+			// Checked here as well as at the top of the walk: one
+			// directory holding more than the cap would otherwise be
+			// counted whole, because the walk only comes back around
+			// between directories.
+			if msg.scan.total() >= deleteScanCap {
 				msg.scan.truncated = true
 				return msg
 			}
-			dir := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			children, err := fs.List(ctx, dir, true)
-			if err != nil {
+			if child.IsDir() {
+				msg.scan.folders++
+				stack = append(stack, fs.Child(dir, child.Name))
 				continue
 			}
-			for _, child := range children {
-				if isParentDirEntry(child) {
-					continue
-				}
-				// Checked here as well as at the top of the walk: one
-				// directory holding more than the cap would otherwise be
-				// counted whole, because the walk only comes back around
-				// between directories.
-				if msg.scan.total() >= deleteScanCap {
-					msg.scan.truncated = true
-					return msg
-				}
-				if child.IsDir() {
-					msg.scan.folders++
-					stack = append(stack, fs.Child(dir, child.Name))
-					continue
-				}
-				msg.scan.files++
-				msg.scan.bytes += child.Size
+			msg.scan.files++
+			msg.scan.bytes += child.Size
+		}
+		emit(dir)
+	}
+	return msg
+}
+
+func (m *Model) startDeleteScan(fs vfs.FS, base string, pane paneID, entries []domain.Entry) tea.Cmd {
+	m.setStatus("scanning…")
+	ctx, token, tick := m.startScan("Counting delete", "Counting items for deletion")
+	events := make(chan tea.Msg, 1)
+	m.scanEvents = events
+	go func() {
+		defer close(events)
+		report := func(progress scanProgressMsg) {
+			select {
+			case events <- progress:
+			default:
 			}
 		}
-		return msg
-	}
+		events <- runDeleteScan(fs, base, pane, entries, report, ctx, token)
+	}()
+	return tea.Batch(waitForScanEvent(events), tick)
 }
 
 // deleteEvent is one batch of removals from a running delete. The producer

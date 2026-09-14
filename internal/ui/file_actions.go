@@ -119,7 +119,7 @@ func (m *Model) openDeletePrompt() tea.Cmd {
 		return nil
 	}
 	m.setStatus("scanning…")
-	return beginDeleteScan(m.fsByID(paneID), pane.path, paneID, entries)
+	return m.startDeleteScan(m.fsByID(paneID), pane.path, paneID, entries)
 }
 
 func (m *Model) openChmodPrompt() {

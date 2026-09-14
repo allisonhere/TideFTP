@@ -9,6 +9,42 @@ feature batches and may change behaviour.
 
 ### Added
 
+- **Live transfer visibility.** Queue is now the one operational transfer
+  view: it contains both waiting and in-flight rows, with a pinned aggregate
+  bytes-and-percent meter whenever files are moving. The redundant Active tab
+  is gone, so the transfer shortcuts are `1` Queue, `2` Failed, `3` History,
+  `4` Log, and `5` Stats. Per-transfer meters use compact segmented cells
+  instead of the old bracketed ASCII bars, with an ASCII fallback for limited
+  terminals. Recursive transfer and delete scans now open a live preparation
+  modal with file, folder, byte, and current-path counts while the confirmation
+  is being built; `Esc` cancels safely before anything is queued or removed.
+
+- **Flaky-connection recovery.** The connection summary now says when
+  TideFTP is reconnecting and which retry is next. Automatic reconnect now
+  tries for roughly nine minutes rather than giving up after one. Interrupted
+  transfers are checked after reconnecting: a missing destination, or a
+  partial destination that matches its source byte-for-byte (up to 16 MB), is
+  safe to resume, while larger, mismatched, full, or unreachable destinations
+  stay in Failed. A review panel then groups the batch into verified partials,
+  missing destinations, mismatched/full, and unreachable, so `enter` resumes
+  the safe ones, `r` restarts the mismatched from zero, `s` skips them, and
+  `↓` inspects the individual Failed rows.
+
+- **Connectivity checks.** When transfers fail back to back, TideFTP now
+  spends one cheap reachability probe — a short TCP dial plus a local-network
+  check — before firing the rest of the queue at the link. If the machine has
+  no network or the server cannot be reached, the queue is paused with a
+  banner naming the problem and re-checks on a backoff, resuming the queue when
+  the link returns. A new **Connectivity check** setting (on by default) turns
+  it off. SFTP connections also send keepalives now, so a silently dead TCP
+  path is noticed instead of lingering as a live session.
+
+- **Transfer Lab.** `tideftp --transfer-lab` uses only the demo adapter and
+  exposes deterministic tiny-file, large-file, mixed-batch, and injected-drop
+  scenarios from the Command Palette. It is a developer tool for exercising
+  Queue, reconnect, recovery, and failure UI without contacting a server or
+  writing transfer data.
+
 - **Bookmarks.** `B` bookmarks the focused pane's current directory and `b`
   opens a picker to jump back to one, so the directories a session actually
   lives in are two keys away instead of a walk down the tree every time. A

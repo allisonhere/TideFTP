@@ -73,6 +73,11 @@ TIDEFTP_FTP_PASSWORD=... go run ./cmd/tideftp --protocol ftps-implicit \
     --host files.example.com --user allie --path /pub
 ```
 
+For deterministic UI and recovery testing, run `tideftp --transfer-lab`. It
+uses the demo adapter and adds **Transfer Lab** to the Command Palette, with
+tiny-file, large-file, mixed-batch, and injected-connection-drop scenarios.
+It never contacts a real server or writes real transfer data.
+
 The two FTPS flavours are separate protocols because a server speaks one or
 the other, never both on the same port. **`ftps`** is explicit FTPS: an
 ordinary FTP connection on port 21 that `AUTH TLS` upgrades in place.
@@ -185,8 +190,8 @@ via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag
 - `Shift+Left` / `Shift+Right`: resize local/remote panes
 - `Shift+Up` / `Shift+Down`: resize transfer pane
 - `Ctrl+0`: reset pane sizes
-- `1`-`6`: focus the transfers pane and open Queue, Active, Failed, History,
-  Log, or Stats respectively
+- `1`-`5`: focus the transfers pane and open Queue, Failed, History, Log, or
+  Stats respectively
 - `U`: install a waiting update
 - `?`: help
 - `q`: quit
@@ -206,11 +211,23 @@ Two settings in `,` change what happens around a transfer:
   to the Failed tab, where `R` retries it. This doubles what a transfer costs
   in time and bytes — it is correctness you opt into, not a free check.
 - **Reconnect** (`auto_reconnect`, on by default) redials after a connection
-  drops on its own, backing off 2s, 4s, 8s, 15s, 30s before giving up, and
-  puts you back in the directory you were in. A disconnect you asked for is
-  never undone, and connecting somewhere by hand calls off a redial in
-  progress. Transfers interrupted by the drop still fail — they are not
-  resumed automatically; retry them with `R`.
+  drops on its own, backing off from 2 seconds through 5 minutes over eight
+  attempts, and puts you back in the directory you were in. A disconnect you
+  asked for is never undone, and connecting somewhere by hand calls off a
+  redial in progress. After a successful reconnect, interrupted transfers are
+  checked and grouped in a review panel: `enter` resumes the safe ones
+  (missing destinations, or partials whose contents match the source, capped
+  at 16 MB for automatic verification), `r` restarts the mismatched/full ones
+  from zero, `s` skips them, and `↓` inspects the individual Failed rows. Set
+  `recover_interrupted_transfers = false` to reconnect without restarting
+  interrupted work.
+- **Connectivity check** (`check_connectivity`, on by default) watches for
+  transfers failing back to back. Two in a row earns one quick reachability
+  probe — a local network check plus a short TCP dial to the server — and if
+  the link is down the queue is held with a banner and re-checked on a
+  backoff, instead of firing every remaining file at a dead connection.
+  SFTP sessions also send keepalives, so a silently dead TCP path is noticed
+  rather than lingering as a live connection.
 
 ## Development
 

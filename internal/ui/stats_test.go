@@ -133,6 +133,23 @@ func TestApplyStatsTickSamplesThroughputBetweenTicks(t *testing.T) {
 	}
 }
 
+// A small-file batch can finish entirely between two ticker messages. Its
+// completion must still leave a visible point in the throughput graph.
+func TestCompletedTransferSamplesStatsWithoutWaitingForTick(t *testing.T) {
+	model := statsTestModel(t)
+	model.transfers = []domain.Transfer{{
+		ID: 1, Status: domain.Active, BytesTotal: 4096, StartedAt: time.Now(),
+	}}
+	model.startStatsSampling()
+	model.statsBytes[0].at = time.Now().Add(-100 * time.Millisecond)
+
+	model.applyTransferEvent(transfer.Event{ID: 1, Kind: transfer.Completed, BytesDone: 4096})
+
+	if len(model.statsHistory) != 1 || model.statsHistory[0] <= 0 {
+		t.Fatalf("statsHistory = %v, want a positive completion sample", model.statsHistory)
+	}
+}
+
 // Looking away and back used to wipe the graph. It must not: the history
 // belongs to the connection, not to the tab being on screen.
 func TestSwitchingBottomTabsKeepsTheGraph(t *testing.T) {
@@ -164,7 +181,7 @@ func TestDisconnectStopsSamplingAndClearsTheGraph(t *testing.T) {
 	model.statsHistory = []int64{111, 222}
 	model.statsBytes = []statsByteSample{{at: time.Now(), bytes: 999}}
 
-	model.clearConnection("dropped")
+	model.clearConnection("dropped", false)
 
 	if model.statsSampling {
 		t.Fatal("sampling still running after a disconnect")

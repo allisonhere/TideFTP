@@ -1,10 +1,10 @@
    TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
-│Local                           filter: md_  1/3││Remote                              /public_html│
+│Local                       /home/allie/projects││Remote                              /public_html│
 │mode        size        modified        name    ││mode        size        modified        name    │
-│    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
-│                                                ││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
-│                                                ││                                                │
+│  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
+│    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
+│    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
 │                                                ││                                                │
@@ -23,8 +23,8 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
 │  1 Queue (2x)    2 Failed   3 History   4 Log   5 Stats                                          │
-│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  17% Queue 2 · 2.0 KB / 12.0 KB                                   │
-│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  50% Active 1 · 2.0 KB / 4.0 KB                                   │
-│↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱  /home/allie/projects/main.go -> /public_html/main.go        50% transferring│
+│ ▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  25% Queue 3 · 100 B / 400 B                                      │
+│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  50% Active 2 · 100 B / 200 B                                     │
+│↑ ▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱  /home/allie/projects/assets/logo.svg -> /public_html/ass…    75% transferrin│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

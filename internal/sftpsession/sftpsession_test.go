@@ -62,6 +62,43 @@ func TestDialWithAKeyFile(t *testing.T) {
 	}
 }
 
+// TestDialSendsKeepalives proves the connection probes an idle server, which
+// is the only way a silently dead TCP path is ever noticed: SSH itself sends
+// nothing when idle.
+func TestDialSendsKeepalives(t *testing.T) {
+	server := startTestServer(t)
+	dialer := New(Config{
+		KnownHostsPath:    server.knownHostsFile(t),
+		IdentityFiles:     []string{server.clientPK},
+		Timeout:           10 * time.Second,
+		KeepaliveInterval: 20 * time.Millisecond,
+	})
+	conn, err := dialer.Dial(context.Background(), targetFor(server), session.Credentials{})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for server.keepaliveCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if server.keepaliveCount() == 0 {
+		conn.Close()
+		t.Fatal("no keepalive reached the server")
+	}
+
+	// Closing the connection stops the probes rather than leaving them to
+	// hammer a socket that is already gone.
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	settled := server.keepaliveCount()
+	time.Sleep(80 * time.Millisecond)
+	if got := server.keepaliveCount(); got != settled {
+		t.Fatalf("keepalives continued after Close: %d -> %d", settled, got)
+	}
+}
+
 func TestDialWithAPassphraseProtectedKey(t *testing.T) {
 	server := startTestServer(t)
 

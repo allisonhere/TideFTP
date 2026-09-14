@@ -5,21 +5,21 @@
 │  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 assets   ││  ▸ drwxr-xr-x     <DIR>  Jan 15 09:30 uploads  │
 │    -rw-r--r--    2.0 KB  Jan 15 09:30 README.md││    -rw-r--r--    8.0 KB  Jan 15 09:30 index.htm│
 │    -rw-r--r--    4.0 KB  Jan 15 09:30 main.go  ││                                                │
-│            ╭─ tideftp · mirror directory ───────────────────────────────────────────╮            │
-│            │                                                                        │            │
-│            │  local → remote                                                        │            │
-│            │  /home/allie/projects/site  →  /public_html/site                       │            │
-│            │                                                                        │            │
-│            │     1 new          47.1 KB                                             │            │
-│            │     1 updated                                                          │            │
-│            │   118 unchanged                                                        │            │
-│            │                                                                        │            │
-│            │     1 extra file(s), 1 dir(s)   5.0 KB                                 │            │
-│            │  prune: OFF — extras kept                                              │            │
-│            │                                                                        │            │
-│            │    enter mirror   p toggle prune   esc cancel                          │            │
-│            │                                                                        │            │
-╰────────────╰────────────────────────────────────────────────────────────────────────╯────────────╯
+│                                                ││                                                │
+│                ╭─ tideftp · interrupted transfers ──────────────────────────────╮                │
+│                │                                                                │                │
+│                │    72 verified partial(s)                      safe to resume  │                │
+│                │    18 destination(s) missing                  safe to restart  │                │
+│                │    7 mismatched/full                          need a decision  │                │
+│                │    3 unreachable                                 leave failed  │                │
+│                │                                                                │                │
+│                │    enter resume safe (90)                                      │                │
+│                │    r restart remaining                                         │                │
+│                │    s skip remaining                                            │                │
+│                │    ↓ inspect individual exceptions                             │                │
+│                │    esc decide later                                            │                │
+│                │                                                                │                │
+╰────────────────╰────────────────────────────────────────────────────────────────╯────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
 │  1 Queue (2x)    2 Failed   3 History   4 Log   5 Stats                                          │

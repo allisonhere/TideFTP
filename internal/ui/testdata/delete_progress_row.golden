@@ -22,9 +22,9 @@
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
-│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │
+│  1 Queue (2x)    2 Failed   3 History   4 Log   5 Stats                                          │
 │⠸ Deleting  1248/3910  [=====             ]                                          32%  x cancel│
 │  /public_html/uploads/2019/raw/IMG_4471.CR2                                                      │
-│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main.go      50% transferring│
+│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  17% Queue 2 · 2.0 KB / 12.0 KB                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

@@ -548,7 +548,7 @@ func TestDeleteRowShowsOnEveryBottomTab(t *testing.T) {
 	model := deleteModel(t, nestedTree())
 	model.deleteJob = &deleteJob{pane: paneRemote, total: 3910, done: 1248, current: "/r/a/a1.txt", cancel: func() {}}
 
-	for _, tab := range []bottomTab{tabQueue, tabActive, tabFailed, tabHistory, tabLog, tabStats} {
+	for _, tab := range []bottomTab{tabQueue, tabFailed, tabHistory, tabLog, tabStats} {
 		model.bottomTab = tab
 		plain := ansi.Strip(model.View())
 		if !strings.Contains(plain, "Deleting  1248/3910") {
@@ -557,6 +557,40 @@ func TestDeleteRowShowsOnEveryBottomTab(t *testing.T) {
 		if !strings.Contains(plain, "/r/a/a1.txt") {
 			t.Fatalf("tab %d does not show the current path:\n%s", tab, plain)
 		}
+	}
+}
+
+func TestScanActivityAppearsInWorkingModal(t *testing.T) {
+	model := deleteModel(t, nestedTree())
+	model.overlay = overlayScanning
+	model.scanActivity = &scanActivity{
+		title:     "Counting delete",
+		phase:     "Counting items for deletion",
+		startedAt: time.Now(),
+		frame:     1,
+		files:     3842,
+		folders:   126,
+		bytes:     1700000000,
+	}
+
+	plain := ansi.Strip(model.View())
+	if !strings.Contains(plain, "Counting delete") || !strings.Contains(plain, "Counting items for deletion") || !strings.Contains(plain, "3842") || !strings.Contains(plain, "126 folders") || !strings.Contains(plain, "esc cancel") {
+		t.Fatalf("scan activity modal is not visible:\n%s", plain)
+	}
+}
+
+func TestEscapeCancelsScanAndRetiresItsResult(t *testing.T) {
+	model := deleteModel(t, nestedTree())
+	_, token, _ := model.startScan("Counting delete", "Counting items for deletion")
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	if model.overlay != overlayNone || model.scanActivity != nil {
+		t.Fatalf("Escape left scan visible: overlay=%v activity=%+v", model.overlay, model.scanActivity)
+	}
+
+	updated, _ := model.Update(deleteScanMsg{token: token, pane: paneRemote, entries: []domain.Entry{{Name: "r", Kind: domain.EntryDir}}})
+	model = updated.(Model)
+	if model.overlay != overlayNone || model.fileAction != nil {
+		t.Fatalf("cancelled scan result reopened a prompt: overlay=%v action=%+v", model.overlay, model.fileAction)
 	}
 }
 

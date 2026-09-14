@@ -22,9 +22,9 @@
 ╰───────────╰──────────────────────────────────────────────────────────────────────────╯───────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │Transfers                                                                                    queue│
-│  1 Queue (2x)    2 Active   3 Failed   4 History   5 Log   6 Stats                               │
-│↑ [=========         ]  /home/allie/projects/main.go -> /public_html/main.go      50% transferring│
-│↓ [                  ]  /public_html/index.html -> /home/allie/projects/index.html       0% queued│
-│                                                                                                  │
+│  1 Queue (2x)    2 Failed   3 History   4 Log   5 Stats                                          │
+│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  17% Queue 2 · 2.0 KB / 12.0 KB                                   │
+│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  50% Active 1 · 2.0 KB / 4.0 KB                                   │
+│↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱  /home/allie/projects/main.go -> /public_html/main.go        50% transferring│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

@@ -122,6 +122,10 @@ func (m *Model) resolveAllConflicts(remember bool) tea.Cmd {
 // by the time this runs (resolveOneConflict/resolveAllConflicts guarantee
 // it); a clean file (no conflict) always queues unconditionally.
 func (m *Model) commitScan(scan preflightScan) {
+	if !m.queueBusy() {
+		m.queueBatchStartID = m.nextTransferID
+		m.queueBatchActive = true
+	}
 	claimed := map[string]bool{}
 	// Reserve incoming names before choosing any rename, including files
 	// later in the batch that do not conflict with the destination listing.

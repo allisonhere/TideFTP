@@ -36,6 +36,9 @@ type testServer struct {
 	refused  bool       // when set, connections are accepted then dropped
 	conns    []net.Conn // accepted connections, closed on shutdown
 	handlers *sftp.Handlers
+	// keepalives counts keepalive@openssh.com global requests, so a test can
+	// prove the client actually probes an idle connection.
+	keepalives int
 }
 
 // path is the absolute path of name on the server. pkg/sftp's server is not
@@ -119,7 +122,7 @@ func (s *testServer) serve(conn net.Conn, config *ssh.ServerConfig) {
 		return
 	}
 	defer sshConn.Close()
-	go ssh.DiscardRequests(requests)
+	go s.handleGlobalRequests(requests)
 
 	for newChannel := range channels {
 		if newChannel.ChannelType() != "session" {
@@ -156,6 +159,29 @@ func (s *testServer) serve(conn net.Conn, config *ssh.ServerConfig) {
 			}
 		}(channel)
 	}
+}
+
+// handleGlobalRequests drains the connection's global requests, counting the
+// keepalive probes the client sends and refusing everything else — the same
+// discard ssh.DiscardRequests does, with an observation point.
+func (s *testServer) handleGlobalRequests(requests <-chan *ssh.Request) {
+	for req := range requests {
+		if req.Type == "keepalive@openssh.com" {
+			s.mu.Lock()
+			s.keepalives++
+			s.mu.Unlock()
+		}
+		if req.WantReply {
+			_ = req.Reply(false, nil)
+		}
+	}
+}
+
+// keepaliveCount reads the probe counter under the server lock.
+func (s *testServer) keepaliveCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.keepalives
 }
 
 // refuse makes every later connection attempt fail, standing in for a server

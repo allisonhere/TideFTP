@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/config"
 	"tideftp/internal/domain"
@@ -241,7 +242,7 @@ func TestRetryWithNothingFailedDoesNothing(t *testing.T) {
 func TestRetryOnANonFailedRowDoesNothing(t *testing.T) {
 	model, _ := loadedModelWithDialer(t, &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()})
 	model.focus = focusQueue
-	model.bottomTab = tabActive
+	model.bottomTab = tabQueue
 	model.transfers = []domain.Transfer{
 		{ID: 1, Status: domain.Active, Source: "/a", Destination: "/a"},
 	}
@@ -303,5 +304,52 @@ func TestDrainingTheQueueRelistsThePanesSoNewFilesShow(t *testing.T) {
 	model = settle(t, next.(Model), cmd)
 	if model.remote.requestToken == before {
 		t.Fatalf("queue drained but the panes were never relisted")
+	}
+}
+
+func TestQueuePinsAggregateProgressMeter(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.width, model.height = 100, 30
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Active, BytesDone: 50, BytesTotal: 100},
+		{ID: 2, Status: domain.Active, BytesDone: 25, BytesTotal: 100},
+		{ID: 3, Status: domain.Queued, BytesTotal: 200},
+	}
+
+	plain := ansi.Strip(model.View())
+	if !strings.Contains(plain, "Active 2 · 75 B / 200 B") || !strings.Contains(plain, " 38%") {
+		t.Fatalf("queue does not show aggregate progress:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Queue 3 · 75 B / 400 B") || !strings.Contains(plain, " 19%") {
+		t.Fatalf("queue does not show total progress:\n%s", plain)
+	}
+	if strings.Index(plain, "Queue 3 · 75 B / 400 B") > strings.Index(plain, "Active 2 · 75 B / 200 B") {
+		t.Fatalf("total progress should appear above active progress:\n%s", plain)
+	}
+	if got, want := model.activeProgressRows(), 1; got != want {
+		t.Fatalf("activeProgressRows = %d, want %d", got, want)
+	}
+	if got, want := model.queueProgressRows(), 1; got != want {
+		t.Fatalf("queueProgressRows = %d, want %d", got, want)
+	}
+}
+
+func TestQueueProgressKeepsCompletedFilesInTheCurrentBatch(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	model.width, model.height = 100, 30
+	model.focus = focusQueue
+	model.bottomTab = tabQueue
+	model.queueBatchActive = true
+	model.queueBatchStartID = 1
+	model.transfers = []domain.Transfer{
+		{ID: 1, Status: domain.Done, BytesDone: 100, BytesTotal: 100},
+		{ID: 2, Status: domain.Active, BytesDone: 25, BytesTotal: 100},
+	}
+
+	plain := ansi.Strip(model.View())
+	if !strings.Contains(plain, "Queue 2 · 125 B / 200 B") || !strings.Contains(plain, " 62%") {
+		t.Fatalf("queue progress dropped completed work from its batch:\n%s", plain)
 	}
 }

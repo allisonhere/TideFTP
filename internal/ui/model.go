@@ -32,7 +32,6 @@ type bottomTab int
 
 const (
 	tabQueue bottomTab = iota
-	tabActive
 	tabFailed
 	tabHistory
 	tabLog
@@ -48,6 +47,8 @@ const (
 	overlayConflict
 	overlayTheme
 	overlayPreflight
+	overlayScanning
+	overlayRecovery
 	overlaySettings
 	overlayHostKey
 	overlayCommandPalette
@@ -58,6 +59,7 @@ const (
 	overlayQuitConfirm
 	overlayUpdate
 	overlayBookmarks
+	overlayTransferLab
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -293,6 +295,8 @@ type Model struct {
 	bookmarkDeleteExpiry time.Time
 	commandQuery         string
 	commandCursor        int
+	transferLab          bool
+	labCursor            int
 	fileAction           *fileActionPrompt
 	pendingEdit          *pendingEdit
 	preview              *previewState
@@ -305,9 +309,21 @@ type Model struct {
 	// autoReconnect redials after a connection drops on its own (see
 	// reconnect.go). reconnect holds the campaign in progress, nil the rest
 	// of the time, and reconnectToken retires a superseded one's timers.
-	autoReconnect  bool
-	reconnect      *reconnectState
-	reconnectToken int
+	autoReconnect               bool
+	recoverInterruptedTransfers bool
+	// checkConnectivity probes the link when transfers fail back to back (see
+	// connectivity.go). It is independent of auto-reconnect: it can hold a
+	// queue on a connection that has not dropped yet.
+	checkConnectivity bool
+	recoverySummary   *recoverySummary
+	reconnect         *reconnectState
+	reconnectToken    int
+	// connectivity tracks the probe held while the queue is paused on a
+	// suspected outage, and transferFailureStreak counts transfers that have
+	// failed back to back since the last success.
+	connectivity          connectivityState
+	connectivityToken     int
+	transferFailureStreak int
 	// lastCreds are the credentials of the most recent connect attempt,
 	// kept so an auto-reconnect can redial with them. In memory only, and
 	// for the same lifetime as the connect form's own copy of a password —
@@ -324,9 +340,15 @@ type Model struct {
 
 	transfers      []domain.Transfer
 	nextTransferID int
-	maxParallel    int
-	bottomTab      bottomTab
-	bottomOffset   int
+	// queueBatchStartID identifies the transfers belonging to the current
+	// draining batch, including ones that have already completed. Keeping
+	// those rows in the aggregate denominator prevents Queue progress from
+	// jumping backward as parallel files finish.
+	queueBatchStartID int
+	queueBatchActive  bool
+	maxParallel       int
+	bottomTab         bottomTab
+	bottomOffset      int
 	// bottomCursor selects one row within the current bottom-pane tab's
 	// transfers, the target for a contextual x (cancel)/R (retry). It has
 	// no meaning on tabLog, which is plain scrolling text with no rows to
@@ -337,6 +359,12 @@ type Model struct {
 	// overlayConflict (some files already exist at their destination) is
 	// asking the user to confirm it. Nil the rest of the time.
 	preflight *preflightScan
+	// scanActivity keeps the otherwise invisible preflight/counting phase
+	// visible while a recursive transfer or delete is being inspected.
+	scanActivity *scanActivity
+	scanEvents   <-chan tea.Msg
+	scanCancel   context.CancelFunc
+	scanToken    int
 	// sync holds a computed directory-mirror plan while overlaySync asks the
 	// user to confirm it (see sync.go). Nil the rest of the time.
 	sync *syncPlan
@@ -501,32 +529,34 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 			sortKey:    parseSortKey(cfg.Sort.Key),
 			sortDesc:   cfg.Sort.Desc,
 		},
-		localFS:             local,
-		dialer:              dialer,
-		targets:             targets,
-		profiles:            profilesFromConfig(cfg.Profiles),
-		state:               connDisconnected,
-		nextTransferID:      1,
-		maxParallel:         maxParallel,
-		theme:               themeByName(cfg.Theme),
-		density:             density,
-		shadow:              cfg.Shadow,
-		showIcons:           cfg.ShowIcons,
-		editorSetting:       cfg.Editor,
-		verifyChecksums:     cfg.VerifyChecksums,
-		autoReconnect:       cfg.AutoReconnect,
-		fileSplit:           tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
-		bottomSplit:         tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
-		save:                save,
-		creds:               creds,
-		serverDeleteIndex:   -1,
-		localBookmarks:      append([]string(nil), cfg.LocalBookmarks...),
-		bookmarkDeleteIndex: -1,
-		version:             currentVersion,
-		updates:             cfg.Updates,
-		updater:             update.New(),
-		logs:                []string{"redacted logs enabled"},
-		status:              "ready",
+		localFS:                     local,
+		dialer:                      dialer,
+		targets:                     targets,
+		profiles:                    profilesFromConfig(cfg.Profiles),
+		state:                       connDisconnected,
+		nextTransferID:              1,
+		maxParallel:                 maxParallel,
+		theme:                       themeByName(cfg.Theme),
+		density:                     density,
+		shadow:                      cfg.Shadow,
+		showIcons:                   cfg.ShowIcons,
+		editorSetting:               cfg.Editor,
+		verifyChecksums:             cfg.VerifyChecksums,
+		autoReconnect:               cfg.AutoReconnect,
+		recoverInterruptedTransfers: cfg.RecoverInterruptedTransfers,
+		checkConnectivity:           cfg.CheckConnectivity,
+		fileSplit:                   tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
+		bottomSplit:                 tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
+		save:                        save,
+		creds:                       creds,
+		serverDeleteIndex:           -1,
+		localBookmarks:              append([]string(nil), cfg.LocalBookmarks...),
+		bookmarkDeleteIndex:         -1,
+		version:                     currentVersion,
+		updates:                     cfg.Updates,
+		updater:                     update.New(),
+		logs:                        []string{"redacted logs enabled"},
+		status:                      "ready",
 	}
 	if model.theme.Name == themeNameMatchOmarchy {
 		model.omarchySig = omarchySignatureNow()
@@ -548,17 +578,24 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 	return model
 }
 
+// EnableTransferLab exposes deterministic fake-transfer scenarios intended
+// only for local development. The executable enables it exclusively through
+// --transfer-lab, which also selects the demo adapter.
+func (m *Model) EnableTransferLab() { m.transferLab = true }
+
 // snapshotConfig captures the current settings for persistence.
 func (m Model) snapshotConfig() config.Config {
 	return config.Config{
-		Theme:           m.theme.Name,
-		Density:         string(m.density),
-		Shadow:          m.shadow,
-		ShowIcons:       m.showIcons,
-		MaxParallel:     m.maxParallel,
-		Editor:          m.editorSetting,
-		VerifyChecksums: m.verifyChecksums,
-		AutoReconnect:   m.autoReconnect,
+		Theme:                       m.theme.Name,
+		Density:                     string(m.density),
+		Shadow:                      m.shadow,
+		ShowIcons:                   m.showIcons,
+		MaxParallel:                 m.maxParallel,
+		Editor:                      m.editorSetting,
+		VerifyChecksums:             m.verifyChecksums,
+		AutoReconnect:               m.autoReconnect,
+		RecoverInterruptedTransfers: m.recoverInterruptedTransfers,
+		CheckConnectivity:           m.checkConnectivity,
 		Layout: config.Layout{
 			FileSplit:   m.fileSplit.Value(),
 			BottomSplit: m.bottomSplit.Value(),
@@ -666,6 +703,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case reconnectTickMsg:
 		return m, m.applyReconnectTick(msg)
+	case labDropMsg:
+		if dropper, ok := m.conn.(interface{ Drop(error) }); ok {
+			m.setStatus("transfer lab: injecting connection drop")
+			dropper.Drop(errors.New("transfer lab: simulated connection drop"))
+		}
+		return m, nil
 	case listingMsg:
 		wasAtBottom := m.isAtBottomPane()
 		m.applyListing(msg)
@@ -795,9 +838,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case preflightScanMsg:
+		if !m.acceptsScan(msg.token) {
+			return m, nil
+		}
+		m.finishScan()
+		m.scanEvents = nil
+		if m.overlay == overlayScanning {
+			m.overlay = overlayNone
+		}
 		wasAtBottom := m.isAtBottomPane()
 		m.applyPreflightScan(msg)
 		m.settleBottomOffset(wasAtBottom)
+		return m, nil
+	case recoveryScanMsg:
+		if !m.acceptsScan(msg.token) {
+			return m, nil
+		}
+		m.finishScan()
+		m.scanEvents = nil
+		if m.overlay == overlayScanning {
+			m.overlay = overlayNone
+		}
+		m.applyInterruptedRecovery(msg)
 		return m, nil
 	case syncScanMsg:
 		m.applySyncScan(msg)
@@ -814,6 +876,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// next queued one, which is why startQueuedTransfers runs here too.
 		wasAtBottom := m.isAtBottomPane()
 		verify := m.applyTransferEvent(msg)
+		// Enough failures back to back earns one connectivity probe. It runs
+		// alongside the event pump; while it is in flight startQueuedTransfers
+		// holds the queue, so a dead link is not fed the whole batch.
+		connectivity := m.noteTransferOutcome(msg)
 		m.startQueuedTransfers()
 		m.settleBottomOffset(wasAtBottom)
 		// When a terminal event empties the queue, re-list the panes so the
@@ -825,9 +891,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			settle = m.relistPanes()
 		}
 		if !m.connected() {
-			return m, tea.Batch(verify, settle)
+			return m, tea.Batch(verify, settle, connectivity)
 		}
-		return m, tea.Batch(verify, settle, waitForTransferEvent(m.engine.Events()))
+		return m, tea.Batch(verify, settle, connectivity, waitForTransferEvent(m.engine.Events()))
+	case connectivityResultMsg:
+		return m, m.applyConnectivityResult(msg)
+	case connectivityRetryMsg:
+		return m, m.applyConnectivityRetry(msg)
 	case verifyDoneMsg:
 		wasAtBottom := m.isAtBottomPane()
 		m.applyVerifyDone(msg)
@@ -836,8 +906,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case transferStreamClosed:
 		return m, nil
 	case deleteScanMsg:
+		if !m.acceptsScan(msg.token) {
+			return m, nil
+		}
+		m.finishScan()
+		m.scanEvents = nil
+		if m.overlay == overlayScanning {
+			m.overlay = overlayNone
+		}
 		m.applyDeleteScan(msg)
 		return m, nil
+	case scanProgressMsg:
+		if !m.acceptsScan(msg.token) {
+			return m, nil
+		}
+		m.applyScanProgress(msg)
+		if m.scanEvents != nil {
+			return m, waitForScanEvent(m.scanEvents)
+		}
+		return m, nil
+	case scanStreamClosed:
+		return m, nil
+	case scanTickMsg:
+		return m, m.advanceScan()
 	case deleteEvent:
 		// Each batch can add a pile of lines to the Log tab, so the same
 		// auto-follow the transfer tabs get applies here.
@@ -945,6 +1036,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayCommandPalette {
 		return m, m.handleCommandPaletteKey(msg)
 	}
+	if m.overlay == overlayTransferLab {
+		return m, m.handleTransferLabKey(msg)
+	}
 	if m.overlay == overlayFileAction {
 		return m, m.handleFileActionKey(msg)
 	}
@@ -959,6 +1053,15 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	}
 	if m.overlay == overlayPreview {
 		return m, m.handlePreviewKey(msg)
+	}
+	if m.overlay == overlayScanning {
+		if msg.String() == "esc" || msg.String() == "q" {
+			m.cancelScan()
+		}
+		return m, nil
+	}
+	if m.overlay == overlayRecovery {
+		return m, m.handleRecoveryKey(msg)
 	}
 	if m.overlay == overlayConflict {
 		return m, m.handleConflictKey(msg)
@@ -1002,6 +1105,15 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 
+	// ctrl+k is a control chord, not filter text, so it stays global even
+	// while a filter input is open. handleFilterKey would otherwise drop it
+	// silently, and the command palette is the one reliable way out of a
+	// key-capturing input.
+	if msg.String() == "ctrl+k" {
+		m.openCommandPalette()
+		return m, nil
+	}
+
 	// A pane with its filter input open is a live text field: keystrokes edit
 	// the query rather than triggering the single-letter bindings below.
 	if fp := m.focusedFilePane(); fp != nil && fp.filtering {
@@ -1026,8 +1138,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "S":
 		m.toggleSortDir()
 		cmd = m.persist()
-	case "ctrl+k":
-		m.openCommandPalette()
 	case "tab", "shift+tab":
 		m.toggleFilePaneFocus()
 	case "up", "k":
@@ -1149,20 +1259,16 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	case "2":
 		tabSwitch = true
 		m.focus = focusQueue
-		m.setBottomTab(tabActive)
+		m.setBottomTab(tabFailed)
 	case "3":
 		tabSwitch = true
 		m.focus = focusQueue
-		m.setBottomTab(tabFailed)
+		m.setBottomTab(tabHistory)
 	case "4":
 		tabSwitch = true
 		m.focus = focusQueue
-		m.setBottomTab(tabHistory)
-	case "5":
-		tabSwitch = true
-		m.focus = focusQueue
 		m.setBottomTab(tabLog)
-	case "6":
+	case "5":
 		tabSwitch = true
 		m.focus = focusQueue
 		m.setBottomTab(tabStats)
@@ -1236,7 +1342,7 @@ func (m *Model) connectFor(target session.Target, creds session.Credentials) tea
 	cmds := []tea.Cmd{}
 	if m.conn != nil {
 		cmds = append(cmds, closeConnCmd(m.conn))
-		m.clearConnection("reconnecting")
+		m.clearConnection("reconnecting", false)
 	}
 	m.target = target
 	m.lastCreds = creds
@@ -1311,14 +1417,18 @@ func (m *Model) applyConnected(msg connectedMsg) tea.Cmd {
 		openPath = resume
 		m.setStatus("reconnected to " + msg.target.Label())
 	}
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		waitForTransferEvent(msg.conn.Engine().Events()),
 		watchConnCmd(msg.conn),
 		// Sampling starts with the connection, not with the Stats tab, so
 		// the graph covers everything this connection did.
 		m.startStatsSampling(),
 		m.requestListing(paneRemote, openPath, listingNavigate),
-	)
+	}
+	if recovery := m.startInterruptedRecovery(); recovery != nil {
+		cmds = append(cmds, recovery)
+	}
+	return tea.Batch(cmds...)
 }
 
 // applyConnectFailed records a connect attempt that never opened, and
@@ -1359,7 +1469,7 @@ func (m *Model) applyDisconnected(msg disconnectedMsg) tea.Cmd {
 	// Captured before clearConnection, which drops the remote pane's path,
 	// so an auto-reconnect can put the user back where they were.
 	resumePath := m.remote.path
-	m.clearConnection(reason)
+	m.clearConnection(reason, msg.err != nil && m.autoReconnect && m.recoverInterruptedTransfers)
 	m.appendLog("connection ended: " + reason)
 	if msg.err == nil {
 		m.state = connDisconnected
@@ -1388,12 +1498,17 @@ func (m *Model) applyDisconnected(msg disconnectedMsg) tea.Cmd {
 // time that old connection's own disconnectedMsg lands, m.conn already names
 // the new connection, so applyDisconnected's staleness check would discard
 // it — and the transfers it was carrying would stay Active forever.
-func (m *Model) clearConnection(reason string) {
+func (m *Model) clearConnection(reason string, retryOnReconnect bool) {
 	for i := range m.transfers {
 		if m.transfers[i].Status == domain.Queued || m.transfers[i].Status == domain.Active {
 			m.transfers[i].Status = domain.Failed
 			m.transfers[i].FinishedAt = time.Now()
-			m.transfers[i].Message = reason
+			m.transfers[i].RetryOnReconnect = retryOnReconnect
+			if retryOnReconnect {
+				m.transfers[i].Message = "interrupted — waiting to reconnect"
+			} else {
+				m.transfers[i].Message = reason
+			}
 		}
 	}
 	// A delete walking the remote tree cannot continue without the adapter it
@@ -1414,6 +1529,15 @@ func (m *Model) clearConnection(reason string) {
 	m.remote.loading = false
 	m.remote.pendingPath = ""
 	m.remote.reset()
+	// A live filter input must not survive a drop: the reconnect can take
+	// seconds, and leaving a pane in key-capturing mode would swallow every
+	// command the user tried after the connection came back. The applied
+	// query stays; only the input closes.
+	m.local.filtering = false
+	m.remote.filtering = false
+	// The connectivity pause belongs to the connection that dropped. The
+	// reconnect/recovery flow owns the link from here.
+	m.resetConnectivity()
 	if m.focus == focusRemote {
 		m.focus = focusLocal
 	}
@@ -1654,7 +1778,7 @@ func (m *Model) quitNow() tea.Cmd {
 // two-way toggle rather than a three-way cycle through the transfers pane:
 // the file panes are what a session is spent moving between, and making Tab
 // pass through the queue on the way back cost a keystroke every time. The
-// queue pane is still focusable — the bottom-tab keys 1-6 take focus there,
+// queue pane is still focusable — the bottom-tab keys 1-5 take focus there,
 // R goes there on its own, and a mouse click still works — so nothing it
 // owns became unreachable.
 //
@@ -1814,7 +1938,7 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) tea.Cmd {
 	if len(entries) == 0 {
 		return nil
 	}
-	return m.beginPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden)
+	return m.startPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden)
 }
 
 // preflightScanCap bounds how many files one preflight scan will discover
@@ -1942,8 +2066,9 @@ func (s *preflightScan) resolveAllRemaining(policy conflictPolicy) {
 
 // preflightScanMsg reports beginPreflightScan's result.
 type preflightScanMsg struct {
-	scan preflightScan
-	err  error
+	scan  preflightScan
+	err   error
+	token int
 }
 
 // beginPreflightScan walks every directory in entries with srcFS.List
@@ -1964,93 +2089,133 @@ type preflightScanMsg struct {
 func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
 	m.setStatus("scanning…")
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), preflightScanTimeout)
-		defer cancel()
+		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, nil, nil, 0)
+	}
+}
 
-		scan := preflightScan{direction: direction, dstFS: dstFS}
-		type walkItem struct{ srcPath, dstPath string }
-		var stack []walkItem
-		for _, entry := range entries {
-			srcPath, dstPath := srcFS.Child(srcBase, entry.Name), dstFS.Child(dstBase, entry.Name)
-			if entry.IsDir() {
+// startPreflightScan streams batched discoveries to the UI while preserving
+// beginPreflightScan as the synchronous command used by focused tests.
+func (m *Model) startPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
+	m.setStatus("scanning…")
+	title := "Preparing upload"
+	if direction == domain.Download {
+		title = "Preparing download"
+	}
+	ctx, token, tick := m.startScan(title, "Scanning source")
+	events := make(chan tea.Msg, 1)
+	m.scanEvents = events
+	go func() {
+		defer close(events)
+		report := func(progress scanProgressMsg) {
+			select {
+			case events <- progress:
+			default: // a newer snapshot is more useful than an old one
+			}
+		}
+		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, report, ctx, token)
+	}()
+	return tea.Batch(waitForScanEvent(events), tick)
+}
+
+func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, report func(scanProgressMsg), parent context.Context, token int) preflightScanMsg {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, preflightScanTimeout)
+	defer cancel()
+
+	scan := preflightScan{direction: direction, dstFS: dstFS}
+	emit := func(phase, current string) {
+		if report != nil {
+			report(scanProgressMsg{token: token, phase: phase, files: len(scan.files), folders: scan.folders, bytes: scan.totalBytes, current: current})
+		}
+	}
+	type walkItem struct{ srcPath, dstPath string }
+	var stack []walkItem
+	for _, entry := range entries {
+		srcPath, dstPath := srcFS.Child(srcBase, entry.Name), dstFS.Child(dstBase, entry.Name)
+		if entry.IsDir() {
+			scan.folders++
+			stack = append(stack, walkItem{srcPath, dstPath})
+			continue
+		}
+		if entry.LinksToDir {
+			scan.skippedLinks++
+			continue
+		}
+		scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, name: entry.Name, size: entry.Size, modified: entry.Modified})
+		scan.totalBytes += entry.Size
+	}
+	emit("Scanning source for transfer", srcBase)
+
+	for len(stack) > 0 {
+		if len(scan.files) >= preflightScanCap {
+			scan.truncated = true
+			break
+		}
+		item := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		children, err := srcFS.List(ctx, item.srcPath, showHidden)
+		if err != nil {
+			return preflightScanMsg{err: fmt.Errorf("scan %s: %w", item.srcPath, err), token: token}
+		}
+		for _, child := range children {
+			childSrc, childDst := srcFS.Child(item.srcPath, child.Name), dstFS.Child(item.dstPath, child.Name)
+			if child.IsDir() {
 				scan.folders++
-				stack = append(stack, walkItem{srcPath, dstPath})
+				stack = append(stack, walkItem{childSrc, childDst})
 				continue
 			}
-			if entry.LinksToDir {
+			if child.LinksToDir {
 				scan.skippedLinks++
 				continue
 			}
-			scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, name: entry.Name, size: entry.Size, modified: entry.Modified})
-			scan.totalBytes += entry.Size
-		}
-
-		for len(stack) > 0 {
 			if len(scan.files) >= preflightScanCap {
 				scan.truncated = true
 				break
 			}
-			item := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			children, err := srcFS.List(ctx, item.srcPath, showHidden)
-			if err != nil {
-				return preflightScanMsg{err: fmt.Errorf("scan %s: %w", item.srcPath, err)}
-			}
-			for _, child := range children {
-				childSrc, childDst := srcFS.Child(item.srcPath, child.Name), dstFS.Child(item.dstPath, child.Name)
-				if child.IsDir() {
-					scan.folders++
-					stack = append(stack, walkItem{childSrc, childDst})
-					continue
-				}
-				if child.LinksToDir {
-					scan.skippedLinks++
-					continue
-				}
-				if len(scan.files) >= preflightScanCap {
-					scan.truncated = true
-					break
-				}
-				scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, name: child.Name, size: child.Size, modified: child.Modified})
-				scan.totalBytes += child.Size
-			}
+			scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, name: child.Name, size: child.Size, modified: child.Modified})
+			scan.totalBytes += child.Size
 		}
-		if len(stack) > 0 {
-			scan.truncated = true
-		}
-
-		// Phase 2: which of the flattened files already exist at their
-		// destination? Grouped by destination directory so each one is
-		// listed at most once, however many files land in it. A directory
-		// that fails to list — most often because it doesn't exist yet, a
-		// nested folder destination not yet created — just means nothing
-		// conflicts there, not a scan failure.
-		byDir := map[string][]int{}
-		for i, f := range scan.files {
-			dir := dstFS.Parent(f.dst)
-			byDir[dir] = append(byDir[dir], i)
-		}
-		scan.siblings = make(map[string]map[string]domain.Entry, len(byDir))
-		for dir, indices := range byDir {
-			listed, err := dstFS.List(ctx, dir, true)
-			if err != nil {
-				continue
-			}
-			byName := make(map[string]domain.Entry, len(listed))
-			for _, e := range listed {
-				byName[e.Name] = e
-			}
-			scan.siblings[dir] = byName
-			for _, i := range indices {
-				if hit, ok := byName[scan.files[i].name]; ok {
-					entry := hit
-					scan.files[i].conflict = &entry
-				}
-			}
-		}
-
-		return preflightScanMsg{scan: scan}
+		emit("Scanning source for transfer", item.srcPath)
 	}
+	if len(stack) > 0 {
+		scan.truncated = true
+	}
+
+	// Phase 2: which of the flattened files already exist at their
+	// destination? Grouped by destination directory so each one is
+	// listed at most once, however many files land in it. A directory
+	// that fails to list — most often because it doesn't exist yet, a
+	// nested folder destination not yet created — just means nothing
+	// conflicts there, not a scan failure.
+	byDir := map[string][]int{}
+	for i, f := range scan.files {
+		dir := dstFS.Parent(f.dst)
+		byDir[dir] = append(byDir[dir], i)
+	}
+	scan.siblings = make(map[string]map[string]domain.Entry, len(byDir))
+	for dir, indices := range byDir {
+		listed, err := dstFS.List(ctx, dir, true)
+		if err != nil {
+			emit("Checking destination conflicts", dir)
+			continue
+		}
+		byName := make(map[string]domain.Entry, len(listed))
+		for _, e := range listed {
+			byName[e.Name] = e
+		}
+		scan.siblings[dir] = byName
+		for _, i := range indices {
+			if hit, ok := byName[scan.files[i].name]; ok {
+				entry := hit
+				scan.files[i].conflict = &entry
+			}
+		}
+		emit("Checking destination conflicts", dir)
+	}
+
+	return preflightScanMsg{scan: scan, token: token}
 }
 
 // applyPreflightScan folds a completed scan into the model. An error is
@@ -2127,6 +2292,13 @@ func (m *Model) startQueuedTransfers() {
 	if !m.connected() {
 		return
 	}
+	// A paused or probing queue is one the connectivity check is holding back
+	// because the link looks dead. Nothing starts until a probe says otherwise,
+	// so a dead link fails one batch's worth of files instead of the whole
+	// queue.
+	if m.connectivity.phase != connectivityIdle {
+		return
+	}
 	active := countStatus(m.transfers, domain.Active)
 	for i := range m.transfers {
 		if active >= m.maxParallel {
@@ -2184,7 +2356,13 @@ func (m *Model) applyTransferEvent(event transfer.Event) tea.Cmd {
 		row.Message = "complete"
 		if m.verifyChecksums {
 			row.Message = "verifying…"
+			if m.statsSampling {
+				m.sampleStats(time.Now())
+			}
 			return m.beginVerify(*row)
+		}
+		if m.statsSampling {
+			m.sampleStats(time.Now())
 		}
 	case transfer.Failed:
 		row.Status = domain.Failed
@@ -2221,8 +2399,6 @@ func (m Model) bottomTabFilter() func(domain.Transfer) bool {
 	switch m.bottomTab {
 	case tabQueue:
 		return func(t domain.Transfer) bool { return t.Status == domain.Queued || t.Status == domain.Active }
-	case tabActive:
-		return func(t domain.Transfer) bool { return t.Status == domain.Active }
 	case tabFailed:
 		return func(t domain.Transfer) bool { return t.Status == domain.Failed || t.Status == domain.Canceled }
 	case tabHistory:
@@ -2381,6 +2557,10 @@ func (m *Model) retrySelectedTransfer() tea.Cmd {
 	if target.Status != domain.Failed && target.Status != domain.Canceled {
 		m.setError("selected transfer did not fail")
 		return nil
+	}
+	if !m.queueBusy() {
+		m.queueBatchStartID = m.nextTransferID
+		m.queueBatchActive = true
 	}
 	m.transfers = append(m.transfers, domain.Transfer{
 		ID:          m.nextTransferID,
