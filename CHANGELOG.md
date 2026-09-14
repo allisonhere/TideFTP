@@ -28,7 +28,8 @@ feature batches and may change behaviour.
   stay in Failed. A review panel then groups the batch into verified partials,
   missing destinations, mismatched/full, and unreachable, so `enter` resumes
   the safe ones, `r` restarts the mismatched from zero, `s` skips them, and
-  `↓` inspects the individual Failed rows.
+  `↓` inspects the individual Failed rows. Recovery is a setting of its own —
+  `recover_interrupted_transfers = false` reconnects without restarting work.
 
 - **Connectivity checks.** When transfers fail back to back, TideFTP now
   spends one cheap reachability probe — a short TCP dial plus a local-network
@@ -172,13 +173,18 @@ feature batches and may change behaviour.
   with two panes there is no forwards or backwards.
 
   The transfer pane is still focusable, so nothing it owns became
-  unreachable: `1`-`6` now take focus there along with selecting a tab, a
+  unreachable: `1`-`5` now take focus there along with selecting a tab, a
   mouse click still works, and `R` goes there by itself. Pressed from a file
   pane, `R` moves focus to the transfer pane, switches to the Failed tab when
   the current one holds no failures, and retries the first failure it finds —
   where it used to just report "select a failed transfer to retry". Pressed
   while already on a failed row it retries that row, so repeated presses do
   not snap back to the top.
+
+- **Settings are grouped into sections.** The settings overlay now labels its
+  rows Appearance, Transfer performance, Workflow, Reliability, and Updates,
+  so the handful that bear on a flaky connection or the queue read as a group
+  instead of one flat list.
 
 ### Fixed
 
@@ -215,6 +221,20 @@ feature batches and may change behaviour.
   connection is now opened with a deadline that covers the greeting too, so
   this fails with a timeout the UI can report. It is what the port bug above
   produced, but it applies to plain FTP just as much.
+
+- **An open pane filter could quietly swallow command keys.** A filter input is
+  a live text field, so printable keys belong to it — but `ctrl+k` was dropped
+  silently too, leaving the command palette unreachable at exactly the moment
+  it was the way out. And a dropped connection could leave a filter input open
+  across a reconnect, so it kept capturing every key after the session came
+  back. `ctrl+k` now always opens the palette, and a disconnect closes any
+  live filter input while keeping the query it had narrowed to.
+
+- **The Stats graph could miss a short burst entirely.** A batch of small files
+  that finished before the first sample had no earlier reading to compare
+  against, so the graph drew nothing for work that had actually moved. Sampling
+  is seeded when the connection opens and now also takes a reading as each
+  transfer completes.
 
 ## v0.2.0
 
