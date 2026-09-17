@@ -18,6 +18,21 @@ SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
 
 ## Install
 
+### Arch Linux
+
+TideFTP is on the AUR as [`tideftp-bin`](https://aur.archlinux.org/packages/tideftp-bin),
+which packages the official release binary:
+
+```bash
+yay -S tideftp-bin
+# or
+paru -S tideftp-bin
+```
+
+Updates then arrive with `pacman -Syu` along with everything else.
+
+### Everywhere else
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/allisonhere/TideFTP/main/install.sh | sh
 ```
