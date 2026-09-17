@@ -23,6 +23,27 @@ func statsTestModel(t *testing.T) Model {
 	return NewModel(localfs.New(), &stubDialer{}, nil, config.Default(), nil, nil, "")
 }
 
+func TestStatsPaletteFollowsThemeAndKeepsRetro(t *testing.T) {
+	model := statsTestModel(t)
+	for _, theme := range allThemes() {
+		model.theme = theme
+		palette := model.statsPalette()
+		if palette.bg != theme.Bg {
+			t.Fatalf("Stats background did not follow %s: %+v", theme.Name, palette)
+		}
+		for row := 0; row < 6; row++ {
+			bg := statsRowBackgroundWithPalette(row, 6, palette)
+			if got := contrastRatio(readableOn(palette.fg, bg, textMinContrast), bg); got < textMinContrast {
+				t.Fatalf("%s row %d contrast %.2f is below %.2f", theme.Name, row, got, textMinContrast)
+			}
+		}
+	}
+	model.statsDisplay = "retro"
+	if got := model.statsPalette(); got != (statsPalette{statsBackground, statsForeground, statsMeta, statsGlow}) {
+		t.Fatalf("retro palette changed: %+v", got)
+	}
+}
+
 func TestComputeStatsAggregatesAcrossStatusesAndProtocols(t *testing.T) {
 	model := statsTestModel(t)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

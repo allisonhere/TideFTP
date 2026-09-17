@@ -20,11 +20,12 @@ import (
 // Default, and Load layers a TOML file over those defaults, so a partial or
 // hand-edited file is fine.
 type Config struct {
-	Theme       string `toml:"theme"`
-	Density     string `toml:"density"`
-	Shadow      bool   `toml:"shadow"`
-	ShowIcons   bool   `toml:"show_icons"`
-	MaxParallel int    `toml:"max_parallel"`
+	Theme        string `toml:"theme"`
+	StatsDisplay string `toml:"stats_display"`
+	Density      string `toml:"density"`
+	Shadow       bool   `toml:"shadow"`
+	ShowIcons    bool   `toml:"show_icons"`
+	MaxParallel  int    `toml:"max_parallel"`
 	// Editor is the command the `e` action opens files with. Empty means
 	// auto: $VISUAL, $EDITOR, git's core.editor, then a common editor on
 	// PATH. A value may carry flags, e.g. "code -w".
@@ -125,6 +126,7 @@ type SaveFunc func(Config) error
 func Default() Config {
 	return Config{
 		Theme:                       "tide-night",
+		StatsDisplay:                "theme",
 		Density:                     "compact",
 		Shadow:                      true,
 		ShowIcons:                   true,

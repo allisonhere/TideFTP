@@ -397,11 +397,12 @@ type Model struct {
 	statsSampling bool
 	logs          []string
 
-	theme       tideui.Theme
-	themePicker tideui.ThemePicker
-	density     tideui.Density
-	shadow      bool
-	showIcons   bool
+	theme        tideui.Theme
+	themePicker  tideui.ThemePicker
+	density      tideui.Density
+	shadow       bool
+	showIcons    bool
+	statsDisplay string
 	// omarchySig / omarchyWatching drive the "match-omarchy" theme's
 	// live-follow poll (see omarchy_theme.go): omarchySig is the last-seen
 	// Omarchy signature, omarchyWatching guards against a second poll loop.
@@ -540,6 +541,7 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		density:                     density,
 		shadow:                      cfg.Shadow,
 		showIcons:                   cfg.ShowIcons,
+		statsDisplay:                cfg.StatsDisplay,
 		editorSetting:               cfg.Editor,
 		verifyChecksums:             cfg.VerifyChecksums,
 		autoReconnect:               cfg.AutoReconnect,
@@ -590,6 +592,7 @@ func (m Model) snapshotConfig() config.Config {
 		Density:                     string(m.density),
 		Shadow:                      m.shadow,
 		ShowIcons:                   m.showIcons,
+		StatsDisplay:                m.statsDisplay,
 		MaxParallel:                 m.maxParallel,
 		Editor:                      m.editorSetting,
 		VerifyChecksums:             m.verifyChecksums,

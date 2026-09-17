@@ -20,6 +20,7 @@ const (
 	settingsFieldDensity
 	settingsFieldShadow
 	settingsFieldIcons
+	settingsFieldStatsDisplay
 	settingsFieldMaxParallel
 	settingsFieldEditor
 	settingsFieldVerify
@@ -72,6 +73,8 @@ func settingsFieldLabel(field settingsField) string {
 		return "Shadow"
 	case settingsFieldIcons:
 		return "Icons"
+	case settingsFieldStatsDisplay:
+		return "Stats display"
 	case settingsFieldMaxParallel:
 		return "Max Parallel"
 	case settingsFieldEditor:
@@ -99,7 +102,7 @@ func settingsFieldLabel(field settingsField) string {
 // arrows still move only through settings a user can act on.
 func settingsCategory(field settingsField) string {
 	switch field {
-	case settingsFieldTheme, settingsFieldDensity, settingsFieldShadow, settingsFieldIcons:
+	case settingsFieldTheme, settingsFieldDensity, settingsFieldShadow, settingsFieldIcons, settingsFieldStatsDisplay:
 		return "Appearance"
 	case settingsFieldMaxParallel:
 		return "Transfer performance"
@@ -123,6 +126,11 @@ func (m Model) settingsFieldValue(field settingsField) string {
 		return settingsToggleChoices[boolToIndex(m.shadow)]
 	case settingsFieldIcons:
 		return settingsToggleChoices[boolToIndex(m.showIcons)]
+	case settingsFieldStatsDisplay:
+		if m.statsDisplay == "retro" {
+			return "retro green"
+		}
+		return "match theme"
 	case settingsFieldMaxParallel:
 		return strconv.Itoa(m.maxParallel)
 	case settingsFieldEditor:
@@ -302,6 +310,12 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 		m.shadow = !m.shadow
 	case settingsFieldIcons:
 		m.showIcons = !m.showIcons
+	case settingsFieldStatsDisplay:
+		if m.statsDisplay == "retro" {
+			m.statsDisplay = "theme"
+		} else {
+			m.statsDisplay = "retro"
+		}
 	case settingsFieldMaxParallel:
 		return m.adjustMaxParallel(direction)
 	case settingsFieldEditor:

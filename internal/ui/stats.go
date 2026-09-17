@@ -16,11 +16,7 @@ import (
 	"tideftp/internal/session"
 )
 
-// The Stats tab paints its own fixed black-on-green palette rather than
-// going through the active theme, on request — a deliberate exception to
-// "everything follows the theme," the same way a terminal monitoring
-// widget (htop, a VU meter) usually commits to one look regardless of the
-// surrounding color scheme.
+// The retro palette preserves the original black-and-green Stats display.
 var (
 	statsBackground = lipgloss.Color("#000000")
 	statsForeground = lipgloss.Color("#33FF66")
@@ -39,33 +35,50 @@ var (
 // lightening it until the peaks wash out.
 var statsGlow = lipgloss.Color("#0A2A12")
 
-// statsRowBackground is the backdrop for one row of the plot box, row 0 at
-// the top. It interpolates statsGlow down to black rather than indexing a
-// fixed ramp because the graph's height follows the pane's.
-func statsRowBackground(row, height int) lipgloss.Color {
-	if height <= 1 || row <= 0 {
-		return statsGlow
+type statsPalette struct{ bg, fg, meta, glow lipgloss.Color }
+
+func (m Model) statsPalette() statsPalette {
+	if m.statsDisplay == "retro" {
+		return statsPalette{statsBackground, statsForeground, statsMeta, statsGlow}
 	}
-	r, g, b, ok := hexToRGB(statsGlow)
+	bg := m.theme.Bg
+	fg := readableOn(m.theme.BorderFocus, bg, textMinContrast)
+	meta := readableOn(m.theme.Dimmed, bg, dimMinContrast)
+	// Keep the plot tint close to the theme background so the line remains readable.
+	glow := mixHex(bg, fg, 0.08)
+	return statsPalette{bg, readableOn(fg, glow, textMinContrast), meta, glow}
+}
+
+// statsRowBackground preserves the retro backdrop for the graph tests.
+func statsRowBackground(row, height int) lipgloss.Color {
+	return statsRowBackgroundWithPalette(row, height, statsPalette{statsBackground, statsForeground, statsMeta, statsGlow})
+}
+
+func statsRowBackgroundWithPalette(row, height int, palette statsPalette) lipgloss.Color {
+	if height <= 1 || row <= 0 {
+		return palette.glow
+	}
+	r, g, b, ok := hexToRGB(palette.glow)
 	if !ok {
-		return statsBackground
+		return palette.bg
+	}
+	baseR, baseG, baseB, baseOK := hexToRGB(palette.bg)
+	if !baseOK {
+		return palette.bg
 	}
 	// Linear in sRGB: the ramp only has a handful of rows to cover, and a
 	// perceptual curve would spend most of them near-black.
 	remaining := 1 - float64(min(row, height-1))/float64(height-1)
 	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X",
-		int(r*255*remaining+0.5),
-		int(g*255*remaining+0.5),
-		int(b*255*remaining+0.5),
+		int((r*remaining+baseR*(1-remaining))*255+0.5),
+		int((g*remaining+baseG*(1-remaining))*255+0.5),
+		int((b*remaining+baseB*(1-remaining))*255+0.5),
 	))
 }
 
-// statsLine renders one full-width row of Stats content on the tab's fixed
-// black background — the same explicit-background-per-span discipline
-// segment/clampView already use for the transfer rows, so a shorter line's
-// padding never shows through as the theme's background instead.
-func statsLine(width int, fg lipgloss.Color, text string) string {
-	return clampView(segment(statsBackground, fg, text), width, 1, statsBackground)
+// statsLineWithPalette paints padding as well as text with the selected backdrop.
+func statsLineWithPalette(width int, palette statsPalette, fg lipgloss.Color, text string) string {
+	return clampView(segment(palette.bg, fg, text), width, 1, palette.bg)
 }
 
 // statsSnapshot is the Stats tab's numbers, recomputed from m.transfers —
@@ -374,11 +387,15 @@ func abs(n int) int {
 // lightly smoothed, then connected sub-pixel to sub-pixel with
 // bresenhamRun so a steep jump between readings still looks like one
 // stroke. The line is drawn in one colour over a backdrop that fades from
-// statsGlow at the top of the box to black at the bottom, so height is the
-// only thing encoding magnitude and the tint is a fixed reference behind it.
+// the palette glow at the top of the box to its background at the bottom, so
+// height is the only thing encoding magnitude.
 // Returns exactly height ANSI-styled lines, each width printable columns
 // wide, or nil if width or height isn't positive.
 func renderThroughputLine(samples []int64, width, height int) []string {
+	return renderThroughputLineWithPalette(samples, width, height, statsPalette{statsBackground, statsForeground, statsMeta, statsGlow})
+}
+
+func renderThroughputLineWithPalette(samples []int64, width, height int, palette statsPalette) []string {
 	if width <= 0 || height <= 0 {
 		return nil
 	}
@@ -441,7 +458,8 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 		// One backdrop per row, used for the cells and for whatever padding
 		// clampView adds — pad with anything else and every row ends in a
 		// notch of the wrong colour.
-		bg := statsRowBackground(r, height)
+		bg := statsRowBackgroundWithPalette(r, height, palette)
+		fg := readableOn(palette.fg, bg, textMinContrast)
 		var line strings.Builder
 		for c := range width {
 			bits := 0
@@ -452,7 +470,7 @@ func renderThroughputLine(samples []int64, width, height int) []string {
 					}
 				}
 			}
-			line.WriteString(segment(bg, statsForeground, string(rune(brailleBase+bits))))
+			line.WriteString(segment(bg, fg, string(rune(brailleBase+bits))))
 		}
 		rows[r] = clampView(line.String(), width, 1, bg)
 	}
@@ -472,8 +490,7 @@ var knownProtocols = []string{
 // the throughput graph — sandwiched between the two text lines so it gets
 // as much of the available height as possible — and a second line packing
 // in session totals, averages, and the per-protocol breakdown. Everything
-// here paints the fixed black/green palette rather than the active theme
-// (statsLine, renderThroughputLine). Below a usable-graph floor it
+// here paints the selected Stats display palette. Below a usable-graph floor it
 // drops to just the two text lines, mirroring how renderBottomPane itself
 // falls back to "no rows yet" when there's no room for anything at all.
 func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []string {
@@ -481,7 +498,8 @@ func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []str
 		return nil
 	}
 
-	line1 := statsLine(width, statsForeground, fmt.Sprintf(
+	palette := m.statsPalette()
+	line1 := statsLineWithPalette(width, palette, palette.fg, fmt.Sprintf(
 		"Active %d · Queued %d · ↕ %s · %s of %s (%.0f%%)",
 		m.stats.activeCount, m.stats.queuedCount, formatRate(m.stats.currentThroughput),
 		formatSize(m.stats.bytesTransferred), formatSize(m.stats.totalBytes), m.stats.percentDone()))
@@ -496,7 +514,7 @@ func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []str
 		}
 		summary += fmt.Sprintf(" · %s %d/%d %s", proto, ps.done, ps.failed, formatSize(ps.bytes))
 	}
-	line2 := statsLine(width, statsMeta, summary)
+	line2 := statsLineWithPalette(width, palette, palette.meta, summary)
 
 	if height == 1 {
 		return []string{line1}
@@ -508,7 +526,7 @@ func (m Model) renderStatsTab(renderer tideui.Renderer, width, height int) []str
 	graphHeight := height - 2
 	lines := make([]string, 0, height)
 	lines = append(lines, line1)
-	lines = append(lines, renderThroughputLine(m.statsHistory, width, graphHeight)...)
+	lines = append(lines, renderThroughputLineWithPalette(m.statsHistory, width, graphHeight, palette)...)
 	lines = append(lines, line2)
 	return lines
 }

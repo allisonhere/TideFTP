@@ -49,6 +49,27 @@ func TestSettingsCursorWrapsBothWays(t *testing.T) {
 	}
 }
 
+func TestStatsDisplaySettingCyclesAndPersists(t *testing.T) {
+	model := loadedModel(t, newScriptedEngine())
+	var saved []config.Config
+	model.save = func(cfg config.Config) error { saved = append(saved, cfg); return nil }
+	model = press(t, model, runes(","))
+	for model.settingsFieldAt(model.settingsCursor) != settingsFieldStatsDisplay {
+		model = press(t, model, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if got := model.settingsFieldValue(settingsFieldStatsDisplay); got != "match theme" {
+		t.Fatalf("initial Stats display = %q", got)
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyRight})
+	if model.statsDisplay != "retro" || len(saved) == 0 || saved[len(saved)-1].StatsDisplay != "retro" {
+		t.Fatalf("retro choice was not persisted: display=%q saved=%v", model.statsDisplay, saved)
+	}
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyLeft})
+	if model.statsDisplay != "theme" || saved[len(saved)-1].StatsDisplay != "theme" {
+		t.Fatalf("theme choice was not restored: display=%q saved=%v", model.statsDisplay, saved)
+	}
+}
+
 func TestSettingsTogglesShadowAndIconsAndPersists(t *testing.T) {
 	var saved []config.Config
 	save := func(c config.Config) error { saved = append(saved, c); return nil }

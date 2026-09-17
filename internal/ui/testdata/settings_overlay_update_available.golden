@@ -1,13 +1,13 @@
    TideFTP    test  test.local:22           ↑ UPDATE v0.3.0 · U  1 queued  tide-night  split 50/50
 ╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
-│Local                       /home/allie/projects││Remote                              /public_html│
-│mode        size  ╭─ tideftp · settings ───────────────────────────────────────╮ed        name    │
-│  ▸ drwxr-xr-x    │                                                            │15 09:30 uploads  │
-│    -rw-r--r--    │  Appearance                                                │15 09:30 index.htm│
-│    -rw-r--r--    │  ▌ Theme                                       tide-night  │                  │
-│                  │    Density                                        compact  │                  │
+│Local             ╭─ tideftp · settings ───────────────────────────────────────╮      /public_html│
+│mode        size  │                                                            │ed        name    │
+│  ▸ drwxr-xr-x    │  Appearance                                                │15 09:30 uploads  │
+│    -rw-r--r--    │  ▌ Theme                                       tide-night  │15 09:30 index.htm│
+│    -rw-r--r--    │    Density                                        compact  │                  │
 │                  │    Shadow                                              on  │                  │
 │                  │    Icons                                               on  │                  │
+│                  │    Stats display                              match theme  │                  │
 │                  │  Transfer performance                                      │                  │
 │                  │    Max Parallel                                         2  │                  │
 │                  │  Workflow                                                  │                  │
