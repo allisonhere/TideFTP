@@ -7,6 +7,8 @@ feature batches and may change behaviour.
 
 ## Unreleased
 
+## v0.3.1
+
 ### Added
 
 - **Live transfer visibility.** Queue is now the one operational transfer
