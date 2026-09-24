@@ -58,7 +58,7 @@ func TestEditChecksOutTheHighlightedFile(t *testing.T) {
 	if string(body) != string(want) {
 		t.Fatalf("temp file = %q, want the source contents %q", body, want)
 	}
-	os.Remove(model.pendingEdit.tmpPath)
+	_ = os.Remove(model.pendingEdit.tmpPath)
 }
 
 func TestEditWritesChangedContentsBack(t *testing.T) {
@@ -188,7 +188,7 @@ func TestEditRejectsABinaryFile(t *testing.T) {
 	model = press(t, model, runes("e"))
 
 	if model.pendingEdit != nil {
-		os.Remove(model.pendingEdit.tmpPath)
+		_ = os.Remove(model.pendingEdit.tmpPath)
 		t.Fatalf("a binary file was checked out for editing")
 	}
 	if !model.statusErr {
@@ -226,7 +226,7 @@ func TestEditReportsWhenNoEditorIsAvailable(t *testing.T) {
 	model = press(t, model, runes("e"))
 
 	if model.pendingEdit != nil {
-		os.Remove(model.pendingEdit.tmpPath)
+		_ = os.Remove(model.pendingEdit.tmpPath)
 		t.Fatalf("a file was checked out even though no editor is available")
 	}
 	if !model.statusErr || !strings.Contains(model.status, "PATH") {

@@ -83,8 +83,8 @@ func (e *Engine) copy(req transfer.Request, stop, quit <-chan struct{}, report f
 		return 0, err
 	}
 
-	defer src.Close()
-	defer dst.Close()
+	defer func() { _ = src.Close() }()
+	defer func() { _ = dst.Close() }()
 
 	sent := req.Offset
 	buf := make([]byte, transfer.CopyChunk)
@@ -141,12 +141,12 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 		}
 		if req.Offset > 0 {
 			if _, err := src.Seek(req.Offset, io.SeekStart); err != nil {
-				src.Close()
+				_ = src.Close()
 				return nil, nil, fmt.Errorf("seek %s: %w", req.Source, err)
 			}
 		}
 		if err := os.MkdirAll(filepath.Dir(req.Destination), 0o755); err != nil {
-			src.Close()
+			_ = src.Close()
 			return nil, nil, fmt.Errorf("create %s: %w", filepath.Dir(req.Destination), err)
 		}
 		flags := os.O_WRONLY | os.O_CREATE
@@ -155,13 +155,13 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 		}
 		dst, err := os.OpenFile(req.Destination, flags, 0o644)
 		if err != nil {
-			src.Close()
+			_ = src.Close()
 			return nil, nil, fmt.Errorf("create %s: %w", req.Destination, err)
 		}
 		if req.Offset > 0 {
 			if _, err := dst.Seek(req.Offset, io.SeekStart); err != nil {
-				src.Close()
-				dst.Close()
+				_ = src.Close()
+				_ = dst.Close()
 				return nil, nil, fmt.Errorf("seek %s: %w", req.Destination, err)
 			}
 		}
@@ -174,7 +174,7 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 	}
 	if req.Offset > 0 {
 		if _, err := src.Seek(req.Offset, io.SeekStart); err != nil {
-			src.Close()
+			_ = src.Close()
 			return nil, nil, fmt.Errorf("seek %s: %w", req.Source, err)
 		}
 	}
@@ -190,13 +190,13 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 		dst, err = e.client.Create(req.Destination)
 	}
 	if err != nil {
-		src.Close()
+		_ = src.Close()
 		return nil, nil, fmt.Errorf("create %s: %w", req.Destination, err)
 	}
 	if req.Offset > 0 {
 		if _, err := dst.Seek(req.Offset, io.SeekStart); err != nil {
-			src.Close()
-			dst.Close()
+			_ = src.Close()
+			_ = dst.Close()
 			return nil, nil, fmt.Errorf("seek %s: %w", req.Destination, err)
 		}
 	}

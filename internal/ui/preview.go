@@ -159,14 +159,14 @@ func imagePreviewCmd(fs vfs.FS, path, name string, size int64, local bool) tea.C
 			}
 			tmp, err := os.CreateTemp("", "tideftp-image-*"+filepath.Ext(name))
 			if err != nil {
-				reader.Close()
+				_ = reader.Close()
 				return fallback()
 			}
 			n, copyErr := io.Copy(tmp, io.LimitReader(reader, maxImageBytes+1))
-			reader.Close()
+			_ = reader.Close()
 			closeErr := tmp.Close()
 			if copyErr != nil || closeErr != nil || n > maxImageBytes {
-				os.Remove(tmp.Name())
+				_ = os.Remove(tmp.Name())
 				return fallback()
 			}
 			viewPath, tempPath = tmp.Name(), tmp.Name()
@@ -177,7 +177,7 @@ func imagePreviewCmd(fs vfs.FS, path, name string, size int64, local bool) tea.C
 		}
 		if err != nil {
 			if tempPath != "" {
-				os.Remove(tempPath)
+				_ = os.Remove(tempPath)
 			}
 			return fallback()
 		}
@@ -199,7 +199,7 @@ func previewCmd(fs vfs.FS, path, name string, size int64) tea.Cmd {
 		if err != nil {
 			return previewLoadedMsg{name: name, err: err}
 		}
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 
 		data, err := io.ReadAll(io.LimitReader(reader, previewMaxBytes+1))
 		if err != nil {

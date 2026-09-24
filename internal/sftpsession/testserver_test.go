@@ -100,7 +100,7 @@ func startTestServerWithHandlers(t *testing.T, handlers *sftp.Handlers) *testSer
 			}
 			server.mu.Unlock()
 			if refused {
-				conn.Close()
+				_ = conn.Close()
 				continue
 			}
 			server.wg.Add(1)
@@ -116,12 +116,12 @@ func startTestServerWithHandlers(t *testing.T, handlers *sftp.Handlers) *testSer
 }
 
 func (s *testServer) serve(conn net.Conn, config *ssh.ServerConfig) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	sshConn, channels, requests, err := ssh.NewServerConn(conn, config)
 	if err != nil {
 		return
 	}
-	defer sshConn.Close()
+	defer func() { _ = sshConn.Close() }()
 	go s.handleGlobalRequests(requests)
 
 	for newChannel := range channels {
@@ -142,10 +142,10 @@ func (s *testServer) serve(conn net.Conn, config *ssh.ServerConfig) {
 			}
 		}()
 		go func(channel ssh.Channel) {
-			defer channel.Close()
+			defer func() { _ = channel.Close() }()
 			if s.handlers != nil {
 				server := sftp.NewRequestServer(channel, *s.handlers)
-				defer server.Close()
+				defer func() { _ = server.Close() }()
 				_ = server.Serve()
 				return
 			}
@@ -153,7 +153,7 @@ func (s *testServer) serve(conn net.Conn, config *ssh.ServerConfig) {
 			if err != nil {
 				return
 			}
-			defer server.Close()
+			defer func() { _ = server.Close() }()
 			if err := server.Serve(); err != nil && err != io.EOF {
 				return
 			}

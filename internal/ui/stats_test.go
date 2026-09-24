@@ -432,7 +432,7 @@ func TestRenderThroughputLineFlatZeroDrawsABaseline(t *testing.T) {
 	}
 	// Bottom row's braille cells must have at least the bottom sub-row lit
 	// (codepoint > the blank braille cell, 0x2800) for every column.
-	for _, r := range []rune(ansi.Strip(rows[1])) {
+	for _, r := range ansi.Strip(rows[1]) {
 		if r <= 0x2800 {
 			t.Fatalf("bottom row has an empty cell %q, want a baseline dot in every column", r)
 		}

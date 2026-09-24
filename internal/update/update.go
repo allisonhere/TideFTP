@@ -107,7 +107,7 @@ func (u *Updater) Check(currentVersion string) (CheckResult, error) {
 	if err != nil {
 		return CheckResult{}, fmt.Errorf("check latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -176,7 +176,7 @@ func (u *Updater) Download(release ReleaseInfo) (DownloadedAsset, error) {
 	if err != nil {
 		return DownloadedAsset{}, fmt.Errorf("download update %s: %w", release.Version, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -194,7 +194,7 @@ func (u *Updater) Download(release ReleaseInfo) (DownloadedAsset, error) {
 		return DownloadedAsset{}, fmt.Errorf("create archive file: %w", err)
 	}
 	if _, err := io.Copy(archiveFile, resp.Body); err != nil {
-		archiveFile.Close()
+		_ = archiveFile.Close()
 		return DownloadedAsset{}, fmt.Errorf("write archive file: %w", err)
 	}
 	if err := archiveFile.Close(); err != nil {
@@ -241,7 +241,7 @@ func (u *Updater) verifyArchiveChecksum(release ReleaseInfo, archivePath string)
 	if err != nil {
 		return fmt.Errorf("download checksums: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download checksums failed: HTTP %d", resp.StatusCode)
 	}
@@ -283,7 +283,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
@@ -495,13 +495,13 @@ func extractTarGz(archivePath, destDir, expectedName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open archive: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gzr, err := gzip.NewReader(f)
 	if err != nil {
 		return "", fmt.Errorf("open gzip stream: %w", err)
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 	for {
@@ -526,7 +526,7 @@ func extractTarGz(archivePath, destDir, expectedName string) (string, error) {
 			return "", fmt.Errorf("create extracted binary: %w", err)
 		}
 		if _, err := io.Copy(outFile, tr); err != nil {
-			outFile.Close()
+			_ = outFile.Close()
 			return "", fmt.Errorf("extract binary: %w", err)
 		}
 		if err := outFile.Close(); err != nil {
@@ -655,14 +655,14 @@ func copyExecutable(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		return err
 	}
 	if err := out.Close(); err != nil {

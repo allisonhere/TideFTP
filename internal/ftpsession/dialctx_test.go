@@ -84,7 +84,7 @@ func TestATransferOutlivesTheGreetingDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	head := make([]byte, 64)
 	if _, err := io.ReadFull(reader, head); err != nil {

@@ -17,7 +17,7 @@ import (
 // queued transfer start.
 func TestRealEngineDrivesTheQueue(t *testing.T) {
 	engine := faketransfer.NewWithInterval(time.Millisecond)
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
 	// selectAll acts on the focused pane, so focus must be on the remote one.
@@ -95,7 +95,7 @@ func TestRealEngineDrivesTheQueue(t *testing.T) {
 // goroutines and comes back as terminal events.
 func TestRealEngineCancelStopsTheQueue(t *testing.T) {
 	engine := faketransfer.NewWithInterval(20 * time.Millisecond)
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	model := loadedModelOver(t, localfs.New(), fakefs.NewRemote(), engine)
 	model.transfers = []domain.Transfer{

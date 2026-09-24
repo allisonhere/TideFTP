@@ -206,7 +206,7 @@ func TestFSOpenReadsTheWholeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	got, err := io.ReadAll(reader)
 	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("Open+ReadAll = %q, %v, want the file's contents", got, err)

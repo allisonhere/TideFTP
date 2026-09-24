@@ -49,7 +49,7 @@ func connect(t *testing.T, server *testServer) session.Conn {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
 
@@ -83,7 +83,7 @@ func TestDialSendsKeepalives(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if server.keepaliveCount() == 0 {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal("no keepalive reached the server")
 	}
 
@@ -125,7 +125,7 @@ func TestDialWithAPassphraseProtectedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial with passphrase: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	if conn.FS() == nil {
 		t.Fatalf("connection with a decrypted key exposed no FS")
 	}
@@ -190,7 +190,7 @@ func TestFSOpenStreamsWithoutBuffering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// A prefix read, the way the preview flow reads one, then the rest.
 	head := make([]byte, 32)
@@ -240,7 +240,7 @@ func TestDialOffPolicyAcceptsAnUnknownHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("off policy rejected an unknown host: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	if conn.FS() == nil {
 		t.Fatalf("connection with host-key checking off exposed no FS")
 	}
@@ -330,7 +330,7 @@ func TestDialAcceptsATrustedHostKeyForOneAttemptOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial with a matching TrustedHostKey: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	// Nothing was remembered, so a plain retry against the same file must be
 	// asked again rather than silently trusting the host from now on.
@@ -362,7 +362,7 @@ func TestDialRemembersATrustedHostKeyWhenRequested(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial with TrustedHostKey and RememberHostKey: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	// Remembered, so a plain retry against the same file must now succeed
 	// without being asked again.
@@ -370,7 +370,7 @@ func TestDialRemembersATrustedHostKeyWhenRequested(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial after remembering the host key: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 }
 
 func TestDialIgnoresATrustedHostKeyThatDoesNotMatchTheServer(t *testing.T) {
@@ -439,7 +439,7 @@ func TestDialWithKnownHostsOverrideVerifiesAgainstIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial with a KnownHostsPath override: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 }
 
 func TestDialWithPasswordOnlySkipsConfiguredKeyFiles(t *testing.T) {
@@ -779,7 +779,7 @@ func TestServerGoingAwayReportsADrop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	server.Close() // tears the connection down from the far end
 

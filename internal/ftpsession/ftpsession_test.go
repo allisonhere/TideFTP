@@ -186,7 +186,7 @@ func TestPoolGetRespectsContext(t *testing.T) {
 		<-release
 		return nil, errStub
 	})
-	go connections.get(context.Background())
+	go func() { _, _ = connections.get(context.Background()) }()
 	<-started
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

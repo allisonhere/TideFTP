@@ -111,12 +111,12 @@ func editPrepareCmd(fs vfs.FS, pane paneID, path, name string) tea.Cmd {
 			return editPreparedMsg{pane: pane, path: path, name: name, err: err}
 		}
 		if _, err := tmp.Write(data); err != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
 			return editPreparedMsg{pane: pane, path: path, name: name, err: err}
 		}
 		if err := tmp.Close(); err != nil {
-			os.Remove(tmp.Name())
+			_ = os.Remove(tmp.Name())
 			return editPreparedMsg{pane: pane, path: path, name: name, err: err}
 		}
 		return editPreparedMsg{pane: pane, path: path, name: name, tmpPath: tmp.Name(), sum: sha256.Sum256(data)}
@@ -127,7 +127,7 @@ func editPrepareCmd(fs vfs.FS, pane paneID, path, name string) tea.Cmd {
 // only when the contents actually changed. The temp file is always removed.
 func editSaveCmd(fs vfs.FS, edit pendingEdit) tea.Cmd {
 	return func() tea.Msg {
-		defer os.Remove(edit.tmpPath)
+		defer func() { _ = os.Remove(edit.tmpPath) }()
 
 		data, err := os.ReadFile(edit.tmpPath)
 		if err != nil {

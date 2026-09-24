@@ -160,7 +160,7 @@ func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		defer resp.Close()
+		defer func() { _ = resp.Close() }()
 		data, err = io.ReadAll(resp)
 		return err
 	})

@@ -61,7 +61,7 @@ func liveConn(t *testing.T) (session.Conn, string) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	return conn, remoteDir
 }
 

@@ -37,7 +37,7 @@ func TestImplicitTLSDialsAndLists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	entries, err := conn.FS().List(ftpCtx(t), "/", false)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestExplicitTLSCannotDialImplicitServer(t *testing.T) {
 	started := time.Now()
 	conn, err := dialer.Dial(ctx, target, session.Credentials{Password: ftpTestPass})
 	if err == nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal("explicit-TLS dial of an implicit server succeeded, want failure")
 	}
 	// It has to fail *promptly*. The server accepts the connection and then
@@ -93,7 +93,7 @@ func TestImplicitTLSVerifiesCertificate(t *testing.T) {
 	dialer := New(Config{ImplicitTLS: true, Timeout: 5 * time.Second})
 	conn, err := dialer.Dial(context.Background(), implicitTarget(t, server.addr), session.Credentials{Password: ftpTestPass})
 	if err == nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal("dial trusted an untrusted self-signed certificate, want failure")
 	}
 }
@@ -110,7 +110,7 @@ func TestImplicitTLSInsecureSkipsVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial with FTPSInsecure: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 }
 
 // TestImplicitTLSRejectsBadPassword pins that authentication still happens
@@ -122,7 +122,7 @@ func TestImplicitTLSRejectsBadPassword(t *testing.T) {
 	dialer := New(Config{ImplicitTLS: true, RootCAFile: server.caFile, Timeout: 10 * time.Second})
 	conn, err := dialer.Dial(context.Background(), implicitTarget(t, server.addr), session.Credentials{Password: "wrong"})
 	if err == nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatal("Dial with a bad password succeeded, want failure")
 	}
 }

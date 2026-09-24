@@ -180,12 +180,12 @@ func matchingPrefix(ctx context.Context, srcFS vfs.FS, srcPath string, dstFS vfs
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	dst, err := dstFS.Open(ctx, dstPath)
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 	left, right := make([]byte, 64*1024), make([]byte, 64*1024)
 	for remaining := size; remaining > 0; {
 		want := int(min(remaining, int64(len(left))))

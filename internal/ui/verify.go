@@ -81,7 +81,7 @@ func hashFile(ctx context.Context, fs vfs.FS, path string) ([32]byte, error) {
 	if err != nil {
 		return sum, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	hash := sha256.New()
 	if _, err := io.CopyBuffer(hash, reader, make([]byte, transfer.CopyChunk)); err != nil {

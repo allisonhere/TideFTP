@@ -46,8 +46,6 @@ func (c *stubConn) Close() error {
 	return nil
 }
 
-func (c *stubConn) drop(err error) { c.end(err) }
-
 func (c *stubConn) end(reason error) {
 	c.once.Do(func() {
 		c.done <- reason

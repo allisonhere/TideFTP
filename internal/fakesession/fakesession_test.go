@@ -20,7 +20,7 @@ func TestDialSucceedsForAKnownHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if conn.FS() == nil || conn.Engine() == nil {
 		t.Fatalf("a live connection must expose both an FS and an engine")

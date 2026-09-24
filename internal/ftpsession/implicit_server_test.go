@@ -81,7 +81,7 @@ func startImplicitServer(t *testing.T) *implicitServer {
 }
 
 func (s *implicitServer) serve(raw net.Conn, config *tls.Config) {
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	_ = raw.SetDeadline(time.Now().Add(30 * time.Second))
 
 	// Peek at the first byte before handing the connection to TLS. A
@@ -103,11 +103,11 @@ func (s *implicitServer) serve(raw net.Conn, config *tls.Config) {
 	if err := conn.Handshake(); err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	w := bufio.NewWriter(conn)
 	reply := func(format string, args ...any) {
-		fmt.Fprintf(w, format+"\r\n", args...)
+		_, _ = fmt.Fprintf(w, format+"\r\n", args...)
 		_ = w.Flush()
 	}
 	reply("220 implicit FTPS ready")
@@ -174,13 +174,13 @@ func (s *implicitServer) openDataConnection(config *tls.Config) (int, error) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	go func() {
-		defer listener.Close()
+		defer func() { _ = listener.Close() }()
 		_ = listener.(*net.TCPListener).SetDeadline(time.Now().Add(15 * time.Second))
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		secure := tls.Server(conn, config)
 		if err := secure.Handshake(); err != nil {
 			return

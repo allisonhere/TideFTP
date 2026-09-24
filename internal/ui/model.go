@@ -764,7 +764,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		editor, err := editorCommand(m.editorSetting, msg.tmpPath)
 		if err != nil {
-			os.Remove(msg.tmpPath)
+			_ = os.Remove(msg.tmpPath)
 			m.setError(err.Error())
 			return m, nil
 		}
@@ -780,7 +780,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			os.Remove(edit.tmpPath)
+			_ = os.Remove(edit.tmpPath)
 			m.setError(fmt.Sprintf("editor: %v", msg.err))
 			return m, nil
 		}
@@ -1768,7 +1768,7 @@ func (m *Model) requestQuit() tea.Cmd {
 // the server sees a clean disconnect rather than a dropped socket.
 func (m *Model) quitNow() tea.Cmd {
 	for _, path := range m.imageTempPaths {
-		os.Remove(path)
+		_ = os.Remove(path)
 	}
 	m.imageTempPaths = nil
 	if m.conn != nil {
@@ -1904,13 +1904,6 @@ func (m *Model) queueDownload() tea.Cmd {
 		return nil
 	}
 	return m.queueTransfer(domain.Download)
-}
-
-func (m *Model) queueFocusedTransfer() tea.Cmd {
-	if m.focus == focusRemote {
-		return m.queueTransfer(domain.Download)
-	}
-	return m.queueTransfer(domain.Upload)
 }
 
 // queueTransfer scans the focused pane's selection — walking any folder in

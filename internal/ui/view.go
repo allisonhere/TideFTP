@@ -1064,7 +1064,8 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		prompt := m.fileAction
 		rows := []string{}
 		title := fileActionLabel(prompt.kind)
-		if prompt.kind == fileActionRenameForce {
+		switch prompt.kind {
+		case fileActionRenameForce:
 			rows = append(rows,
 				renderer.Styles.DetailBody.Width(contentWidth).Render(fmt.Sprintf("Replace %q?", prompt.text)),
 				renderer.Styles.DetailMeta.Width(contentWidth).Render("the existing item is deleted, then "+prompt.oldName+" is renamed"),
@@ -1073,7 +1074,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 					tideui.SoftHint{Key: "y/enter", Label: "replace"},
 					tideui.SoftHint{Key: "esc/n", Label: "cancel"}),
 			)
-		} else if prompt.kind == fileActionChmod {
+		case fileActionChmod:
 			runes := []rune(prompt.text)
 			cur := min(max(prompt.cursor, 0), len(runes))
 			shown := string(append(runes[:cur], append([]rune{'|'}, runes[cur:]...)...))
@@ -1089,7 +1090,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 					tideui.SoftHint{Key: "enter", Label: "apply"},
 					tideui.SoftHint{Key: "esc", Label: "cancel"}),
 			)
-		} else if prompt.kind == fileActionDelete {
+		case fileActionDelete:
 			names := make([]string, 0, min(5, len(prompt.entries)))
 			hasDir := false
 			for i, entry := range prompt.entries {
@@ -1119,7 +1120,7 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 					tideui.SoftHint{Key: "y/enter", Label: "delete"},
 					tideui.SoftHint{Key: "esc/n", Label: "cancel"}),
 			)
-		} else {
+		default:
 			value := prompt.text
 			runes := []rune(value)
 			cur := min(max(prompt.cursor, 0), len(runes))

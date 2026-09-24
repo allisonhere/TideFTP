@@ -7,6 +7,8 @@ feature batches and may change behaviour.
 
 ## Unreleased
 
+## v0.3.2
+
 ## v0.3.1
 
 ### Added

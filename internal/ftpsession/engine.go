@@ -95,7 +95,7 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 	if err != nil {
 		return 0, fmt.Errorf("retrieve %s: %w", source, err)
 	}
-	defer remote.Close()
+	defer func() { _ = remote.Close() }()
 
 	if err := os.MkdirAll(filepath.Dir(req.Destination), 0o755); err != nil {
 		return 0, fmt.Errorf("create %s: %w", filepath.Dir(req.Destination), err)
@@ -110,7 +110,7 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 	}
 	if req.Offset > 0 {
 		if _, err := local.Seek(req.Offset, io.SeekStart); err != nil {
-			local.Close()
+			_ = local.Close()
 			return 0, fmt.Errorf("seek %s: %w", req.Destination, err)
 		}
 	}
@@ -188,7 +188,7 @@ func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop, quit <
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", req.Source, err)
 	}
-	defer local.Close()
+	defer func() { _ = local.Close() }()
 	if req.Offset > 0 {
 		if _, err := local.Seek(req.Offset, io.SeekStart); err != nil {
 			return 0, fmt.Errorf("seek %s: %w", req.Source, err)

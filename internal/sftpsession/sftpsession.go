@@ -175,7 +175,7 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 
 	clientConn, channels, requests, err := ssh.NewClientConn(conn, address, clientConfig)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("ssh %s: %w", address, err)
 	}
 	_ = conn.SetDeadline(time.Time{})
@@ -183,7 +183,7 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 	sshClient := ssh.NewClient(clientConn, channels, requests)
 	client, err := sftp.NewClient(sshClient)
 	if err != nil {
-		sshClient.Close()
+		_ = sshClient.Close()
 		return nil, fmt.Errorf("sftp %s: %w", address, err)
 	}
 
@@ -382,7 +382,7 @@ func rememberHostKey(path, address string, key ssh.PublicKey) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	line := knownhosts.Line([]string{knownhosts.Normalize(address)}, key)
 	_, err = f.WriteString(line + "\n")
 	return err

@@ -28,7 +28,7 @@ func TestRunnerReportsProgressThenCompleted(t *testing.T) {
 		return 100, nil
 	}
 	r := NewRunner(move)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	r.Start(Request{ID: 1, Size: 100})
 
@@ -46,7 +46,7 @@ func TestRunnerReportsFailedWithTheMoveFuncsError(t *testing.T) {
 		return 40, want
 	}
 	r := NewRunner(move)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	r.Start(Request{ID: 1})
 
@@ -64,7 +64,7 @@ func TestRunnerCancelStopsAnInFlightTransferAsCanceled(t *testing.T) {
 		return 10, ErrCanceled
 	}
 	r := NewRunner(move)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	r.Start(Request{ID: 1})
 	select {
@@ -84,7 +84,7 @@ func TestRunnerIgnoresACancelForAnUnknownID(t *testing.T) {
 	r := NewRunner(func(Request, <-chan struct{}, <-chan struct{}, func(int64)) (int64, error) {
 		return 0, nil
 	})
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Must not panic canceling a transfer nobody started.
 	r.Cancel(999)
@@ -101,7 +101,7 @@ func TestRunnerStartIgnoresADuplicateID(t *testing.T) {
 	r := NewRunner(move)
 	defer func() {
 		close(block)
-		r.Close()
+		_ = r.Close()
 	}()
 
 	r.Start(Request{ID: 1})

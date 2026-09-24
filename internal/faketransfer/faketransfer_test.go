@@ -35,7 +35,7 @@ func drain(t *testing.T, engine *Engine, id int) transfer.Event {
 
 func TestTransferCompletes(t *testing.T) {
 	engine := NewWithInterval(testInterval)
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	engine.Start(request(1, 500_000))
 	event := drain(t, engine, 1)
@@ -50,7 +50,7 @@ func TestTransferCompletes(t *testing.T) {
 
 func TestEveryNthTransferFails(t *testing.T) {
 	engine := NewWithInterval(testInterval)
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// simulatedFailureEvery is the rule that keeps the Failed tab reachable.
 	engine.Start(request(simulatedFailureEvery, 500_000))
@@ -70,7 +70,7 @@ func TestEveryNthTransferFails(t *testing.T) {
 
 func TestCancelStopsATransfer(t *testing.T) {
 	engine := NewWithInterval(10 * time.Millisecond)
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// Large enough that it cannot finish before the cancel lands.
 	engine.Start(request(1, 1<<30))
@@ -83,7 +83,7 @@ func TestCancelStopsATransfer(t *testing.T) {
 
 func TestCancelUnknownIDIsANoop(t *testing.T) {
 	engine := NewWithInterval(testInterval)
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 	engine.Cancel(404) // must not panic
 }
 
@@ -119,7 +119,7 @@ func TestCloseWithNoReaderDoesNotDeadlock(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		engine.Close()
+		_ = engine.Close()
 		close(done)
 	}()
 	select {

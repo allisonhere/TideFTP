@@ -148,7 +148,7 @@ func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return io.ReadAll(file)
 }
 
@@ -172,7 +172,7 @@ func (f *FS) WriteFile(ctx context.Context, path string, data []byte) error {
 		return err
 	}
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	return file.Close()
