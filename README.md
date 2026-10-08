@@ -10,8 +10,9 @@ SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
   resume, conflict policies.
 - Directory mirror (`M`) with a pre-flight plan and opt-in prune.
 - Streaming preview and in-place edit without downloading the whole file.
-- A non-interactive mode for scripts and CI (`tideftp get`, `put`, `ls`, …),
-  sharing the same connection handling as the app.
+- A scriptable mode for shell, cron and CI: `get`, `put`, `ls --json`, `sync`
+  (dry-run, parallel, optional delete), one-connection `script`/`shell`, and
+  distinct exit codes — sharing the same connection handling as the app.
 - Strict host-key checking; passwords are never passed as flags.
 - `tide-night` default theme plus a live theme picker, soft modal screens,
   shift-arrow pane resizing. `match-omarchy` follows your current

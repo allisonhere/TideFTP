@@ -448,7 +448,7 @@
 
 <section class="thesis">
   <div class="wrap">
-    <p>A dedicated, polished, two-pane <strong>transfer client</strong> for the terminal is a niche almost nobody occupies. Most "TUI FTP" is a general file manager with a protocol layer bolted on, or a scriptable CLI with no interface at all. TideFTP is the part in between — the queue, the progress, the conflict prompts, on screen.</p>
+    <p>A dedicated, polished, two-pane <strong>transfer client</strong> for the terminal is a niche almost nobody occupies. Most "TUI FTP" is a general file manager with a protocol layer bolted on, or a scriptable CLI with no interface at all. TideFTP is the part in between — the queue, the progress, the conflict prompts, on screen — and the same binary also runs headless for scripts.</p>
   </div>
 </section>
 
@@ -469,7 +469,7 @@
           <tr><th scope="row">Directory mirror with pre-flight plan</th><td class="mark">●</td><td class="mark">●</td><td class="no">○</td><td class="mark">●</td></tr>
           <tr><th scope="row">Streaming preview &amp; in-place edit</th><td class="mark">●</td><td class="no">○</td><td class="part">◐</td><td class="no">○</td></tr>
           <tr><th scope="row">Runs in a terminal, over SSH</th><td class="mark">●</td><td class="mark">●</td><td class="mark">●</td><td class="no">○</td></tr>
-          <tr><th scope="row">Scriptable / headless</th><td class="no">○</td><td class="mark">●</td><td class="part">◐</td><td class="no">○</td></tr>
+          <tr><th scope="row">Scriptable / headless</th><td class="part">◐</td><td class="mark">●</td><td class="part">◐</td><td class="no">○</td></tr>
           <tr><th scope="row">Cloud storage backends</th><td class="no">○</td><td class="no">○</td><td class="no">○</td><td class="no">○</td></tr>
         </tbody>
       </table>
@@ -548,7 +548,7 @@
     <h2 class="reveal">What it isn't, yet</h2>
     <ul class="reveal">
       <li><b>Not a cloud client.</b> SFTP, FTP and FTPS only. S3, GCS and Dropbox are rclone's job.</li>
-      <li><b>Not scriptable.</b> No headless mode. For cron and pipelines, lftp and rclone win outright.</li>
+      <li><b>Scripting is new.</b> <code>get</code>, <code>put</code>, <code>ls --json</code>, <code>sync</code> and one-connection <code>script</code> work for cron and CI, but there is no bandwidth limit yet and a dropped connection mid-sync is not redialled. For heavy pipelines, lftp and rclone still win.</li>
       <li><b>Still filling edges.</b> Queue persistence across restarts, bandwidth limiting and directory bookmarks are on the roadmap, not in the build.</li>
       <li><b>Pre-1.0, one maintainer.</b> lftp has absorbed decades of protocol quirks; TideFTP handles what <code>pkg/sftp</code> and <code>jlaffaye/ftp</code> expose — which is why FTP has no <code>chmod</code>.</li>
     </ul>

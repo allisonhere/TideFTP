@@ -2,10 +2,10 @@
 
 ## What changed
 
-- **Non-interactive CLI.** The `tideftp` binary runs one command and exits —
-  `ls`, `get`, `put`, `rm`, `mkdir`, `mv`, with `-r` and `--force`/`--resume` —
-  for scripts, CI and cron, alongside the interactive app. See the
-  *Non-interactive CLI* section below.
+- **Scriptable CLI.** The `tideftp` binary runs commands without the TUI —
+  file operations, `--json` listings, `sync`/`mirror`, and one-connection
+  `script`/`shell` — for scripts, CI and cron. See the *Non-interactive CLI*
+  section below; it has never been run against a real server.
 - **Queue is the live-transfer view.** The former Active tab is gone. Keys are
   `1` Queue, `2` Failed, `3` History, `4` Log, and `5` Stats.
 - Queue shows two meters when work is pending: **Queue** (the full draining
@@ -77,39 +77,44 @@ as a separate integration layer.
 
 ## Non-interactive CLI
 
-The same binary does one operation and exits, so a shell script can move
-files without the TUI:
+The same binary runs commands without the TUI. Any non-flag first argument
+goes to `cli.Run`; otherwise the app opens unchanged. User-facing docs are in
+the README "Scripting" section.
 
 ```
-tideftp ls    [conn] [-l] [PATH]
-tideftp get   [conn] [-r] [--force] [--resume] REMOTE [LOCAL]
-tideftp put   [conn] [-r] [--force] [-p] LOCAL [REMOTE]
-tideftp rm    [conn] [-r] PATH...
-tideftp mkdir [conn] [-p] PATH...
-tideftp mv    [conn] OLD NEW
-tideftp help
+ls stat exists cat du find tree      read-only; ls/stat/find take --json
+get put rm mkdir mv chmod            get/put take globs and several sources
+sync (alias mirror) SRC DST          one-way mirror, PROFILE:/path locations
+script [-c CMDS | FILE]  shell       many commands over one connection
 ```
 
-- Every command takes the connection flags or `--profile NAME` from
-  `config.toml`. Results go to stdout, progress to stderr; `-q` silences
-  everything but errors.
-- Exit code is `0` success, `1` operation failed, `2` usage or connection
-  error.
-- Existing destinations are never overwritten: `--force` overwrites,
-  `--resume` continues a partial download from its current size.
-- `--host-key-policy` is `strict` by default — an unknown host key fails with
-  its fingerprint instead of hanging for input — and `off` to accept any.
-  Passwords are still never flags: `TIDEFTP_SFTP_PASSWORD` /
-  `TIDEFTP_FTP_PASSWORD`, or a profile's OS-keyring entry.
-- `mirror`/prune, scp-style `user@host:path` operands, `--json`, and parallel
-  transfers are deliberately not in this cut.
-
-Where it lives: `internal/cli` is the command layer (UI-free inside the same
-process); `internal/connect` builds the dialer and resolves a profile into a
-`session.Target`, shared with the TUI so the two cannot drift; `vfs.FS` gained
-`Stat`; `transfer.Copy` is the synchronous start-to-terminal helper.
-`cmd/tideftp/main.go` routes any non-flag first argument to `cli.Run` and
-otherwise opens the app unchanged.
+- **Exit codes** (`internal/cli/extra.go`): `0` ok, `1` failed, `2` usage,
+  `3` connect, `4` auth, `5` not found. `codedError` carries an explicit code
+  (a nil inner error is silent — `exists` uses that); `classifyDial` sorts dial
+  failures by message, so a server that words its auth error unusually will
+  land on `3`.
+- **Connections:** `App.open` dials per command, or returns `App.shared` (a
+  `keepOpen` wrapper whose Close is a no-op) when running inside `script`/
+  `shell`. `sync` always dials itself — one connection per `--transfers`
+  worker, because a `transfer.Engine` serves one transfer at a time and
+  `transfer.Copy` owns its event channel (never run two Copies on one engine).
+- **Writes are atomic:** `put` and `sync` upload to `NAME.part` and rename;
+  downloads in `sync` do the same and stamp the source mtime. `--resume`
+  continues a leftover download `.part` only when asked, since the source may
+  have changed.
+- **Sync safety:** deletions run only after every copy succeeded; an empty
+  source refuses `--delete` without `--allow-empty-source`; a file filtered out
+  by size/age is never treated as deleted from the source (delete candidates
+  are computed against the unfiltered source tree).
+- **Location syntax** (`location.go`): `prefix:path` is remote when the prefix
+  is two or more characters with no slash, so a one-letter profile name cannot
+  be used (Windows drive letters win).
+- **Not done:** `--bwlimit` (engines cannot throttle), redial mid-transfer,
+  `**` globs, `ln`, empty-dir mirroring under filters. See TODO.md.
+- **Never run against a real server.** The CLI tests use `fakefs` plus a
+  disk-copying test engine; `fakefs.Remote` is not goroutine-safe, so the sync
+  tests wrap it in a locking `vfs.FS`. Run `sync --dry-run`, `put`, `get` and
+  `script` against a QA host before trusting it.
 
 ## Verification and useful entry points
 

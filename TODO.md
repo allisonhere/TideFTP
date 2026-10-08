@@ -46,18 +46,30 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 
 ## Tier 2 — server-admin essentials
 
-- [x] **Non-interactive CLI** — the `tideftp` binary now runs one command and
-      exits: `ls`, `get`, `put`, `rm`, `mkdir`, `mv`, with `-r` recursion for
-      `get`/`put`/`rm`, and `--force`/`--resume` for overwrite and continuation.
-      Connection comes from the usual flags or `--profile NAME`; passwords stay
-      out of argv (`TIDEFTP_SFTP_PASSWORD`/`TIDEFTP_FTP_PASSWORD`, or a profile's
-      OS-keyring entry); host keys are strict by default. Exit `0`/`1`/`2`
-      (success / operation failed / usage or connection error). The connection
-      plumbing is shared with the TUI through `internal/connect`, the command
-      layer is UI-free in `internal/cli`, `vfs.FS` gained `Stat`, and
-      `transfer.Copy` is the synchronous start-to-terminal helper. Not yet:
-      scp-style `user@host:path` operands, `mirror`/prune, `--json`, parallel
-      transfers.
+- [x] **Non-interactive CLI** — the `tideftp` binary runs one command and
+      exits (`ls`, `get`, `put`, `rm`, `mkdir`, `mv`, `stat`, `exists`, `cat`,
+      `du`, `find`, `tree`, `chmod`), alongside the interactive app. Connection
+      comes from the usual flags or `--profile NAME`; passwords stay out of argv
+      (`TIDEFTP_*_PASSWORD`, a profile's keyring entry, or `--password-stdin`);
+      host keys are strict by default. Exit codes: `0` ok, `1` failed, `2`
+      usage, `3` connect, `4` auth, `5` not found. `ls`/`stat`/`find --json`,
+      remote globs, multi-source `get`/`put`, `put` via `NAME.part`,
+      `--retries`/`--timeout` on connect. The connection plumbing is shared with
+      the TUI through `internal/connect`; the command layer is UI-free in
+      `internal/cli`; `transfer.Copy` is the synchronous helper.
+- [x] **`sync` / `mirror` (CLI)** — `tideftp sync SRC DST` with `PROFILE:/path`
+      locations (local↔server and server↔server), size/mtime or `--checksum`
+      comparison, `--dry-run`, opt-in `--delete` (after all copies succeed;
+      refuses an empty source), include/exclude, size and age filters,
+      `--transfers N` workers (one connection each), atomic `.part` files and
+      `--resume`.
+- [x] **`script` / `shell` (CLI)** — many commands over one connection, with
+      `cd`/`lcd`/`pwd`/`exit`, quoting and comments, `-k` keep-going, `-x` echo.
+- [ ] **CLI follow-ups** — `--bwlimit` (needs throttling inside the FTP/SFTP
+      engines), redial and continue when a connection drops mid-sync, `**`
+      globs, `ln` (needs a `vfs.FS` symlink op), mirroring empty directories
+      when a filter is active, a run against real FTP/FTPS/SFTP servers (all
+      CLI tests use the fake), shell completions and a man page.
 - [x] **chmod / permissions edit** — `m` opens an octal-mode prompt for the
       selection or highlighted row, pre-filled with the current mode and
       echoing the symbolic form back. `vfs.FS` gained `Chmod`; localfs and
