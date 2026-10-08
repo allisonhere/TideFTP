@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+	"time"
 
 	"tideftp/internal/domain"
 )
@@ -74,6 +75,26 @@ type FS interface {
 	// WriteFile replaces the contents of the file at path, creating it if it
 	// does not exist. An existing file keeps its permissions.
 	WriteFile(ctx context.Context, path string, data []byte) error
+}
+
+// MtimeSetter is implemented by filesystems that can stamp a file with a
+// modification time. It is optional — most callers want "preserve the mtime if
+// you can" — so it is a separate interface rather than part of FS: assert for
+// it, and treat ErrUnsupported (an FTP server with neither MFMT nor a writable
+// MDTM) as "not possible here", not as a failure.
+type MtimeSetter interface {
+	SetMtime(ctx context.Context, path string, mtime time.Time) error
+}
+
+// Symlinker is implemented by filesystems that can make and read symbolic
+// links. Like MtimeSetter it is optional; a backend without it (plain FTP has
+// no portable symlink command) wraps ErrUnsupported.
+type Symlinker interface {
+	// Symlink creates link pointing at target. target is stored as given — it
+	// may be relative to the link's directory — and is not resolved.
+	Symlink(ctx context.Context, target, link string) error
+	// Readlink returns where the symbolic link at path points.
+	Readlink(ctx context.Context, path string) (string, error)
 }
 
 // Remote paths are always slash-separated, whatever the client's own OS is,

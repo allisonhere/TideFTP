@@ -29,6 +29,16 @@ type Request struct {
 	// starting here and the destination is written starting here too,
 	// without truncating it first. 0 means an ordinary full transfer.
 	Offset int64
+	// Length, when positive, limits a download to the byte range
+	// [Offset, Offset+Length) so several connections can each fetch a segment
+	// of one file. 0 means "to the end of the file".
+	Length int64
+	// NoTruncate stops a download from truncating its destination even at
+	// Offset 0, which is how parallel segments write into one preallocated file.
+	NoTruncate bool
+	// Limit, when non-nil, paces the transfer. Share one Limiter between
+	// requests to cap their combined rate.
+	Limit *Limiter
 }
 
 // EventKind is what just happened to a transfer.
@@ -78,10 +88,22 @@ var ErrShort = errors.New("short transfer")
 // than expected is exempt too — that means the source grew after it was
 // listed, which is not a failure.
 func CheckComplete(req Request, sent int64) error {
-	if req.Size <= 0 || sent >= req.Size {
+	want := req.Size
+	if req.Length > 0 {
+		want = req.Offset + req.Length // a segment is complete at its own end
+	}
+	if want <= 0 || sent >= want {
 		return nil
 	}
-	return fmt.Errorf("%w: moved %d of %d bytes", ErrShort, sent, req.Size)
+	return fmt.Errorf("%w: moved %d of %d bytes", ErrShort, sent, want)
+}
+
+// SegmentEnd is where a ranged request stops (exclusive), or -1 for "to EOF".
+func (r Request) SegmentEnd() int64 {
+	if r.Length > 0 {
+		return r.Offset + r.Length
+	}
+	return -1
 }
 
 // Engine moves bytes on behalf of the UI.

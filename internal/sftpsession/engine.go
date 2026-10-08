@@ -89,6 +89,7 @@ func (e *Engine) copy(req transfer.Request, stop, quit <-chan struct{}, report f
 	sent := req.Offset
 	buf := make([]byte, transfer.CopyChunk)
 	lastReport := time.Now()
+	end := req.SegmentEnd()
 
 	for {
 		if transfer.IsCanceled(stop, quit) {
@@ -96,7 +97,14 @@ func (e *Engine) copy(req transfer.Request, stop, quit <-chan struct{}, report f
 		}
 
 		n, readErr := src.Read(buf)
+		if end >= 0 && sent+int64(n) >= end {
+			// A ranged download stops at its own end, not the file's.
+			n, readErr = int(end-sent), io.EOF
+		}
 		if n > 0 {
+			if !req.Limit.Wait(n, stop, quit) {
+				return sent, transfer.ErrCanceled
+			}
 			written, writeErr := dst.Write(buf[:n])
 			sent += int64(written)
 			if writeErr != nil {
@@ -150,7 +158,7 @@ func (e *Engine) open(req transfer.Request) (io.ReadCloser, io.WriteCloser, erro
 			return nil, nil, fmt.Errorf("create %s: %w", filepath.Dir(req.Destination), err)
 		}
 		flags := os.O_WRONLY | os.O_CREATE
-		if req.Offset == 0 {
+		if req.Offset == 0 && !req.NoTruncate {
 			flags |= os.O_TRUNC
 		}
 		dst, err := os.OpenFile(req.Destination, flags, 0o644)

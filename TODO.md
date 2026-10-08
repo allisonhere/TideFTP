@@ -65,11 +65,16 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
       `--resume`.
 - [x] **`script` / `shell` (CLI)** — many commands over one connection, with
       `cd`/`lcd`/`pwd`/`exit`, quoting and comments, `-k` keep-going, `-x` echo.
-- [ ] **CLI follow-ups** — `--bwlimit` (needs throttling inside the FTP/SFTP
-      engines), redial and continue when a connection drops mid-sync, `**`
-      globs, `ln` (needs a `vfs.FS` symlink op), mirroring empty directories
-      when a filter is active, a run against real FTP/FTPS/SFTP servers (all
-      CLI tests use the fake), shell completions and a man page.
+- [x] **lftp parity (CLI)** — bandwidth limit, reconnect + resume, `mirror`
+      option set, script language with jobs/queue/`open`/rc, `pget`,
+      `ln -s`; all exercised over real in-process SFTP and FTP servers
+      (`internal/testserver`, `internal/cli/e2e_test.go`).
+- [ ] **CLI follow-ups** — `--progress` for `sync`/`mirror`/`pget` (only `get`/`put` show it); a run against a real QA host and third-party
+      FTP/FTPS servers (MFMT, REST+STOR, EPSV quirks, LIST timestamp timezone);
+      `site`/raw `quote` and FTP `chmod` (jlaffaye/ftp v0.2.4 cannot send raw
+      commands); `&&`/`||` in scripts; `**` globs; hard links; proxies and
+      HTTP/FISH/BitTorrent (out of scope so far); shell completions and a man
+      page; bandwidth limit and auto-reconnect in the TUI itself.
 - [x] **chmod / permissions edit** — `m` opens an octal-mode prompt for the
       selection or highlighted row, pre-filled with the current mode and
       echoing the symbolic form back. `vfs.FS` gained `Chmod`; localfs and

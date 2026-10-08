@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jlaffaye/ftp"
 
@@ -198,6 +199,28 @@ func (f *FS) Chmod(ctx context.Context, targetPath string, mode fs.FileMode) err
 		return err
 	}
 	return fmt.Errorf("chmod %s: %w", vfs.CleanRemote(targetPath), vfs.ErrUnsupported)
+}
+
+// SetMtime stamps a file via MFMT (or vsftpd's writable MDTM). A server with
+// neither returns vfs.ErrUnsupported, so callers can carry on without it.
+func (f *FS) SetMtime(ctx context.Context, targetPath string, mtime time.Time) error {
+	targetPath = vfs.CleanRemote(targetPath)
+	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		if !conn.IsSetTimeSupported() {
+			return fmt.Errorf("set time %s: %w", targetPath, vfs.ErrUnsupported)
+		}
+		return conn.SetTime(targetPath, mtime)
+	})
+}
+
+// Symlink and Readlink are not available over FTP: it has no portable command
+// for either.
+func (f *FS) Symlink(ctx context.Context, target, link string) error {
+	return fmt.Errorf("symlink %s: %w", vfs.CleanRemote(link), vfs.ErrUnsupported)
+}
+
+func (f *FS) Readlink(ctx context.Context, path string) (string, error) {
+	return "", fmt.Errorf("readlink %s: %w", vfs.CleanRemote(path), vfs.ErrUnsupported)
 }
 
 func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {

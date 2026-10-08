@@ -45,6 +45,42 @@ feature batches and may change behaviour.
   the same interactively. New commands: `cat`, `du`, `find`, `tree`, `chmod`
   (octal or symbolic, `-R`), and `mirror` as an alias for `sync`.
 
+- **lftp-parity scripting.** The CLI now covers what lftp does for
+  FTP/FTPS/SFTP automation:
+  - `--bwlimit` (new `transfer.Limiter`, shared across parallel files; also
+    `set net:limit-rate`).
+  - Auto-reconnect with resume: `--retries N` redials with backoff and
+    continues a half-moved file from where it stopped, for uploads and
+    downloads; `get -c`/`reget`, `put -c`/`reput` and `sync --resume` continue
+    a partial file from an earlier run.
+  - `mirror` with lftp's arguments and short options (`-R`, `-x`/`-X`, `-n`,
+    `-e`, `-c`, `-P`, `-L`, `-p`, `-r`) on the same engine as `sync`, plus
+    `--only-newer`, `--only-missing`, regex filters, `--newer-than`,
+    `--no-empty-dirs`, `--verify`, `--max-errors`, `--delete-first`,
+    `--on-change`, `--log`; uploads preserve mtime and permissions
+    (`vfs.MtimeSetter`; MFMT over FTP when the server has it).
+  - Script language: `set`, `alias`, `source`, `echo`, `!cmd`, `help CMD`,
+    `open`/`close` (switch servers mid-script), an rc file, and background
+    jobs (`cmd &`, `queue`, `jobs`, `wait`, `kill`, `exit kill`); `mirror` and
+    `sync` run on the script's connection.
+  - `pget -n N` and `sync --use-pget-n N` (ranged downloads: `Request.Length`
+    and `NoTruncate`), `mget`/`mput`/`mrm`, `-O DIR`, `rmdir`, `ln -s`,
+    `readlink` (`vfs.Symlinker`; SFTP only).
+  - New `internal/testserver` runs real in-process SFTP and FTP servers, and
+    `internal/cli/e2e_test.go` drives every feature over both — including
+    dropping the connection mid-transfer.
+  - `--progress` on `get`/`put`: percent, size, speed and ETA (opt-in).
+  - A detailed scripting guide, `docs/scripting.md` (recipes, cron/CI,
+    exit codes, JSON, troubleshooting), linked from the README.
+  - Fixed in the same pass: `ln -s -f TARGET LINK` where LINK is an existing
+    symlink to a directory created the new link *inside* the old target instead
+    of replacing it, so repointing a `current` release link did nothing.
+  - `sync` no longer accepts `-r` (it meant "don't recurse", the opposite of
+    `get`/`put`/`rm -r`); that short form remains only on lftp-style `mirror`,
+    and `--no-recursion` works on both.
+  - Behaviour change: `sync` with filters now creates empty source directories
+    (lftp parity); pass `--no-empty-dirs` for the old behaviour.
+
 - **Live transfer visibility.** Queue is now the one operational transfer
   view: it contains both waiting and in-flight rows, with a pinned aggregate
   bytes-and-percent meter whenever files are moving. The redundant Active tab
@@ -223,6 +259,13 @@ feature batches and may change behaviour.
   instead of one flat list.
 
 ### Fixed
+
+- **A failed FTP login no longer looks like a domain was appended to the
+  username** (issue #3). The error read `login jan@mydomain.com:21: 530 …`,
+  which made `jan` appear to have been sent as `jan@mydomain.com`. The
+  username has always been sent exactly as typed; the message now reads
+  `login as "jan" on mydomain.com:21: 530 …`, and a test pins that the server
+  receives the entered name verbatim.
 
 - **Every FTP and FTPS connection dropped the instant it opened**, reporting
   "operation was canceled". Taking over the control dial to bound the greeting

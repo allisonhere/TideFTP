@@ -20,27 +20,42 @@ import (
 // open resolves the connection flags, dials, and returns the live connection
 // with the target it connected to. The caller closes the connection.
 func (a App) open(c *connFlags) (session.Conn, session.Target, error) {
+	conn, target, _, err := a.openWith(c)
+	return conn, target, err
+}
+
+// openWith is open plus the credentials it used, for commands (pget, sync)
+// that dial extra connections of their own to the same server.
+func (a App) openWith(c *connFlags) (session.Conn, session.Target, session.Credentials, error) {
+	if err := a.resolveLimit(c); err != nil {
+		return nil, session.Target{}, session.Credentials{}, err
+	}
 	if sh := a.shared; sh != nil {
 		// Inside a script every command rides the one open connection; its own
 		// connection flags are ignored, and a leading `cd` is the base path.
+		if sh.conn == nil {
+			return nil, session.Target{}, session.Credentials{}, usageError("not connected: use open HOST|PROFILE first")
+		}
 		c.quiet = c.quiet || sh.quiet
+		c.retries = sh.flags.retries
 		target := sh.target
 		target.StartPath = sh.cwd
-		return keepOpen{sh.conn}, target, nil
+		return keepOpen{sh.conn}, target, sh.creds, nil
 	}
 	target, err := a.target(c)
 	if err != nil {
-		return nil, session.Target{}, err
+		return nil, session.Target{}, session.Credentials{}, err
 	}
 	creds, err := a.credentials(target, c)
 	if err != nil {
-		return nil, session.Target{}, err
+		return nil, session.Target{}, session.Credentials{}, err
 	}
-	conn, err := a.dial(target, creds, c)
+	dial := func() (session.Conn, error) { return a.dial(target, creds, c) }
+	conn, err := dial()
 	if err != nil {
-		return nil, session.Target{}, err
+		return nil, session.Target{}, session.Credentials{}, err
 	}
-	return conn, target, nil
+	return a.live(conn, dial, c), target, creds, nil
 }
 
 // resolveRemote joins a remote operand onto the connection's base directory.
@@ -140,6 +155,9 @@ func (a App) cmdGet(args []string) error {
 	fs.BoolVar(&force, "f", false, "overwrite an existing destination")
 	fs.BoolVar(&force, "force", false, "overwrite an existing destination")
 	fs.BoolVar(&resume, "resume", false, "continue a partially downloaded file")
+	fs.BoolVar(&resume, "c", false, "same as --resume")
+	var outDir string
+	fs.StringVar(&outDir, "O", "", "download into this local directory (created if missing)")
 	c := &connFlags{}
 	c.register(fs)
 	if err := fs.Parse(args); err != nil {
@@ -161,7 +179,7 @@ func (a App) cmdGet(args []string) error {
 	// One plain source and an optional destination keeps the original
 	// meaning. Several sources, or a wildcard, make the last operand a
 	// destination directory.
-	multi := len(rest) > 2 || hasGlob(rest[0])
+	multi := len(rest) > 2 || hasGlob(rest[0]) || outDir != ""
 	if !multi {
 		remote := resolveRemote(base, rest[0])
 		local := ""
@@ -191,11 +209,19 @@ func (a App) cmdGet(args []string) error {
 	}
 
 	operands, destDir := rest, "."
-	if len(rest) >= 2 {
+	switch {
+	case outDir != "":
+		destDir = outDir
+	case len(rest) >= 2:
 		operands, destDir = rest[:len(rest)-1], rest[len(rest)-1]
 	}
 	if info, statErr := os.Stat(destDir); statErr == nil && !info.IsDir() {
 		return usageError("%s is not a directory", destDir)
+	}
+	if outDir != "" {
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
+			return err
+		}
 	}
 	remotes, err := expandRemoteAll(ctx, conn.FS(), base, operands)
 	if err != nil {
@@ -253,11 +279,15 @@ func (a App) downloadFile(ctx context.Context, eng transfer.Engine, remote, loca
 		Destination: local,
 		Size:        entry.Size,
 		Offset:      offset,
+		Limit:       c.limit,
 	}
 	if !c.quiet {
 		a.statusf("downloading %s → %s", remote, local)
 	}
-	if err := transfer.Copy(ctx, eng, req, nil); err != nil {
+	onProgress, finish := a.progressLine(c, path.Base(remote), entry.Size, offset)
+	err := transfer.Copy(ctx, eng, req, onProgress)
+	finish()
+	if err != nil {
 		return fmt.Errorf("download %s: %w", remote, err)
 	}
 	if !c.quiet {
@@ -312,6 +342,11 @@ func (a App) cmdPut(args []string) error {
 	fs.BoolVar(&parents, "p", false, "create parent directories")
 	fs.BoolVar(&parents, "parents", false, "create parent directories")
 	fs.BoolVar(&noPart, "no-part", false, "write straight to the final name instead of NAME.part then rename")
+	var resumeUp bool
+	var outDir string
+	fs.StringVar(&outDir, "O", "", "upload into this remote directory")
+	fs.BoolVar(&resumeUp, "resume", false, "continue a partly uploaded file")
+	fs.BoolVar(&resumeUp, "c", false, "same as --resume")
 	c := &connFlags{}
 	c.register(fs)
 	if err := fs.Parse(args); err != nil {
@@ -322,11 +357,15 @@ func (a App) cmdPut(args []string) error {
 		return usageError("put needs LOCAL... [REMOTE]")
 	}
 	c.noPart = noPart
+	c.resume = resumeUp
 
 	// Sources are everything but the last operand when there are two or more;
 	// the lone-operand form uploads into the base directory.
 	sourceOperands, destOperand := rest, ""
-	if len(rest) >= 2 {
+	switch {
+	case outDir != "":
+		destOperand = outDir
+	case len(rest) >= 2:
 		sourceOperands, destOperand = rest[:len(rest)-1], rest[len(rest)-1]
 	}
 	var sources []string
@@ -347,7 +386,7 @@ func (a App) cmdPut(args []string) error {
 	ctx := context.Background()
 	base := target.Home()
 	// Several sources (or a wildcard) always mean "into this directory".
-	intoDir := len(sources) > 1 || (len(rest) >= 2 && len(sourceOperands) > 1)
+	intoDir := len(sources) > 1 || (len(rest) >= 2 && len(sourceOperands) > 1) || outDir != ""
 	if intoDir {
 		dest := base
 		if destOperand != "" {
@@ -409,7 +448,13 @@ func (a App) uploadFile(ctx context.Context, fsys vfs.FS, eng transfer.Engine, l
 			return err
 		}
 	}
-	if _, err := fsys.Stat(ctx, remote); err == nil {
+	if st, err := fsys.Stat(ctx, remote); err == nil {
+		if c.resume && !st.IsDir() && st.Size == size {
+			if !c.quiet {
+				a.statusf("= %s already complete", remote)
+			}
+			return nil
+		}
 		if !force {
 			return fmt.Errorf("%s already exists (use --force to overwrite)", remote)
 		}
@@ -421,17 +466,28 @@ func (a App) uploadFile(ctx context.Context, fsys vfs.FS, eng transfer.Engine, l
 	if !c.noPart {
 		dest = remote + ".part"
 	}
+	var offset int64
+	if c.resume {
+		if st, err := fsys.Stat(ctx, dest); err == nil && !st.IsDir() && st.Size < size {
+			offset = st.Size
+		}
+	}
 	req := transfer.Request{
 		Direction:   domain.Upload,
 		Source:      local,
 		Destination: dest,
 		Size:        size,
+		Offset:      offset,
+		Limit:       c.limit,
 	}
 	if !c.quiet {
 		a.statusf("uploading %s → %s", local, remote)
 	}
-	if err := transfer.Copy(ctx, eng, req, nil); err != nil {
-		if dest != remote {
+	onProgress, finish := a.progressLine(c, filepath.Base(local), size, offset)
+	err := transfer.Copy(ctx, eng, req, onProgress)
+	finish()
+	if err != nil {
+		if dest != remote && !c.resume {
 			_ = fsys.Remove(ctx, dest)
 		}
 		return fmt.Errorf("upload %s: %w", local, err)

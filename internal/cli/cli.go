@@ -16,12 +16,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"tideftp/internal/config"
 	"tideftp/internal/connect"
 	"tideftp/internal/credstore"
 	"tideftp/internal/session"
+	"tideftp/internal/transfer"
 )
 
 // dialTimeout bounds the connect handshake. A listing or transfer after a
@@ -89,6 +91,18 @@ func (a App) Run(args []string) int {
 	}
 	cmd, rest := args[0], args[1:]
 	if cmd == "help" || cmd == "-h" || cmd == "--help" {
+		if cmd == "help" && len(rest) > 0 {
+			// `tideftp help sync` is `tideftp sync -h`.
+			known, err := a.dispatch(rest[0], []string{"-h"})
+			if !known {
+				_, _ = fmt.Fprintf(a.Stderr, "tideftp: no help for unknown command %q\n", rest[0])
+				return exitUsage
+			}
+			if errors.Is(err, errUsage) {
+				return exitOK
+			}
+			return a.report(err)
+		}
 		a.usage()
 		return 0
 	}
@@ -117,8 +131,28 @@ func (a App) dispatch(cmd string, rest []string) (known bool, err error) {
 		err = a.cmdMkdir(rest)
 	case "mv":
 		err = a.cmdMv(rest)
-	case "sync", "mirror":
+	case "sync":
 		err = a.cmdSync(rest)
+	case "mirror":
+		err = a.cmdMirror(rest)
+	case "ln":
+		err = a.cmdLn(rest)
+	case "readlink":
+		err = a.cmdReadlink(rest)
+	case "pget":
+		err = a.cmdPget(rest)
+	case "mget":
+		err = a.cmdGet(rest)
+	case "mput":
+		err = a.cmdPut(rest)
+	case "mrm":
+		err = a.cmdRm(rest)
+	case "rmdir":
+		err = a.cmdRmdir(rest)
+	case "reget":
+		err = a.cmdGet(append([]string{"--resume"}, rest...))
+	case "reput":
+		err = a.cmdPut(append([]string{"--resume"}, rest...))
 	case "stat":
 		err = a.cmdStat(rest)
 	case "exists":
@@ -166,12 +200,57 @@ func (a App) report(err error) int {
 	return exitCode(err)
 }
 
+// outMu keeps lines from parallel workers (and reconnect notices) whole.
+var outMu sync.Mutex
+
+// lockedWriter serialises writes to w with the rest of the CLI's output, for
+// handing to a child process (whose output is copied from another goroutine).
+type lockedWriter struct{ w io.Writer }
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	outMu.Lock()
+	defer outMu.Unlock()
+	return l.w.Write(p)
+}
+
 func (a App) statusf(format string, args ...any) {
+	outMu.Lock()
+	defer outMu.Unlock()
 	_, _ = fmt.Fprintf(a.Stderr, format+"\n", args...)
 }
 
 func (a App) resultf(format string, args ...any) {
+	outMu.Lock()
+	defer outMu.Unlock()
 	_, _ = fmt.Fprintf(a.Stdout, format+"\n", args...)
+}
+
+// live wraps a connection so it redials and resumes when it drops, unless
+// --retries is 0. redial must make a brand-new connection.
+func (a App) live(first session.Conn, redial func() (session.Conn, error), c *connFlags) session.Conn {
+	if c.retries == 0 {
+		return first
+	}
+	logf := func(format string, args ...any) {
+		if !c.quiet {
+			a.statusf(format, args...)
+		}
+	}
+	return newLiveConn(first, redial, c.retries, a.Sleep, logf)
+}
+
+// defaultRetries gives a command a --retries default other than 0 when the
+// user did not pass the flag.
+func defaultRetries(fset *flag.FlagSet, c *connFlags, n int) {
+	given := false
+	fset.Visit(func(f *flag.Flag) {
+		if f.Name == "retries" {
+			given = true
+		}
+	})
+	if !given {
+		c.retries = n
+	}
 }
 
 // newFlagSet builds a parsable flag set that reports errors instead of exiting,
@@ -225,7 +304,11 @@ type connFlags struct {
 	hostKeyPolicy string
 	quiet         bool
 	passwordStdin bool
+	bwlimit       string
+	progress      bool
+	limit         *transfer.Limiter // resolved from bwlimit (or a script's) by resolveLimit
 	noPart        bool
+	resume        bool // put: continue a partly uploaded file
 	retries       int
 	timeout       time.Duration
 }
@@ -245,9 +328,28 @@ func (c *connFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.hostKeyPolicy, "host-key-policy", "", "sftp: strict (default) or off")
 	fs.BoolVar(&c.quiet, "quiet", false, "print only errors")
 	fs.BoolVar(&c.quiet, "q", false, "print only errors")
+	fs.BoolVar(&c.progress, "progress", false, "show transfer progress (percent, size, speed, ETA) on stderr")
+	fs.StringVar(&c.bwlimit, "bwlimit", "", "cap transfer speed in bytes/s, e.g. 500k or 2M (combined across parallel files)")
 	fs.BoolVar(&c.passwordStdin, "password-stdin", false, "read the password from the first line of standard input")
 	fs.IntVar(&c.retries, "retries", 0, "retry a failed connection this many times, with backoff")
 	fs.DurationVar(&c.timeout, "timeout", dialTimeout, "give up connecting after this long (per attempt)")
+}
+
+// resolveLimit turns --bwlimit into the limiter a command's transfers share,
+// or inherits the one a script set for the whole session.
+func (a App) resolveLimit(c *connFlags) error {
+	if c.bwlimit != "" {
+		rate, err := parseSize(c.bwlimit)
+		if err != nil {
+			return usageError("--bwlimit: %v", err)
+		}
+		c.limit = transfer.NewLimiter(rate)
+		return nil
+	}
+	if a.shared != nil {
+		c.limit = a.shared.limit
+	}
+	return nil
 }
 
 func (a App) loadConfig() (config.Config, error) {
@@ -400,7 +502,12 @@ Commands:
   mv    OLD NEW                 rename a remote path
   sync  [flags] SRC DST         one-way mirror; SRC/DST is a local dir or
                                 PROFILE:/path (or :/path using --host...)
-  mirror                        alias for sync
+  mirror [-R] [REMOTE [LOCAL]]  lftp-style mirror (see sync for the options)
+  reget, reput                  get / put with --resume
+  pget [-n N] REMOTE [LOCAL]    download one file over N connections
+  mget, mput, mrm               aliases of get, put, rm (they all take globs)
+  rmdir PATH...                 remove empty directories
+  ln -s TARGET LINK, readlink   symbolic links (SFTP; FTP has no such command)
   cat   [flags] PATH...         write remote files to stdout
   du    [-h] [-d N] PATH...     total size of a path (per directory with -d)
   find  [flags] [PATH]          list paths by name, type, size or age
@@ -423,8 +530,16 @@ Connection flags (on every command):
   --ftps-ca FILE --ftps-insecure --ftps-allow-tls13
   -q, --quiet      print only errors
   --password-stdin read the password from the first line of stdin
-  --retries N      retry a failed connection N times (1s, 2s, 4s... backoff)
+  --progress       show progress for get/put (off by default)
+  --bwlimit RATE   cap speed, e.g. 500k or 2M (shared by parallel files)
+  --retries N      reconnect up to N times when the connection drops, resuming
+                   the file in flight (1s, 2s, 4s... backoff; -1 = forever;
+                   default 3 for sync/mirror/script, 0 elsewhere)
   --timeout D      connect timeout per attempt (default 1m0s)
+
+Inside script/shell: cd lcd pwd lpwd echo !CMD set alias source open close
+jobs wait kill queue exit, and CMD & to run a command in the background.
+"tideftp help COMMAND" shows a command's flags.
 
 Exit codes: 0 ok, 1 failed, 2 usage, 3 connection, 4 authentication, 5 not found.
 

@@ -67,9 +67,16 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 		sent, err = e.upload(conn, req, stop, quit, report)
 	}
 
+	// A ranged download that stopped at its segment's end closed the data
+	// connection early, which leaves the control connection owing a reply.
+	segmentDone := errors.Is(err, errSegmentDone)
+	if segmentDone {
+		err = nil
+	}
+
 	// A transfer that failed or was cancelled may have left the control
 	// connection mid-response, so it is dropped rather than reused.
-	if err != nil {
+	if err != nil || segmentDone {
 		e.pool.discard(conn)
 	} else {
 		e.pool.put(conn)
@@ -89,6 +96,10 @@ func (e *Engine) move(req transfer.Request, stop, quit <-chan struct{}, report f
 	return sent, err
 }
 
+// errSegmentDone marks a ranged download that read its whole segment and cut
+// the data connection short; the control connection must not be reused.
+var errSegmentDone = errors.New("segment complete")
+
 func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit <-chan struct{}, report func(int64)) (int64, error) {
 	source := vfs.CleanRemote(req.Source)
 	remote, err := conn.RetrFrom(source, uint64(req.Offset))
@@ -101,7 +112,7 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 		return 0, fmt.Errorf("create %s: %w", filepath.Dir(req.Destination), err)
 	}
 	flags := os.O_WRONLY | os.O_CREATE
-	if req.Offset == 0 {
+	if req.Offset == 0 && !req.NoTruncate {
 		flags |= os.O_TRUNC
 	}
 	local, err := os.OpenFile(req.Destination, flags, 0o644)
@@ -141,12 +152,41 @@ func (e *Engine) download(conn *ftp.ServerConn, req transfer.Request, stop, quit
 	sent := req.Offset
 	buf := make([]byte, transfer.CopyChunk)
 	lastReport := time.Now()
+	// A segment that ends before the file does is cut off here rather than
+	// read to EOF; one that runs to the file's end is an ordinary download.
+	end := req.SegmentEnd()
+	cutShort := end >= 0 && (req.Size <= 0 || end < req.Size)
 	for {
 		if transfer.IsCanceled(stop, quit) {
 			return sent, transfer.ErrCanceled
 		}
 		n, readErr := remote.Read(buf)
+		if end >= 0 && sent+int64(n) >= end {
+			n = int(end - sent)
+			if cutShort {
+				if n > 0 {
+					if !req.Limit.Wait(n, stop, quit) {
+						return sent, transfer.ErrCanceled
+					}
+					written, writeErr := local.Write(buf[:n])
+					sent += int64(written)
+					if writeErr != nil {
+						return sent, fmt.Errorf("write %s: %w", req.Destination, writeErr)
+					}
+				}
+				report(sent)
+				_ = remote.Close() // the server answers 426 to an early close; the bytes are all here
+				if err := local.Close(); err != nil {
+					return sent, fmt.Errorf("close %s: %w", req.Destination, err)
+				}
+				return sent, errSegmentDone
+			}
+			readErr = io.EOF
+		}
 		if n > 0 {
+			if !req.Limit.Wait(n, stop, quit) {
+				return sent, transfer.ErrCanceled
+			}
 			written, writeErr := local.Write(buf[:n])
 			sent += int64(written)
 			if writeErr != nil {
@@ -206,6 +246,7 @@ func (e *Engine) upload(conn *ftp.ServerConn, req transfer.Request, stop, quit <
 		quit:   quit,
 		report: report,
 		sent:   req.Offset,
+		limit:  req.Limit,
 	}
 	storErr := conn.StorFrom(destination, reader, uint64(req.Offset))
 	if storErr != nil {
@@ -245,6 +286,7 @@ type progressReader struct {
 	report     func(int64)
 	sent       int64
 	lastReport time.Time
+	limit      *transfer.Limiter
 }
 
 func (p *progressReader) Read(buf []byte) (int, error) {
@@ -253,6 +295,9 @@ func (p *progressReader) Read(buf []byte) (int, error) {
 	}
 	n, err := p.reader.Read(buf)
 	if n > 0 {
+		if !p.limit.Wait(n, p.stop, p.quit) {
+			return 0, transfer.ErrCanceled
+		}
 		p.sent += int64(n)
 		if time.Since(p.lastReport) >= transfer.ProgressInterval {
 			p.lastReport = time.Now()

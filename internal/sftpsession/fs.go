@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pkg/sftp"
 
@@ -169,6 +170,29 @@ func (f *FS) Chmod(ctx context.Context, path string, mode fs.FileMode) error {
 		return err
 	}
 	return f.client.Chmod(vfs.CleanRemote(path), mode)
+}
+
+// SetMtime stamps a file with its modification time (vfs.MtimeSetter).
+func (f *FS) SetMtime(ctx context.Context, path string, mtime time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.client.Chtimes(vfs.CleanRemote(path), mtime, mtime)
+}
+
+// Symlink and Readlink implement vfs.Symlinker.
+func (f *FS) Symlink(ctx context.Context, target, link string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.client.Symlink(target, vfs.CleanRemote(link))
+}
+
+func (f *FS) Readlink(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return f.client.ReadLink(vfs.CleanRemote(path))
 }
 
 func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {

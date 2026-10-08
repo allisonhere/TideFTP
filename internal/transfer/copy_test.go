@@ -24,10 +24,10 @@ func newStubEngine() *stubEngine {
 	}
 }
 
-func (s *stubEngine) Start(req Request)          { s.started <- req }
-func (s *stubEngine) Cancel(id int)              { s.canceled <- id }
-func (s *stubEngine) Events() <-chan Event       { return s.events }
-func (s *stubEngine) Close() error               { return nil }
+func (s *stubEngine) Start(req Request)    { s.started <- req }
+func (s *stubEngine) Cancel(id int)        { s.canceled <- id }
+func (s *stubEngine) Events() <-chan Event { return s.events }
+func (s *stubEngine) Close() error         { return nil }
 
 func TestCopyReturnsWhenTransferCompletes(t *testing.T) {
 	eng := newStubEngine()

@@ -189,7 +189,10 @@ func (d *Dialer) Dial(ctx context.Context, target session.Target, creds session.
 		}
 		if err := conn.Login(target.User, password); err != nil {
 			_ = conn.Quit()
-			return nil, fmt.Errorf("login %s@%s: %w", target.User, address, err)
+			// Quote the name and keep it apart from the address: "user@host"
+			// reads as though TideFTP had appended a domain to the login, when
+			// the username is sent exactly as it was typed.
+			return nil, fmt.Errorf("login as %q on %s: %w", target.User, address, err)
 		}
 		return conn, nil
 	}

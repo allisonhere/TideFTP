@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +77,16 @@ func (l *lockedFS) Remove(ctx context.Context, p string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.FS.Remove(ctx, p)
+}
+func (l *lockedFS) Chmod(ctx context.Context, p string, m fs.FileMode) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.FS.Chmod(ctx, p, m)
+}
+func (l *lockedFS) SetMtime(ctx context.Context, p string, t time.Time) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.FS.(vfs.MtimeSetter).SetMtime(ctx, p, t)
 }
 func (l *lockedFS) ReadFile(ctx context.Context, p string) ([]byte, error) {
 	l.mu.Lock()

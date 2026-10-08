@@ -299,18 +299,4 @@ func TestScriptRejectsPasswordStdinWithStdinScript(t *testing.T) {
 	}
 }
 
-func TestMirrorIsSyncAlias(t *testing.T) {
-	remote := fakefs.NewRemote()
-	src := t.TempDir()
-	writeLocal(t, src, "a.txt", "A")
-	if code, _, e := syncRunCLI(t, hosts(remote), "--dry-run", src, "alpha:/incoming/m"); code != 0 {
-		t.Fatalf("sync: %s", e)
-	}
-	app, _, _ := syncApp(t, hosts(remote))
-	if code := app.Run([]string{"mirror", src, "alpha:/incoming/m"}); code != 0 {
-		t.Fatalf("mirror exit = %d", code)
-	}
-	if readRemote(t, remote, "/incoming/m/a.txt") != "A" {
-		t.Fatalf("mirror did not copy")
-	}
-}
+func fakefsRemote() *fakefs.Remote { return fakefs.NewRemote() }

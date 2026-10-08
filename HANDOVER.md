@@ -2,10 +2,11 @@
 
 ## What changed
 
-- **Scriptable CLI.** The `tideftp` binary runs commands without the TUI —
-  file operations, `--json` listings, `sync`/`mirror`, and one-connection
-  `script`/`shell` — for scripts, CI and cron. See the *Non-interactive CLI*
-  section below; it has never been run against a real server.
+- **Scriptable CLI at lftp parity.** The `tideftp` binary runs commands without
+  the TUI — file operations, `--json`, `sync`/`mirror`, bandwidth limit,
+  auto-reconnect with resume, `pget`, and a `script`/`shell` language with
+  background jobs — for scripts, CI and cron. See the *Non-interactive CLI*
+  section below; it has been tested against in-process SFTP/FTP servers only.
 - **Queue is the live-transfer view.** The former Active tab is gone. Keys are
   `1` Queue, `2` Failed, `3` History, `4` Log, and `5` Stats.
 - Queue shows two meters when work is pending: **Queue** (the full draining
@@ -78,50 +79,76 @@ as a separate integration layer.
 ## Non-interactive CLI
 
 The same binary runs commands without the TUI. Any non-flag first argument
-goes to `cli.Run`; otherwise the app opens unchanged. User-facing docs are in
-the README "Scripting" section.
+goes to `cli.Run`; otherwise the app opens unchanged. User-facing docs are the
+README "Scripting" section (including a "Coming from lftp" table).
 
-```
-ls stat exists cat du find tree      read-only; ls/stat/find take --json
-get put rm mkdir mv chmod            get/put take globs and several sources
-sync (alias mirror) SRC DST          one-way mirror, PROFILE:/path locations
-script [-c CMDS | FILE]  shell       many commands over one connection
-```
+Layout of `internal/cli`:
 
-- **Exit codes** (`internal/cli/extra.go`): `0` ok, `1` failed, `2` usage,
-  `3` connect, `4` auth, `5` not found. `codedError` carries an explicit code
-  (a nil inner error is silent — `exists` uses that); `classifyDial` sorts dial
-  failures by message, so a server that words its auth error unusually will
-  land on `3`.
-- **Connections:** `App.open` dials per command, or returns `App.shared` (a
-  `keepOpen` wrapper whose Close is a no-op) when running inside `script`/
-  `shell`. `sync` always dials itself — one connection per `--transfers`
-  worker, because a `transfer.Engine` serves one transfer at a time and
-  `transfer.Copy` owns its event channel (never run two Copies on one engine).
-- **Writes are atomic:** `put` and `sync` upload to `NAME.part` and rename;
-  downloads in `sync` do the same and stamp the source mtime. `--resume`
-  continues a leftover download `.part` only when asked, since the source may
-  have changed.
+- `cli.go` — `App`, `dispatch` (command table), `report`/`exitCode`, shared
+  flags (`connFlags`), `resolveLimit`, `live` (wraps a conn in `liveConn`).
+- `commands.go` — ls/get/put/rm/mkdir/mv; `open`/`openWith` return the conn
+  (or the script's shared one).
+- `extra.go` — exit codes (`codedError`, `classifyDial`), globs, `stat`/`exists`.
+- `inspect.go` / `pget.go` — cat, du, find, tree, chmod, pget, rmdir, ln, readlink.
+- `sync.go`, `syncfilter.go`, `location.go` — the sync/mirror engine.
+- `redial.go` — `liveConn`, `resilientFS`, `resilientEngine`.
+- `script.go`, `jobs.go` — script/shell language and background jobs.
+- Tests: fakefs-based unit tests, plus `e2e_test.go` over `internal/testserver`.
+
+Design points worth knowing before changing it:
+
+- **Exit codes:** `0` ok, `1` failed, `2` usage, `3` connect, `4` auth,
+  `5` not found. `classifyDial` sorts dial failures by message text, so a server
+  that words an auth failure unusually lands on `3`.
+- **Reconnect/resume:** `liveConn` implements `session.Conn`, so no command
+  knows it is there. `resilientFS` retries each call after a redial and treats
+  the "already done" answer to a repeated mkdir/remove/rename/symlink as
+  success. `resilientEngine.Start` runs `transfer.Copy` on the live conn and, on
+  a transient error (`isTransient`), redials and resumes: downloads from the
+  local partial file's size, uploads from `Stat(.part)`, ranged segments from
+  the last progress report. A source whose size changed is a permanent error.
+- **One transfer per engine at a time.** `transfer.Copy` owns `Events()`, so
+  parallelism means one connection per worker (sync workers, pget segments, job
+  sessions). Never run two Copies on one engine.
+- **Limiter:** `transfer.Request.Limit` is read in the three byte-copy loops
+  (`sftpsession/engine.go`, `ftpsession/engine.go` download loop and
+  `progressReader`). One limiter shared between requests is a total cap.
+- **Ranged downloads:** `Request.Length`/`NoTruncate`. The FTP engine cuts a
+  segment short by closing the data connection and discards that control
+  connection (`errSegmentDone`); the last segment reads to EOF normally.
+- **Atomic writes:** `put`/`sync` upload to `NAME.part` and rename; sync
+  downloads do the same and stamp the source mtime. A stale `.part` is
+  discarded unless `--resume`.
 - **Sync safety:** deletions run only after every copy succeeded; an empty
-  source refuses `--delete` without `--allow-empty-source`; a file filtered out
-  by size/age is never treated as deleted from the source (delete candidates
-  are computed against the unfiltered source tree).
-- **Location syntax** (`location.go`): `prefix:path` is remote when the prefix
-  is two or more characters with no slash, so a one-letter profile name cannot
-  be used (Windows drive letters win).
-- **Not done:** `--bwlimit` (engines cannot throttle), redial mid-transfer,
-  `**` globs, `ln`, empty-dir mirroring under filters. See TODO.md.
-- **Never run against a real server.** The CLI tests use `fakefs` plus a
-  disk-copying test engine; `fakefs.Remote` is not goroutine-safe, so the sync
-  tests wrap it in a locking `vfs.FS`. Run `sync --dry-run`, `put`, `get` and
-  `script` against a QA host before trusting it.
+  source refuses `--delete`; delete candidates are computed against the
+  *unfiltered* source tree. `applyMeta` copies mtime (`vfs.MtimeSetter`) and
+  mode best-effort; FTP without MFMT just skips it.
+- **Optional vfs interfaces** (`vfs.MtimeSetter`, `vfs.Symlinker`) avoid
+  touching every `FS`. `resilientFS` must forward each one, or type assertions
+  on the wrapper silently fail.
+- **Scripts:** `App.shared` is the session; `open()` hands out `keepOpen`
+  around it. Background jobs and the `queue` get their own session
+  (`childSession`) with the cwd copied. `parseScript` is the tokenizer.
+- **Location syntax:** `prefix:path` is remote when the prefix is two or more
+  characters with no slash; a one-letter profile name is therefore unusable.
+
+- **Issue #3** ("adds @domain to the username"): the FTP login always sent the
+  typed name; the misleading part was the failed-login error text, now
+  `login as "user" on host:port`. `ftpsession/login_test.go` pins both.
+- **Short flags differ by command on purpose:** `-r` is recursive for
+  get/put/rm, no-recursion only on `mirror` (lftp's meaning), absent on `sync`.
+- `--progress` is opt-in and only drawn by `get`/`put` (`cli/progress.go`).
+- The user guide is `docs/scripting.md`; keep it in step with flag changes.
+
+Known limits are in TODO.md ("CLI follow-ups"). The big one: it has only run
+against the in-process test servers, never a third-party FTP/SFTP server.
 
 ## Verification and useful entry points
 
 - Last full verification: `go test ./...` and `git diff --check` pass.
-- Scripting work: unit tests in `internal/cli` (over `fakefs` plus a real
-  disk-copying test engine) and `internal/transfer/copy_test.go`; the FTP
-  adapter path was smoke-tested end to end against an in-process server.
+- Scripting work: `internal/cli` unit tests (over `fakefs`), real-protocol tests
+  in `internal/cli/e2e_test.go` (`go test -short` skips the paced ones),
+  `internal/transfer/{copy,limiter}_test.go`, and `internal/testserver`.
 - UI rendering and state live under `internal/ui/`; key areas are
   `view.go`, `model.go`, `recovery.go`, and `transfer_lab.go`.
 - Golden snapshots are in `internal/ui/testdata/`. Refresh intentionally with

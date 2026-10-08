@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,15 +30,27 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 // shape what --delete may remove: a file that merely falls outside --max-age
 // is "not selected", never "gone from the source".
 type syncFilter struct {
-	includes, excludes []string
-	minSize, maxSize   int64 // 0 = unset
-	minAge, maxAge     time.Duration
-	now                time.Time
+	includes, excludes   []string         // globs
+	includeRE, excludeRE []*regexp.Regexp // matched against the relative path
+	minSize, maxSize     int64            // 0 = unset
+	minAge, maxAge       time.Duration
+	newerThan, olderThan time.Time // zero = unset; compared with a file's mtime
+	now                  time.Time
 }
 
 func (f syncFilter) active() bool {
-	return len(f.includes) > 0 || len(f.excludes) > 0 ||
-		f.minSize > 0 || f.maxSize > 0 || f.minAge > 0 || f.maxAge > 0
+	return len(f.includes) > 0 || len(f.excludes) > 0 || len(f.includeRE) > 0 || len(f.excludeRE) > 0 ||
+		f.minSize > 0 || f.maxSize > 0 || f.minAge > 0 || f.maxAge > 0 ||
+		!f.newerThan.IsZero() || !f.olderThan.IsZero()
+}
+
+func matchesAny(res []*regexp.Regexp, rel string) bool {
+	for _, re := range res {
+		if re.MatchString(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 func patternMatches(pattern, rel string) bool {
@@ -56,7 +70,10 @@ func (f syncFilter) namePasses(rel string) bool {
 			return false
 		}
 	}
-	if len(f.includes) == 0 {
+	if matchesAny(f.excludeRE, rel) {
+		return false
+	}
+	if len(f.includes) == 0 && len(f.includeRE) == 0 {
 		return true
 	}
 	for _, p := range f.includes {
@@ -64,7 +81,7 @@ func (f syncFilter) namePasses(rel string) bool {
 			return true
 		}
 	}
-	return false
+	return matchesAny(f.includeRE, rel)
 }
 
 // dirExcluded reports whether an exclude pattern names the directory itself,
@@ -75,7 +92,7 @@ func (f syncFilter) dirExcluded(rel string) bool {
 			return true
 		}
 	}
-	return false
+	return matchesAny(f.excludeRE, rel+"/")
 }
 
 // selects reports whether a source file is part of the sync.
@@ -90,6 +107,12 @@ func (f syncFilter) selects(rel string, e domain.Entry) bool {
 		return false
 	}
 	if !e.Modified.IsZero() {
+		if !f.newerThan.IsZero() && !e.Modified.After(f.newerThan) {
+			return false
+		}
+		if !f.olderThan.IsZero() && !e.Modified.Before(f.olderThan) {
+			return false
+		}
 		age := f.now.Sub(e.Modified)
 		if f.minAge > 0 && age < f.minAge {
 			return false
@@ -166,4 +189,23 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// parseWhen reads a point in time for --newer-than / --older-than: an RFC 3339
+// timestamp, a plain date (2026-10-01), or the path of a local file whose
+// modification time is used.
+func parseWhen(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return t, nil
+		}
+	}
+	if info, err := os.Stat(s); err == nil {
+		return info.ModTime(), nil
+	}
+	return time.Time{}, fmt.Errorf("%q is neither a date (2026-10-01, RFC 3339) nor an existing file", s)
 }

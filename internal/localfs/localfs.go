@@ -14,12 +14,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"tideftp/internal/domain"
 	"tideftp/internal/vfs"
 )
 
-var _ vfs.FS = FS{}
+var (
+	_ vfs.FS          = FS{}
+	_ vfs.MtimeSetter = FS{}
+	_ vfs.Symlinker   = FS{}
+)
 
 type FS struct{}
 
@@ -145,6 +150,29 @@ func (FS) Chmod(ctx context.Context, path string, mode fs.FileMode) error {
 		return err
 	}
 	return os.Chmod(path, mode)
+}
+
+// SetMtime stamps path with mtime (vfs.MtimeSetter).
+func (FS) SetMtime(ctx context.Context, path string, mtime time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Chtimes(path, mtime, mtime)
+}
+
+// Symlink and Readlink implement vfs.Symlinker.
+func (FS) Symlink(ctx context.Context, target, link string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Symlink(target, link)
+}
+
+func (FS) Readlink(ctx context.Context, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return os.Readlink(path)
 }
 
 func (FS) ReadFile(ctx context.Context, path string) ([]byte, error) {

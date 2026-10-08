@@ -22,6 +22,8 @@ type Remote struct {
 	// contents holds file bodies for ReadFile/WriteFile, keyed by clean path.
 	// A listed file with no entry here reads as empty.
 	contents map[string][]byte
+	// links maps a symlink's path to its target.
+	links map[string]string
 	// latency stands in for network round-trip time. Zero in tests; the app
 	// sets a small one so the panes' loading state is visible in real use.
 	latency time.Duration
@@ -294,6 +296,63 @@ func (r *Remote) Chmod(ctx context.Context, targetPath string, mode fs.FileMode)
 		return nil
 	}
 	return fmt.Errorf("no such item: %s", targetPath)
+}
+
+// SetMtime stamps an entry's modification time (vfs.MtimeSetter).
+func (r *Remote) SetMtime(ctx context.Context, targetPath string, mtime time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	targetPath = clean(targetPath)
+	parent, name := path.Dir(targetPath), path.Base(targetPath)
+	children, ok := r.entries[parent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", parent)
+	}
+	for i, entry := range children {
+		if entry.Name == name {
+			updated := append([]domain.Entry(nil), children...)
+			updated[i].Modified = mtime
+			r.entries[parent] = updated
+			return nil
+		}
+	}
+	return fmt.Errorf("no such item: %s: %w", targetPath, fs.ErrNotExist)
+}
+
+// Symlink and Readlink implement vfs.Symlinker.
+func (r *Remote) Symlink(ctx context.Context, target, link string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	link = clean(link)
+	parent, name := path.Dir(link), path.Base(link)
+	children, ok := r.entries[parent]
+	if !ok {
+		return fmt.Errorf("no such directory: %s", parent)
+	}
+	for _, e := range children {
+		if e.Name == name {
+			return fmt.Errorf("%w: %s", vfs.ErrExists, link)
+		}
+	}
+	if r.links == nil {
+		r.links = map[string]string{}
+	}
+	r.links[link] = target
+	r.entries[parent] = append(append([]domain.Entry(nil), children...),
+		domain.Entry{Name: name, Kind: domain.EntrySymlink, Mode: "Lrwxrwxrwx", Modified: time.Now()})
+	return nil
+}
+
+func (r *Remote) Readlink(ctx context.Context, p string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if target, ok := r.links[clean(p)]; ok {
+		return target, nil
+	}
+	return "", fmt.Errorf("not a symbolic link: %s: %w", clean(p), fs.ErrNotExist)
 }
 
 func (r *Remote) ReadFile(ctx context.Context, filePath string) ([]byte, error) {
