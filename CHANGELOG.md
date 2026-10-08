@@ -9,6 +9,42 @@ feature batches and may change behaviour.
 
 ### Added
 
+- **Non-interactive CLI.** The `tideftp` binary now runs one command and
+  exits — `ls`, `get`, `put`, `rm`, `mkdir`, `mv` — for shell scripts, CI and
+  cron, in addition to the interactive app. A command takes the usual
+  connection flags or `--profile NAME`, prints results to stdout and progress
+  to stderr, and exits `0`/`1`/`2` (success / operation failed / usage or
+  connection error). Recursive `get -r`/`put -r` and `rm -r` walk a tree;
+  `--force` overwrites and `--resume` continues a partial download. Host keys
+  are strict by default (`--host-key-policy off` opts out), and passwords stay
+  out of argv — `TIDEFTP_SFTP_PASSWORD`/`TIDEFTP_FTP_PASSWORD` or a profile's
+  keyring entry. The connection plumbing is shared with the TUI through new
+  `internal/connect`, and `vfs.FS` gained `Stat` for existence and size.
+
+- **Scripting basics for the CLI.** `ls --json`, plus new `stat` and `exists`
+  (`-f`/`-d`; silent, exit `0` or `5`) commands. Remote wildcards in the last
+  path component for `ls`, `stat`, `get` and `rm` (a pattern that matches
+  nothing is a not-found error, not a silent success), and several sources for
+  `get`/`put` with the last operand as the destination directory. Exit codes
+  now distinguish usage (`2`), connection (`3`), authentication (`4`) and not
+  found (`5`) from a generic failure (`1`). New `--password-stdin`,
+  `--retries N` (connect only, 1s/2s/4s backoff) and `--timeout`. `put`
+  uploads to `NAME.part` and renames on success (`--no-part` opts out).
+
+- **`tideftp sync SRC DST`.** One-way mirror between a local directory and a
+  server, or between two servers, using `PROFILE:/path` / `:/path` locations.
+  Size/mtime comparison (or `--checksum` / `--size-only`), `--dry-run`,
+  opt-in `--delete` (run only after all copies succeed, and guarded against an
+  empty source), include/exclude globs, size and age limits, `--transfers N`
+  parallel workers, atomic `.part` files, mtime stamping on download and
+  `--resume`. `fakefs.Rename` now carries file bodies with it.
+
+- **Batch scripts and an interactive shell.** `tideftp script [-c CMDS|FILE]`
+  runs many commands over one connection (with `cd`/`lcd`/`pwd`/`exit`,
+  quoting, comments, `-k` keep-going and `-x` echo), and `tideftp shell` is
+  the same interactively. New commands: `cat`, `du`, `find`, `tree`, `chmod`
+  (octal or symbolic, `-R`), and `mirror` as an alias for `sync`.
+
 - **Live transfer visibility.** Queue is now the one operational transfer
   view: it contains both waiting and in-flight rows, with a pinned aggregate
   bytes-and-percent meter whenever files are moving. The redundant Active tab

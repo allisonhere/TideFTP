@@ -1,12 +1,12 @@
 package ui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"tideftp/internal/credstore"
 	"tideftp/internal/domain"
 	"tideftp/internal/session"
 )
@@ -203,10 +203,11 @@ func targetKey(t session.Target) profileKey {
 
 // credentialKey is the opaque key a stored password lives under: the same
 // identity targetKey uses, not target.Name, so renaming a saved profile
-// never orphans its stored password.
+// never orphans its stored password. The format lives in credstore.Key so the
+// non-interactive CLI resolves the same key.
 func credentialKey(t session.Target) string {
 	k := targetKey(t)
-	return fmt.Sprintf("%s|%s|%d|%s", k.protocol, k.host, k.port, k.user)
+	return credstore.Key(k.protocol, k.host, k.port, k.user)
 }
 
 // profileIndexOf returns the index of the saved profile matching target's key
@@ -503,7 +504,7 @@ func (m *Model) openConnectIdentityBrowser() {
 		showHidden: true,
 		selected:   map[string]bool{},
 	}
-	m.prependPaneParent(&m.connectIdentityPane, m.localFS)
+	m.prependPaneParent(&m.connectIdentityPane, m.localFS, listingNavigate)
 	m.connectIdentityPane.clamp(connectIdentityBrowserHeight - 1)
 	m.connectIdentityBrowse = true
 	m.setStatus("browse to an identity file")

@@ -1,7 +1,11 @@
-# TideFTP handover — transfer visibility, recovery, and test lab
+# TideFTP handover — transfers, recovery, test lab, and scripting
 
 ## What changed
 
+- **Non-interactive CLI.** The `tideftp` binary runs one command and exits —
+  `ls`, `get`, `put`, `rm`, `mkdir`, `mv`, with `-r` and `--force`/`--resume` —
+  for scripts, CI and cron, alongside the interactive app. See the
+  *Non-interactive CLI* section below.
 - **Queue is the live-transfer view.** The former Active tab is gone. Keys are
   `1` Queue, `2` Failed, `3` History, `4` Log, and `5` Stats.
 - Queue shows two meters when work is pending: **Queue** (the full draining
@@ -71,9 +75,48 @@ The lab validates UI/state behavior, not real FTP/SFTP/FTPS wire behavior.
 For protocol-level fault testing, add a local real server behind a fault proxy
 as a separate integration layer.
 
+## Non-interactive CLI
+
+The same binary does one operation and exits, so a shell script can move
+files without the TUI:
+
+```
+tideftp ls    [conn] [-l] [PATH]
+tideftp get   [conn] [-r] [--force] [--resume] REMOTE [LOCAL]
+tideftp put   [conn] [-r] [--force] [-p] LOCAL [REMOTE]
+tideftp rm    [conn] [-r] PATH...
+tideftp mkdir [conn] [-p] PATH...
+tideftp mv    [conn] OLD NEW
+tideftp help
+```
+
+- Every command takes the connection flags or `--profile NAME` from
+  `config.toml`. Results go to stdout, progress to stderr; `-q` silences
+  everything but errors.
+- Exit code is `0` success, `1` operation failed, `2` usage or connection
+  error.
+- Existing destinations are never overwritten: `--force` overwrites,
+  `--resume` continues a partial download from its current size.
+- `--host-key-policy` is `strict` by default — an unknown host key fails with
+  its fingerprint instead of hanging for input — and `off` to accept any.
+  Passwords are still never flags: `TIDEFTP_SFTP_PASSWORD` /
+  `TIDEFTP_FTP_PASSWORD`, or a profile's OS-keyring entry.
+- `mirror`/prune, scp-style `user@host:path` operands, `--json`, and parallel
+  transfers are deliberately not in this cut.
+
+Where it lives: `internal/cli` is the command layer (UI-free inside the same
+process); `internal/connect` builds the dialer and resolves a profile into a
+`session.Target`, shared with the TUI so the two cannot drift; `vfs.FS` gained
+`Stat`; `transfer.Copy` is the synchronous start-to-terminal helper.
+`cmd/tideftp/main.go` routes any non-flag first argument to `cli.Run` and
+otherwise opens the app unchanged.
+
 ## Verification and useful entry points
 
 - Last full verification: `go test ./...` and `git diff --check` pass.
+- Scripting work: unit tests in `internal/cli` (over `fakefs` plus a real
+  disk-copying test engine) and `internal/transfer/copy_test.go`; the FTP
+  adapter path was smoke-tested end to end against an in-process server.
 - UI rendering and state live under `internal/ui/`; key areas are
   `view.go`, `model.go`, `recovery.go`, and `transfer_lab.go`.
 - Golden snapshots are in `internal/ui/testdata/`. Refresh intentionally with

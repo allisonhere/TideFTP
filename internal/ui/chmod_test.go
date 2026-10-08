@@ -21,6 +21,9 @@ type unsupportedChmodFS struct{}
 func (unsupportedChmodFS) List(context.Context, string, bool) ([]domain.Entry, error) {
 	return []domain.Entry{{Name: "notes.txt", Kind: domain.EntryFile, Mode: "-rw-r--r--"}}, nil
 }
+func (unsupportedChmodFS) Stat(context.Context, string) (domain.Entry, error) {
+	return domain.Entry{Name: "notes.txt", Kind: domain.EntryFile, Mode: "-rw-r--r--"}, nil
+}
 func (unsupportedChmodFS) Child(current, name string) string            { return path.Join(current, name) }
 func (unsupportedChmodFS) Parent(current string) string                 { return path.Dir(current) }
 func (unsupportedChmodFS) Mkdir(context.Context, string) error          { return nil }

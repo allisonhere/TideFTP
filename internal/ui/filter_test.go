@@ -9,10 +9,15 @@ import (
 )
 
 // paneEntryNames is the visible entry names in a pane, in order.
+// paneEntryNames lists the pane's rows, leaving out the always-present ".."
+// row so tests can assert on real entries.
 func paneEntryNames(p filePane) []string {
-	names := make([]string, len(p.entries))
-	for i, e := range p.entries {
-		names[i] = e.Name
+	names := make([]string, 0, len(p.entries))
+	for _, e := range p.entries {
+		if isParentDirEntry(e) {
+			continue
+		}
+		names = append(names, e.Name)
 	}
 	return names
 }
@@ -25,8 +30,8 @@ func filteredRemote(t *testing.T) Model {
 	model := loadedModel(t, newScriptedEngine())
 	model.focus = focusRemote
 	model = settle(t, model, model.navigateTo(paneRemote, "/public_html"))
-	if len(model.remote.entries) != 5 {
-		t.Fatalf("setup: /public_html has %d entries, want 5", len(model.remote.entries))
+	if len(model.remote.entries) != 6 {
+		t.Fatalf("setup: /public_html has %d entries, want 6 (5 plus the parent row)", len(model.remote.entries))
 	}
 	return model
 }
@@ -47,8 +52,8 @@ func TestFilterNarrowsBySubstring(t *testing.T) {
 	if len(names) != 1 || names[0] != "app.css" {
 		t.Fatalf("filtered entries = %v, want [app.css]", names)
 	}
-	if len(model.remote.allEntries) != 5 {
-		t.Fatalf("allEntries = %d, want the full 5 kept behind the filter", len(model.remote.allEntries))
+	if len(model.remote.allEntries) != 6 {
+		t.Fatalf("allEntries = %d, want the full 6 kept behind the filter", len(model.remote.allEntries))
 	}
 }
 
@@ -145,7 +150,7 @@ func TestFilterEscClearsAndRestores(t *testing.T) {
 	if model.remote.filterActive() {
 		t.Fatalf("esc left the filter active: %+v", model.remote.filter)
 	}
-	if len(model.remote.entries) != 5 {
+	if len(model.remote.entries) != 6 {
 		t.Fatalf("esc restored %d entries, want the full 5", len(model.remote.entries))
 	}
 }
@@ -205,9 +210,8 @@ func TestFilterAlwaysKeepsParentEntry(t *testing.T) {
 	model = press(t, model, runes("/"))
 	model = press(t, model, runes("zzz-no-such-file"))
 
-	names := paneEntryNames(model.local)
-	if len(names) != 1 || names[0] != parentEntryName {
-		t.Fatalf("a no-match filter left %v, want just [%q]", names, parentEntryName)
+	if entries := model.local.entries; len(entries) != 1 || entries[0].Name != parentEntryName {
+		t.Fatalf("a no-match filter left %+v, want just [%q]", entries, parentEntryName)
 	}
 }
 

@@ -65,6 +65,15 @@ var _ vfs.FS = (*conflictFS)(nil)
 func (f *conflictFS) List(_ context.Context, dir string, _ bool) ([]domain.Entry, error) {
 	return f.entries[dir], nil
 }
+func (f *conflictFS) Stat(_ context.Context, target string) (domain.Entry, error) {
+	parent, base := path.Dir(target), path.Base(target)
+	for _, e := range f.entries[parent] {
+		if e.Name == base {
+			return e, nil
+		}
+	}
+	return domain.Entry{}, fs.ErrNotExist
+}
 func (f *conflictFS) Child(current, name string) string                { return path.Join(current, name) }
 func (f *conflictFS) Parent(current string) string                     { return path.Dir(current) }
 func (f *conflictFS) Mkdir(context.Context, string) error              { return nil }

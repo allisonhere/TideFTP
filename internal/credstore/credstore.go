@@ -6,6 +6,18 @@
 // config.toml.
 package credstore
 
+import "fmt"
+
+// Key is the opaque key a stored password lives under, derived from the parts
+// that name an account on a server: protocol, host, port and user together.
+// It deliberately excludes a profile's Name and StartPath, so renaming a saved
+// profile never orphans its stored password. Every caller that reads or writes
+// the keyring must build the key through this one function, or the app and the
+// non-interactive CLI would look up different keys for the same server.
+func Key(protocol, host string, port int, user string) string {
+	return fmt.Sprintf("%s|%s|%d|%s", protocol, host, port, user)
+}
+
 // Store gets, sets, and deletes a password by an opaque key. internal/ui
 // builds that key from a profile's protocol/host/port/user, never its name,
 // so renaming a saved profile does not orphan its stored password.

@@ -83,6 +83,36 @@ func (FS) Child(current, name string) string { return filepath.Join(current, nam
 // knows there is nowhere further up to go.
 func (FS) Parent(current string) string { return filepath.Dir(current) }
 
+func (FS) Stat(ctx context.Context, target string) (domain.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Entry{}, err
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		return domain.Entry{}, err
+	}
+	kind := domain.EntryFile
+	linksToDir := false
+	switch {
+	case info.IsDir():
+		kind = domain.EntryDir
+	case info.Mode()&os.ModeSymlink != 0:
+		kind = domain.EntrySymlink
+		if resolved, err := os.Stat(target); err == nil {
+			linksToDir = resolved.IsDir()
+		}
+	}
+	return domain.Entry{
+		Name:       info.Name(),
+		Kind:       kind,
+		Size:       info.Size(),
+		Mode:       info.Mode().String(),
+		Modified:   info.ModTime(),
+		Hidden:     strings.HasPrefix(info.Name(), "."),
+		LinksToDir: linksToDir,
+	}, nil
+}
+
 func (FS) Mkdir(ctx context.Context, dirPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err

@@ -46,6 +46,18 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 
 ## Tier 2 — server-admin essentials
 
+- [x] **Non-interactive CLI** — the `tideftp` binary now runs one command and
+      exits: `ls`, `get`, `put`, `rm`, `mkdir`, `mv`, with `-r` recursion for
+      `get`/`put`/`rm`, and `--force`/`--resume` for overwrite and continuation.
+      Connection comes from the usual flags or `--profile NAME`; passwords stay
+      out of argv (`TIDEFTP_SFTP_PASSWORD`/`TIDEFTP_FTP_PASSWORD`, or a profile's
+      OS-keyring entry); host keys are strict by default. Exit `0`/`1`/`2`
+      (success / operation failed / usage or connection error). The connection
+      plumbing is shared with the TUI through `internal/connect`, the command
+      layer is UI-free in `internal/cli`, `vfs.FS` gained `Stat`, and
+      `transfer.Copy` is the synchronous start-to-terminal helper. Not yet:
+      scp-style `user@host:path` operands, `mirror`/prune, `--json`, parallel
+      transfers.
 - [x] **chmod / permissions edit** — `m` opens an octal-mode prompt for the
       selection or highlighted row, pre-filled with the current mode and
       echoing the symbolic form back. `vfs.FS` gained `Chmod`; localfs and
@@ -116,7 +128,10 @@ Feature backlog, roughly prioritised. Not a spec; each needs its own design pass
 
 ## Smaller / opportunistic
 
-- [ ] `--host-key-policy` startup flag (form + persistence already done).
+- [ ] `--host-key-policy` startup flag for the interactive app. The
+      non-interactive CLI already takes it (`strict` default, `off` to accept
+      any); the connect form and persistence are done, but the TUI still has no
+      equivalent startup flag.
 - [x] Normalise trailing whitespace in the golden files — `-update` already
       wrote trimmed files (see `assertGolden`); regenerating them for the Tier 3
       work committed the trim, so the churn is gone.

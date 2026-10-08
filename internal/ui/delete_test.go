@@ -105,6 +105,22 @@ func (f *deleteFS) List(ctx context.Context, dir string, _ bool) ([]domain.Entry
 	return append([]domain.Entry(nil), entries...), nil
 }
 
+func (f *deleteFS) Stat(_ context.Context, target string) (domain.Entry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	target = syncClean(target)
+	if target == "/" {
+		return domain.Entry{Name: "/", Kind: domain.EntryDir, Mode: "drwxr-xr-x"}, nil
+	}
+	parent, base := path.Dir(target), path.Base(target)
+	for _, e := range f.tree[parent] {
+		if e.Name == base {
+			return e, nil
+		}
+	}
+	return domain.Entry{}, fs.ErrNotExist
+}
+
 // Remove refuses a non-empty directory, like rmdir and like every real
 // vfs.FS adapter.
 func (f *deleteFS) Remove(ctx context.Context, target string) error {

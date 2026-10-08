@@ -556,8 +556,8 @@ func TestEnteringDirectoryClearsSelection(t *testing.T) {
 	if len(model.remote.selected) != 0 {
 		t.Fatalf("selection survived a directory change: %v", model.remote.selected)
 	}
-	if model.remote.cursor != 0 || model.remote.offset != 0 {
-		t.Fatalf("entering a directory left cursor=%d offset=%d, want 0/0", model.remote.cursor, model.remote.offset)
+	if model.remote.cursor != 1 || model.remote.offset != 0 {
+		t.Fatalf("entering a directory left cursor=%d offset=%d, want 1/0", model.remote.cursor, model.remote.offset)
 	}
 
 	// Going back up is a directory change too.

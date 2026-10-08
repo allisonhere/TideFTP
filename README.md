@@ -10,6 +10,8 @@ SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
   resume, conflict policies.
 - Directory mirror (`M`) with a pre-flight plan and opt-in prune.
 - Streaming preview and in-place edit without downloading the whole file.
+- A non-interactive mode for scripts and CI (`tideftp get`, `put`, `ls`, …),
+  sharing the same connection handling as the app.
 - Strict host-key checking; passwords are never passed as flags.
 - `tide-night` default theme plus a live theme picker, soft modal screens,
   shift-arrow pane resizing. `match-omarchy` follows your current
@@ -107,6 +109,127 @@ other user on the machine to read.
 Check the version of a built binary with `tideftp --version` (release builds inject it
 via `-ldflags "-X main.version=$VERSION"`; `go run`/`go build` without that flag reports
 `dev`).
+
+## Scripting
+
+The same binary also runs one command and exits, for shell scripts, CI and
+cron. It takes the connection flags above plus an operation:
+
+```bash
+tideftp ls [--host ...] [PATH]           list a directory, or one path
+tideftp get [flags] REMOTE [LOCAL]       download a file (or -r a directory)
+tideftp put [flags] LOCAL [REMOTE]       upload a file (or -r a directory)
+tideftp rm [flags] PATH...               delete files (or -r directories)
+tideftp mkdir [-p] PATH...               create directories
+tideftp mv OLD NEW                       rename a remote path
+tideftp sync [flags] SRC DST             one-way mirror (see below); `mirror` is an alias
+tideftp cat PATH...                      write remote files to stdout
+tideftp du [-h] [-d N] PATH...           total size (per directory with -d)
+tideftp find [PATH] --name '*.log' --type f --min-age 7d   list matching paths
+tideftp tree [-L N] [PATH]               indented directory tree
+tideftp chmod [-R] 755|u+x,go-w PATH...  set permissions (SFTP only)
+tideftp script [-c CMDS | FILE]          many commands over ONE connection
+tideftp shell                            the same, interactively
+tideftp stat [--json] PATH...            type, size, mode, mtime
+tideftp exists [-f|-d] PATH...           silent; exit 0 if all exist, 5 if not
+tideftp help
+```
+
+A saved profile keeps the connection in one place:
+
+```bash
+tideftp get --profile prod /var/log/app.log ./logs/
+tideftp put --profile prod ./build.tar /releases/
+tideftp get -r --profile prod /var/www ./www
+```
+
+- Exit codes: `0` success, `1` an operation failed, `2` usage, `3` could not
+  connect, `4` authentication rejected, `5` a path was not found — so `&&`
+  chains and CI steps behave, and a script can react to each.
+- `ls --json` and `stat --json` print a JSON array of
+  `{name, path, type, size, mode, modified}`; `if tideftp exists -f --profile
+  prod /flag; then …` needs no parsing at all.
+- Remote wildcards work in the last path component (`get '/logs/*.gz' ./logs`,
+  `rm '/tmp/*.part'`); like a shell they skip dotfiles. A pattern that matches
+  nothing is exit `5`. `get`/`put` take several sources, the last operand being
+  the destination directory.
+- `put` writes to `NAME.part` and renames when it finishes, so a reader never
+  sees a half-written file (`--no-part` to disable).
+- `--password-stdin` reads the password from the first line of stdin;
+  `--retries N` retries a failed *connection* with backoff, and `--timeout`
+  bounds each connect attempt.
+- Progress goes to stderr, listings and destination paths to stdout; `-q`
+  silences everything but errors.
+- Existing destinations are never overwritten: `--force` overwrites,
+  `--resume` continues a partial download from where it stopped.
+- `--host-key-policy` is `strict` by default — an unknown host key fails with
+  its fingerprint rather than hanging for input — and `off` to accept any.
+- Passwords are still never flags: use `TIDEFTP_FTP_PASSWORD` /
+  `TIDEFTP_SFTP_PASSWORD`, or save one on a profile (read from the OS keyring).
+
+### Sync
+
+`sync` makes DST match SRC, one way. Either side is a local directory or a
+server: `PROFILE:/path` uses a saved profile, `:/path` uses the connection
+flags (`--host`, …). Put `./` in front of a local path that has a colon in it.
+Remote-to-remote works too (the bytes relay through a temp file here).
+
+```bash
+tideftp sync ./site prod:/var/www                  # upload what changed
+tideftp sync --dry-run --delete ./site prod:/var/www   # preview, incl. deletions
+tideftp sync prod:/var/log ./logs --include '*.gz' --max-age 7d
+tideftp sync prod:/data staging:/data --transfers 8
+```
+
+- Files are compared by size, then modification time (the source must be
+  more than 2s newer). `--checksum` hashes same-size files instead;
+  `--size-only` ignores time.
+- Nothing is deleted unless you pass `--delete`, deletions run only after every
+  copy succeeded, and an empty source refuses to delete anything without
+  `--allow-empty-source`.
+- `--include`/`--exclude` take globs (no slash: match the name; with a slash:
+  match the path under the root); `--min-size`/`--max-size` (`10k`, `5M`) and
+  `--min-age`/`--max-age` (`2h`, `7d`) select source files. A file that is only
+  filtered out is never treated as deleted from the source.
+- `--transfers N` (default 4) moves files in parallel, one connection per
+  worker. Files land as `NAME.part` and are renamed when complete; downloads
+  are stamped with the source's mtime, and `--resume` continues an interrupted
+  download. Symlinked directories are skipped.
+- `--dry-run` prints `copy`/`update`/`delete`/`mkdir` lines and changes
+  nothing. A failure on one file does not stop the others; the exit code is `1`
+  if anything failed.
+
+### Scripts and the shell
+
+Reconnecting for every command is slow and trips server login limits.
+`script` connects once and runs a list of commands over that connection:
+
+```bash
+tideftp script --profile prod -c 'cd /var/www; lcd ./build; put index.html; chmod 644 index.html'
+
+tideftp script --profile prod deploy.tide        # one command per line, # comments
+tideftp shell --profile prod                     # interactive; prompt is on stderr
+```
+
+- Commands are the ones above plus `cd`, `lcd`, `pwd`, `lpwd`, `exit [N]`.
+  `cd` changes what relative remote paths mean for the rest of the script.
+  Words split on whitespace; `'single'` and `"double"` quotes and `\` escapes
+  work, `;` or a newline ends a command, a trailing `\` continues a line.
+- A script stops at the first failing command and exits with that command's
+  exit code. `-k` keeps going and exits with the *first* failure's code
+  (`shell` does this by default); `-x` echoes each command to stderr.
+- Connection flags belong on `script`/`shell` itself; ones on an inner command
+  are ignored. `sync` inside a script still opens its own connections, so give
+  it `PROFILE:` locations. `--password-stdin` cannot be combined with a script
+  read from stdin.
+
+For example, a nightly mirror to a server whose key is already trusted:
+
+```bash
+#!/bin/sh
+set -eu
+tideftp get -r --profile prod /var/www/uploads /srv/backups/uploads
+```
 
 ## Keys
 

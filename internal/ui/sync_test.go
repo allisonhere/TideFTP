@@ -79,6 +79,20 @@ func (f *syncFS) Parent(current string) string {
 	return p
 }
 
+func (f *syncFS) Stat(_ context.Context, target string) (domain.Entry, error) {
+	target = syncClean(target)
+	if target == "/" {
+		return domain.Entry{Name: "/", Kind: domain.EntryDir, Mode: "drwxr-xr-x"}, nil
+	}
+	parent, base := path.Dir(target), path.Base(target)
+	for _, e := range f.tree[parent] {
+		if e.Name == base {
+			return e, nil
+		}
+	}
+	return domain.Entry{}, fs.ErrNotExist
+}
+
 func (f *syncFS) Remove(_ context.Context, target string) error {
 	target = syncClean(target)
 	parent := f.Parent(target)

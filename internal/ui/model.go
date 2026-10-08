@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"tideftp/internal/config"
+	"tideftp/internal/connect"
 	"tideftp/internal/credstore"
 	"tideftp/internal/domain"
 	"tideftp/internal/session"
@@ -613,21 +614,7 @@ func (m Model) snapshotConfig() config.Config {
 // profilesFromConfig converts persisted profiles into the session.Target shape
 // the connect form and dialer use.
 func profilesFromConfig(profiles []config.Profile) []session.Target {
-	if len(profiles) == 0 {
-		return nil
-	}
-	targets := make([]session.Target, len(profiles))
-	for i, p := range profiles {
-		targets[i] = session.Target{
-			Name: p.Name, Protocol: p.Protocol, Host: p.Host,
-			Port: p.Port, User: p.User, StartPath: p.StartPath,
-			HostKeyPolicy: session.NormalizeHostKeyPolicy(p.HostKeyPolicy),
-			// Copied, not shared: m.profiles and any config snapshot taken
-			// from it must never write through to the same backing array.
-			Bookmarks: append([]string(nil), p.Bookmarks...),
-		}
-	}
-	return targets
+	return connect.TargetFromProfiles(profiles)
 }
 
 // profilesToConfig converts saved connection targets into the config schema
@@ -1625,11 +1612,15 @@ func (m *Model) applyListing(msg listingMsg) {
 		target.clamp(m.filePaneVisibleRows())
 	}
 	if msg.pane == paneLocal {
-		m.prependPaneParent(&m.local, m.localFS)
+		m.prependPaneParent(&m.local, m.localFS, msg.kind)
+		target.clamp(m.filePaneVisibleRows())
+	}
+	if msg.pane == paneRemote && m.remoteFS != nil {
+		m.prependPaneParent(&m.remote, m.remoteFS, msg.kind)
 		target.clamp(m.filePaneVisibleRows())
 	}
 	if msg.pane == paneIdentity {
-		m.prependPaneParent(&m.connectIdentityPane, m.localFS)
+		m.prependPaneParent(&m.connectIdentityPane, m.localFS, msg.kind)
 		target.clamp(connectIdentityBrowserHeight - 1)
 	}
 	// The pane filter belongs to one directory: walking into a new one drops
@@ -1657,13 +1648,19 @@ func isParentDirEntry(entry domain.Entry) bool {
 	return entry.Name == parentEntryName && entry.IsDir()
 }
 
-func (m *Model) prependPaneParent(pane *filePane, fs vfs.FS) {
+func (m *Model) prependPaneParent(pane *filePane, fs vfs.FS, kind listingKind) {
 	if pane.path == "" || fs.Parent(pane.path) == pane.path {
 		return
 	}
+	if len(pane.entries) > 0 && isParentDirEntry(pane.entries[0]) {
+		return
+	}
 	pane.entries = append([]domain.Entry{parentDirEntry()}, pane.entries...)
-	pane.cursor++
-	pane.offset++
+	// A fresh directory starts on its first real row rather than on "..";
+	// a refresh already holds a cursor that counted the ".." row.
+	if kind == listingNavigate {
+		pane.cursor++
+	}
 }
 
 // navigateTo walks a pane to dirPath. The path is not committed until the

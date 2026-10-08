@@ -96,6 +96,37 @@ func (f *FS) Child(current, name string) string { return vfs.ChildRemote(current
 
 func (f *FS) Parent(current string) string { return vfs.ParentRemote(current) }
 
+// Stat is a single Lstat, plus one Stat when the target is a symlink to settle
+// whether it resolves to a directory — the same rule List applies. pkg/sftp
+// normalises "no such file" to fs.ErrNotExist, so callers can test for it.
+func (f *FS) Stat(ctx context.Context, target string) (domain.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Entry{}, err
+	}
+	target = vfs.CleanRemote(target)
+	info, err := f.client.Lstat(target)
+	if err != nil {
+		return domain.Entry{}, err
+	}
+	kind := entryKind(info.Mode())
+	linksToDir := false
+	if kind == domain.EntrySymlink {
+		if resolved, statErr := f.client.Stat(target); statErr == nil {
+			linksToDir = resolved.IsDir()
+		}
+	}
+	name := info.Name()
+	return domain.Entry{
+		Name:       name,
+		Kind:       kind,
+		Size:       info.Size(),
+		Mode:       info.Mode().String(),
+		Modified:   info.ModTime(),
+		Hidden:     strings.HasPrefix(name, "."),
+		LinksToDir: linksToDir,
+	}, nil
+}
+
 func (f *FS) Mkdir(ctx context.Context, dirPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err

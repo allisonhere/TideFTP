@@ -78,6 +78,54 @@ func (f *FS) Child(current, name string) string { return vfs.ChildRemote(current
 
 func (f *FS) Parent(current string) string { return vfs.ParentRemote(current) }
 
+// Stat resolves one path to an entry. It prefers MLST via GetEntry; a server
+// without it (GetEntry returns StatusNotImplemented), or a path MLST refuses,
+// falls back to scanning the parent's listing — the same fallback ftpPathExists
+// uses. A path with no entry returns fs.ErrNotExist.
+func (f *FS) Stat(ctx context.Context, statPath string) (domain.Entry, error) {
+	statPath = vfs.CleanRemote(statPath)
+	var item *ftp.Entry
+	err := f.withConn(ctx, func(conn *ftp.ServerConn) error {
+		if entry, err := conn.GetEntry(statPath); err == nil {
+			item = entry
+			return nil
+		}
+		if statPath == "/" {
+			return nil
+		}
+		parent, base := path.Dir(statPath), path.Base(statPath)
+		entries, err := conn.List(parent)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if entry != nil && entry.Name == base {
+				item = entry
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Entry{}, err
+	}
+	if item == nil {
+		if statPath == "/" {
+			return domain.Entry{Name: "/", Kind: domain.EntryDir, Mode: "dir"}, nil
+		}
+		return domain.Entry{}, fs.ErrNotExist
+	}
+	base := path.Base(statPath)
+	return domain.Entry{
+		Name:     base,
+		Kind:     entryKind(item.Type),
+		Size:     int64(item.Size),
+		Mode:     modeLabel(item.Type),
+		Modified: item.Time,
+		Hidden:   strings.HasPrefix(base, "."),
+	}, nil
+}
+
 func (f *FS) Mkdir(ctx context.Context, dirPath string) error {
 	return f.withConn(ctx, func(conn *ftp.ServerConn) error {
 		return conn.MakeDir(vfs.CleanRemote(dirPath))

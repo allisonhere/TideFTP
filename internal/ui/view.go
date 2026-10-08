@@ -190,7 +190,7 @@ func (m Model) renderFilePane(renderer tideui.Renderer, pane filePane, width, he
 		entry := pane.entries[index]
 		rows = append(rows, m.renderEntryRow(renderer, entry, index == pane.cursor, pane.selected[entry.Name], width))
 	}
-	if len(pane.entries) == 0 {
+	if shown, _ := pane.filterCounts(); shown == 0 {
 		label := "empty"
 		switch {
 		case pane.loading:

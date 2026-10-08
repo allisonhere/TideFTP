@@ -126,6 +126,26 @@ func (r *Remote) Parent(current string) string {
 	return parent
 }
 
+// Stat finds one entry in its parent's listing, which is how the fake stores
+// everything. The root exists by construction. A missing path wraps
+// fs.ErrNotExist, matching the real adapters.
+func (r *Remote) Stat(ctx context.Context, target string) (domain.Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Entry{}, err
+	}
+	target = clean(target)
+	if target == "/" {
+		return domain.Entry{Name: "/", Kind: domain.EntryDir, Mode: "drwxr-xr-x"}, nil
+	}
+	parent, name := path.Dir(target), path.Base(target)
+	for _, entry := range r.entries[parent] {
+		if entry.Name == name {
+			return entry, nil
+		}
+	}
+	return domain.Entry{}, fs.ErrNotExist
+}
+
 func (r *Remote) Mkdir(ctx context.Context, dirPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -188,6 +208,17 @@ func (r *Remote) Rename(ctx context.Context, oldPath, newPath string) error {
 	r.entries[oldParent] = remaining
 	entry.Name = newName
 	r.entries[newParent] = append(r.entries[newParent], entry)
+	// File bodies are keyed by path, so they move with the rename.
+	moveBodies := map[string][]byte{}
+	for p, body := range r.contents {
+		if p == oldPath || strings.HasPrefix(p, oldPath+"/") {
+			moveBodies[newPath+strings.TrimPrefix(p, oldPath)] = body
+			delete(r.contents, p)
+		}
+	}
+	for p, body := range moveBodies {
+		r.contents[p] = body
+	}
 	if entry.IsDir() {
 		moved := map[string][]domain.Entry{}
 		for dirPath, entries := range r.entries {

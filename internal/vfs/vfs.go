@@ -37,6 +37,12 @@ type FS interface {
 	// List returns the entries in dirPath, omitting hidden ones unless
 	// showHidden is set. It must honour ctx cancellation.
 	List(ctx context.Context, dirPath string, showHidden bool) ([]domain.Entry, error)
+	// Stat returns the single entry at path, in the same shape List reports
+	// for the same name. A symlink is reported as EntrySymlink, with
+	// LinksToDir set when it resolves to a directory, matching List. A path
+	// that does not exist wraps fs.ErrNotExist, so callers test it with
+	// errors.Is.
+	Stat(ctx context.Context, path string) (domain.Entry, error)
 	// Child resolves the path of name inside current. It is pure path math:
 	// no I/O, no error, safe to call on the UI goroutine.
 	Child(current, name string) string
