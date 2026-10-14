@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -351,6 +352,7 @@ type Model struct {
 	queueBatchStartID int
 	queueBatchActive  bool
 	maxParallel       int
+	scanFileLimit     int // 0 = unlimited
 	bottomTab         bottomTab
 	bottomOffset      int
 	// bottomCursor selects one row within the current bottom-pane tab's
@@ -521,7 +523,8 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		maxParallel = defaultParallelTransfers
 	}
 	model := Model{
-		focus: focusLocal,
+		scanFileLimit: cfg.ScanFileLimit,
+		focus:         focusLocal,
 		local: filePane{
 			title:      "Local",
 			path:       cwd,
@@ -601,6 +604,7 @@ func (m Model) snapshotConfig() config.Config {
 		Shadow:                      m.shadow,
 		ShowIcons:                   m.showIcons,
 		MaxParallel:                 m.maxParallel,
+		ScanFileLimit:               m.scanFileLimit,
 		Editor:                      m.editorSetting,
 		VerifyChecksums:             m.verifyChecksums,
 		AutoReconnect:               m.autoReconnect,
@@ -1987,11 +1991,27 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) tea.Cmd {
 	return m.startPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden)
 }
 
-// preflightScanCap bounds how many files one preflight scan will discover
+// defaultScanFileLimit bounds (by default) how many files one preflight scan will discover
 // before giving up and reporting a lower bound instead (scan.truncated),
 // so a pathological or enormous tree cannot make queuing a folder hang the
 // UI or balloon memory.
-const preflightScanCap = 100000
+const defaultScanFileLimit = 100000
+
+// scanFileLimits is the Settings row's cycle order; 0 is unlimited.
+var scanFileLimits = []int{10000, 50000, 100000, 500000, 1000000, 0}
+
+// scanCap turns a ScanFileLimit setting into a count the scans can compare
+// against: 0 (unlimited) becomes the largest int, and a negative value from
+// a hand-edited config falls back to the default.
+func scanCap(limit int) int {
+	switch {
+	case limit == 0:
+		return math.MaxInt
+	case limit < 0:
+		return defaultScanFileLimit
+	}
+	return limit
+}
 
 // preflightScanTimeout bounds the sync scans (sync.go); the transfer scan
 // bounds each listing instead, so a big tree can take as long as it needs.
@@ -2068,7 +2088,7 @@ type preflightScan struct {
 	files      []preflightFile
 	folders    int
 	totalBytes int64
-	truncated  bool // hit preflightScanCap; files/totalBytes are a lower bound
+	truncated  bool // hit the scan file limit; files/totalBytes are a lower bound
 	cursor     int  // selects a policy row in overlayConflict
 	// skippedLinks counts symlinks pointing at directories that the walk
 	// left alone. They cannot be queued: transfer.Engine moves file bytes and
@@ -2195,7 +2215,7 @@ type preflightScanMsg struct {
 func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
 	m.setStatus("scanning…")
 	return func() tea.Msg {
-		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, nil, nil, nil, 0)
+		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, scanCap(m.scanFileLimit), nil, nil, nil, 0)
 	}
 }
 
@@ -2221,6 +2241,7 @@ func (m *Model) startPreflightScan(direction domain.TransferDirection, entries [
 	}
 	events := make(chan tea.Msg, 1)
 	m.scanEvents = events
+	limit := scanCap(m.scanFileLimit)
 	go func() {
 		defer close(events)
 		report := func(progress scanProgressMsg) {
@@ -2238,12 +2259,12 @@ func (m *Model) startPreflightScan(direction domain.TransferDirection, entries [
 				}
 			}
 		}
-		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, report, batch, ctx, token)
+		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, limit, report, batch, ctx, token)
 	}()
 	return tea.Batch(waitForScanEvent(events), tick)
 }
 
-func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, report func(scanProgressMsg), batch func(preflightScan), parent context.Context, token int) preflightScanMsg {
+func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, limit int, report func(scanProgressMsg), batch func(preflightScan), parent context.Context, token int) preflightScanMsg {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -2294,7 +2315,7 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 	}
 
 	for len(stack) > 0 {
-		if !streaming && len(scan.files) >= preflightScanCap {
+		if !streaming && len(scan.files) >= limit {
 			scan.truncated = true
 			break
 		}
@@ -2325,7 +2346,7 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 				scan.skippedLinks++
 				continue
 			}
-			if !streaming && len(scan.files) >= preflightScanCap {
+			if !streaming && len(scan.files) >= limit {
 				scan.truncated = true
 				break
 			}

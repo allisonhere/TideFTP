@@ -50,7 +50,7 @@ type syncPlan struct {
 	pruneBytes int64
 	prune      bool // armed by the overlay's "p"
 
-	truncated bool // hit preflightScanCap; counts are a lower bound
+	truncated bool // hit the scan file limit; counts are a lower bound
 	// skippedLinks counts symlinked directories left alone by the walk, the
 	// same way preflightScan.skippedLinks does and for the same reasons.
 	skippedLinks int
@@ -151,6 +151,7 @@ func (m *Model) startSync() tea.Cmd {
 // file is neither copied nor counted as an extra to prune when hidden files
 // are off.
 func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
+	limit := scanCap(m.scanFileLimit)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), preflightScanTimeout)
 		defer cancel()
@@ -175,7 +176,7 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 		var orphanDirs []string
 
 		for len(stack) > 0 {
-			if plan.count() >= preflightScanCap {
+			if plan.count() >= limit {
 				plan.truncated = true
 				break
 			}
@@ -219,7 +220,7 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 					plan.skippedLinks++
 					continue
 				}
-				if plan.count() >= preflightScanCap {
+				if plan.count() >= limit {
 					plan.truncated = true
 					break
 				}
@@ -258,7 +259,7 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 		// Every extra destination subtree, flattened so prune can delete it
 		// bottom-up.
 		for _, root := range orphanDirs {
-			collectPruneTree(ctx, dstFS, root, showHidden, &plan)
+			collectPruneTree(ctx, dstFS, root, showHidden, limit, &plan)
 		}
 		sort.SliceStable(plan.prunePaths, func(i, j int) bool {
 			return strings.Count(plan.prunePaths[i].path, "/") > strings.Count(plan.prunePaths[j].path, "/")
@@ -270,10 +271,10 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 
 // collectPruneTree adds root and everything under it to plan.prunePaths, so a
 // destination subtree with no source counterpart can be removed entirely.
-func collectPruneTree(ctx context.Context, dstFS vfs.FS, root string, showHidden bool, plan *syncPlan) {
+func collectPruneTree(ctx context.Context, dstFS vfs.FS, root string, showHidden bool, limit int, plan *syncPlan) {
 	stack := []string{root}
 	for len(stack) > 0 {
-		if plan.count() >= preflightScanCap {
+		if plan.count() >= limit {
 			plan.truncated = true
 			return
 		}

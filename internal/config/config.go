@@ -25,6 +25,10 @@ type Config struct {
 	Shadow      bool   `toml:"shadow"`
 	ShowIcons   bool   `toml:"show_icons"`
 	MaxParallel int    `toml:"max_parallel"`
+	// ScanFileLimit is how many files one folder scan (queuing a folder
+	// transfer, or a mirror) will discover before stopping early. 0 means
+	// unlimited. A file without the key gets the default.
+	ScanFileLimit int `toml:"scan_file_limit"`
 	// ConflictPolicy is what to do when a queued file already exists at its
 	// destination: "" (ask), "overwrite", "overwrite-newer", "overwrite-size",
 	// "overwrite-size-newer", "resume", "rename" or "skip". Anything but ask
@@ -135,6 +139,7 @@ func Default() Config {
 		Shadow:                      true,
 		ShowIcons:                   true,
 		MaxParallel:                 2,
+		ScanFileLimit:               100000,
 		AutoReconnect:               true,
 		RecoverInterruptedTransfers: true,
 		CheckConnectivity:           true,

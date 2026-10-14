@@ -9,6 +9,7 @@
 │                  │    Icons                                               on  │                  │
 │                  │  Transfer performance                                      │                  │
 │                  │    Max Parallel                                         2  │                  │
+│                  │    Scan file limit                                 100000  │                  │
 │                  │  Workflow                                                  │                  │
 │                  │    Editor                                              vi  │                  │
 │                  │  Reliability                                               │                  │
@@ -18,13 +19,12 @@
 │                  │    Connectivity check            on · pauses when offline  │                  │
 │                  │  Workflow                                                  │                  │
 │                  │    If file exists                                     ask  │                  │
-│                  │  Updates                                                   │                  │
-╰──────────────────│    Check for updates                                   on  │──────────────────╯
-╭──────────────────│    Updates                     dev build — enter to check  │──────────────────╮
-│Transfers         │                                                            │             queue│
-│  1 Queue (2x)    │    up/down select   h/l change   esc close                 │                  │
-│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱│                                                            │                  │
-│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱╰────────────────────────────────────────────────────────────╯                  │
-│↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱  /home/allie/projects/main.go -> /public_html/main.go        50% transferring│
+╰──────────────────│  Updates                                                   │──────────────────╯
+╭──────────────────│    Check for updates                                   on  │──────────────────╮
+│Transfers         │    Updates                     dev build — enter to check  │             queue│
+│  1 Queue (2x)    │                                                            │                  │
+│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱│    up/down select   h/l change   esc close                 │                  │
+│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱│                                                            │                  │
+│↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱╰────────────────────────────────────────────────────────────╯  50% transferring│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

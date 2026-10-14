@@ -16,7 +16,7 @@ import (
 
 const (
 	// deleteScanCap bounds the count walk that runs before the confirmation
-	// prompt. It is deliberately looser than preflightScanCap: that cap
+	// prompt. It is deliberately looser than the scan file limit: that cap
 	// decides how much work actually gets queued, so stopping early is a real
 	// limit, while this one only decides how precise the prompt and the
 	// progress denominator are. Running past it costs the user a "20000+"

@@ -1,14 +1,14 @@
    TideFTP    test  test.local:22           ↑ UPDATE v0.3.0 · U  1 queued  tide-night  split 50/50
-╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
-│Local             ╭─ tideftp · settings ───────────────────────────────────────╮      /public_html│
-│mode        size  │                                                            │ed        name    │
-│  ▸ drwxr-xr-x    │  Appearance                                                │15 09:30 uploads  │
-│    -rw-r--r--    │  ▌ Theme                                       tide-night  │15 09:30 index.htm│
-│    -rw-r--r--    │    Density                                        compact  │                  │
-│                  │    Shadow                                              on  │                  │
+╭──────────────────╭─ tideftp · settings ───────────────────────────────────────╮──────────────────╮
+│Local             │                                                            │      /public_html│
+│mode        size  │  Appearance                                                │ed        name    │
+│  ▸ drwxr-xr-x    │  ▌ Theme                                       tide-night  │15 09:30 uploads  │
+│    -rw-r--r--    │    Density                                        compact  │15 09:30 index.htm│
+│    -rw-r--r--    │    Shadow                                              on  │                  │
 │                  │    Icons                                               on  │                  │
 │                  │  Transfer performance                                      │                  │
 │                  │    Max Parallel                                         2  │                  │
+│                  │    Scan file limit                                 100000  │                  │
 │                  │  Workflow                                                  │                  │
 │                  │    Editor                                              vi  │                  │
 │                  │  Reliability                                               │                  │

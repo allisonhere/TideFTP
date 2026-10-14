@@ -130,13 +130,14 @@ func dirEntry(name string) domain.Entry {
 
 func TestSyncScanCapDoesNotPruneMatchingFiles(t *testing.T) {
 	src, dst := newSyncFS(), newSyncFS()
-	entries := make([]domain.Entry, preflightScanCap+2)
+	entries := make([]domain.Entry, defaultScanFileLimit+2)
 	for i := range entries {
 		entries[i] = file(fmt.Sprintf("f%05d", i), 1, time.Time{})
 	}
 	src.put("/src", entries...)
 	dst.put("/dst", append(append([]domain.Entry(nil), entries...), file("extra", 1, time.Time{}))...)
 	m, _ := mirrorModel(t, src, dst)
+	m.scanFileLimit = defaultScanFileLimit
 	msg := m.beginSyncScan(domain.Upload, "/src", "/dst", src, dst, true)().(syncScanMsg)
 	if msg.err != nil {
 		t.Fatal(msg.err)
