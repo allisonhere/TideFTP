@@ -36,7 +36,7 @@ func TestStreamingScanBatchesPerDirectoryAndSkipsBadFolder(t *testing.T) {
 
 	var batches []preflightScan
 	entries := []domain.Entry{dirEntry("a"), dirEntry("b")}
-	msg := runPreflightScan(domain.Download, entries, "/src", "/dst", bad, dst, true, math.MaxInt, nil,
+	msg := runPreflightScan(domain.Download, entries, "/src", "/dst", bad, dst, true, math.MaxInt, 1, nil,
 		func(b preflightScan) { batches = append(batches, b) }, context.Background(), 0)
 	if msg.err != nil {
 		t.Fatal(msg.err)
@@ -59,7 +59,7 @@ func TestBufferedScanSkipsBadFolderInsteadOfAborting(t *testing.T) {
 	dst.put("/dst")
 	bad := &flakyListFS{FS: src, bad: "/src/b"}
 
-	msg := runPreflightScan(domain.Download, []domain.Entry{dirEntry("a"), dirEntry("b")}, "/src", "/dst", bad, dst, true, math.MaxInt, nil, nil, context.Background(), 0)
+	msg := runPreflightScan(domain.Download, []domain.Entry{dirEntry("a"), dirEntry("b")}, "/src", "/dst", bad, dst, true, math.MaxInt, 1, nil, nil, context.Background(), 0)
 	if msg.err != nil {
 		t.Fatalf("err = %v, want the scan to survive one unlistable folder", msg.err)
 	}

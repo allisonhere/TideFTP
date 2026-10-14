@@ -9,6 +9,7 @@
 │                  │  Transfer performance                                      │                  │
 │                  │    Max Parallel                                         2  │                  │
 │                  │    Scan file limit                                 100000  │                  │
+│                  │    Scan workers                                         3  │                  │
 │                  │  Workflow                                                  │                  │
 │                  │    Editor                                              vi  │                  │
 │                  │  Reliability                                               │                  │
@@ -18,13 +19,12 @@
 │                  │    Connectivity check            on · pauses when offline  │                  │
 │                  │  Workflow                                                  │                  │
 │                  │    If file exists                                     ask  │                  │
-│                  │  Updates                                                   │                  │
-╰──────────────────│    Check for updates                                   on  │──────────────────╯
-╭──────────────────│    Updates                       v0.3.0 available — enter  │──────────────────╮
-│Transfers         │    Ignore this version                              enter  │             queue│
-│  1 Queue (2x)    │                                                            │                  │
-│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱│    up/down select   h/l change   esc close                 │                  │
-│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱│                                                            │                  │
-│↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱╰────────────────────────────────────────────────────────────╯  50% transferring│
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╰──────────────────│  Updates                                                   │──────────────────╯
+╭──────────────────│    Check for updates                                   on  │──────────────────╮
+│Transfers         │    Updates                       v0.3.0 available — enter  │             queue│
+│  1 Queue (2x)    │    Ignore this version                              enter  │                  │
+│ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱│                                                            │                  │
+│ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱│    up/down select   h/l change   esc close                 │                  │
+│↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱│                                                            │  50% transferring│
+╰──────────────────╰────────────────────────────────────────────────────────────╯──────────────────╯
    ready   tab pane  enter open  space select  u upload  d download  c connect  t theme  shift+arr…

@@ -29,6 +29,9 @@ type Config struct {
 	// transfer, or a mirror) will discover before stopping early. 0 means
 	// unlimited. A file without the key gets the default.
 	ScanFileLimit int `toml:"scan_file_limit"`
+	// ScanWorkers is how many folders a tree scan lists at once (1 = one at
+	// a time). A file without the key gets the default.
+	ScanWorkers int `toml:"scan_workers"`
 	// ConflictPolicy is what to do when a queued file already exists at its
 	// destination: "" (ask), "overwrite", "overwrite-newer", "overwrite-size",
 	// "overwrite-size-newer", "resume", "rename" or "skip". Anything but ask
@@ -140,6 +143,7 @@ func Default() Config {
 		ShowIcons:                   true,
 		MaxParallel:                 2,
 		ScanFileLimit:               100000,
+		ScanWorkers:                 3,
 		AutoReconnect:               true,
 		RecoverInterruptedTransfers: true,
 		CheckConnectivity:           true,

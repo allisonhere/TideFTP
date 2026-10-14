@@ -23,6 +23,7 @@ const (
 	settingsFieldIcons
 	settingsFieldMaxParallel
 	settingsFieldScanLimit
+	settingsFieldScanWorkers
 	settingsFieldEditor
 	settingsFieldVerify
 	settingsFieldReconnect
@@ -79,6 +80,8 @@ func settingsFieldLabel(field settingsField) string {
 		return "Max Parallel"
 	case settingsFieldScanLimit:
 		return "Scan file limit"
+	case settingsFieldScanWorkers:
+		return "Scan workers"
 	case settingsFieldEditor:
 		return "Editor"
 	case settingsFieldVerify:
@@ -108,7 +111,7 @@ func settingsCategory(field settingsField) string {
 	switch field {
 	case settingsFieldTheme, settingsFieldDensity, settingsFieldShadow, settingsFieldIcons:
 		return "Appearance"
-	case settingsFieldMaxParallel, settingsFieldScanLimit:
+	case settingsFieldMaxParallel, settingsFieldScanLimit, settingsFieldScanWorkers:
 		return "Transfer performance"
 	case settingsFieldEditor, settingsFieldConflict:
 		return "Workflow"
@@ -137,6 +140,8 @@ func (m Model) settingsFieldValue(field settingsField) string {
 			return "unlimited"
 		}
 		return strconv.Itoa(scanCap(m.scanFileLimit))
+	case settingsFieldScanWorkers:
+		return strconv.Itoa(scanWorkerCount(m.scanWorkers))
 	case settingsFieldEditor:
 		if m.editorSetting == "" {
 			if got := detectedEditor(); got != "" {
@@ -327,6 +332,8 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 			cur = slices.Index(scanFileLimits, defaultScanFileLimit)
 		}
 		m.scanFileLimit = scanFileLimits[((cur+direction)%len(scanFileLimits)+len(scanFileLimits))%len(scanFileLimits)]
+	case settingsFieldScanWorkers:
+		m.scanWorkers = min(max(scanWorkerCount(m.scanWorkers)+direction, 1), maxScanWorkers)
 	case settingsFieldEditor:
 		choices := editorChoices()
 		cur := slices.Index(choices, m.editorSetting)

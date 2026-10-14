@@ -353,6 +353,7 @@ type Model struct {
 	queueBatchActive  bool
 	maxParallel       int
 	scanFileLimit     int // 0 = unlimited
+	scanWorkers       int // folders listed at once by a scan
 	bottomTab         bottomTab
 	bottomOffset      int
 	// bottomCursor selects one row within the current bottom-pane tab's
@@ -524,6 +525,7 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 	}
 	model := Model{
 		scanFileLimit: cfg.ScanFileLimit,
+		scanWorkers:   cfg.ScanWorkers,
 		focus:         focusLocal,
 		local: filePane{
 			title:      "Local",
@@ -605,6 +607,7 @@ func (m Model) snapshotConfig() config.Config {
 		ShowIcons:                   m.showIcons,
 		MaxParallel:                 m.maxParallel,
 		ScanFileLimit:               m.scanFileLimit,
+		ScanWorkers:                 m.scanWorkers,
 		Editor:                      m.editorSetting,
 		VerifyChecksums:             m.verifyChecksums,
 		AutoReconnect:               m.autoReconnect,
@@ -2000,6 +2003,19 @@ const defaultScanFileLimit = 100000
 // scanFileLimits is the Settings row's cycle order; 0 is unlimited.
 var scanFileLimits = []int{10000, 50000, 100000, 500000, 1000000, 0}
 
+// maxScanWorkers caps the Scan workers setting. FTP sessions pool only a few
+// connections, so more than that just queue behind each other.
+const maxScanWorkers = 8
+
+// scanWorkerCount turns a ScanWorkers setting into a usable count: a missing
+// or hand-edited-to-nonsense value falls back to the default.
+func scanWorkerCount(n int) int {
+	if n < 1 {
+		return defaultScanWorkers
+	}
+	return min(n, maxScanWorkers)
+}
+
 // scanCap turns a ScanFileLimit setting into a count the scans can compare
 // against: 0 (unlimited) becomes the largest int, and a negative value from
 // a hand-edited config falls back to the default.
@@ -2215,7 +2231,7 @@ type preflightScanMsg struct {
 func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
 	m.setStatus("scanning…")
 	return func() tea.Msg {
-		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, scanCap(m.scanFileLimit), nil, nil, nil, 0)
+		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, scanCap(m.scanFileLimit), scanWorkerCount(m.scanWorkers), nil, nil, nil, 0)
 	}
 }
 
@@ -2242,6 +2258,7 @@ func (m *Model) startPreflightScan(direction domain.TransferDirection, entries [
 	events := make(chan tea.Msg, 1)
 	m.scanEvents = events
 	limit := scanCap(m.scanFileLimit)
+	workers := scanWorkerCount(m.scanWorkers)
 	go func() {
 		defer close(events)
 		report := func(progress scanProgressMsg) {
@@ -2259,12 +2276,12 @@ func (m *Model) startPreflightScan(direction domain.TransferDirection, entries [
 				}
 			}
 		}
-		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, limit, report, batch, ctx, token)
+		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, limit, workers, report, batch, ctx, token)
 	}()
 	return tea.Batch(waitForScanEvent(events), tick)
 }
 
-func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, limit int, report func(scanProgressMsg), batch func(preflightScan), parent context.Context, token int) preflightScanMsg {
+func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, limit, workers int, report func(scanProgressMsg), batch func(preflightScan), parent context.Context, token int) preflightScanMsg {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -2314,52 +2331,64 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 		flush()
 	}
 
-	for len(stack) > 0 {
-		if !streaming && len(scan.files) >= limit {
-			scan.truncated = true
-			break
-		}
-		item := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		children, err := listWithRetry(ctx, srcFS, item.srcPath, showHidden)
-		if err != nil {
-			if ctx.Err() != nil {
-				return preflightScanMsg{err: fmt.Errorf("scan %s: %w", item.srcPath, err), token: token}
+	var scanErr error
+	var unlisted int
+	if !streaming && len(scan.files) >= limit {
+		scan.truncated = true
+		stack = nil
+	}
+	unlisted = walkParallel(ctx, stack, workers,
+		func(c context.Context, item walkItem) ([]domain.Entry, error) {
+			return listWithRetry(c, srcFS, item.srcPath, showHidden)
+		},
+		func(item walkItem, children []domain.Entry, err error) ([]walkItem, bool) {
+			if err != nil {
+				if ctx.Err() != nil {
+					scanErr = fmt.Errorf("scan %s: %w", item.srcPath, err)
+					return nil, true
+				}
+				// One folder that will not list is skipped and reported, not
+				// allowed to throw away everything found so far.
+				scan.failedDirs++
+				if scan.firstFailure == "" {
+					scan.firstFailure = fmt.Sprintf("%s: %v", item.srcPath, err)
+				}
+				emit("Scanning source for transfer", item.srcPath)
+				return nil, false
 			}
-			// One folder that will not list is skipped and reported, not
-			// allowed to throw away everything found so far.
-			scan.failedDirs++
-			if scan.firstFailure == "" {
-				scan.firstFailure = fmt.Sprintf("%s: %v", item.srcPath, err)
+			var next []walkItem
+			for _, child := range children {
+				childSrc, childDst := srcFS.Child(item.srcPath, child.Name), dstFS.Child(item.dstPath, child.Name)
+				if child.IsDir() {
+					scan.folders++
+					next = append(next, walkItem{childSrc, childDst})
+					continue
+				}
+				if child.LinksToDir {
+					scan.skippedLinks++
+					continue
+				}
+				if !streaming && len(scan.files) >= limit {
+					scan.truncated = true
+					break
+				}
+				scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, name: child.Name, size: child.Size, modified: child.Modified})
+				scan.totalBytes += child.Size
+				total++
+			}
+			if streaming {
+				flush()
 			}
 			emit("Scanning source for transfer", item.srcPath)
-			continue
-		}
-		for _, child := range children {
-			childSrc, childDst := srcFS.Child(item.srcPath, child.Name), dstFS.Child(item.dstPath, child.Name)
-			if child.IsDir() {
-				scan.folders++
-				stack = append(stack, walkItem{childSrc, childDst})
-				continue
-			}
-			if child.LinksToDir {
-				scan.skippedLinks++
-				continue
-			}
-			if !streaming && len(scan.files) >= limit {
-				scan.truncated = true
-				break
-			}
-			scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, name: child.Name, size: child.Size, modified: child.Modified})
-			scan.totalBytes += child.Size
-			total++
-		}
-		if streaming {
-			flush()
-		}
-		emit("Scanning source for transfer", item.srcPath)
+			return next, !streaming && len(scan.files) >= limit
+		})
+	if scanErr != nil {
+		return preflightScanMsg{err: scanErr, token: token}
 	}
-	if len(stack) > 0 {
+	if ctx.Err() != nil {
+		return preflightScanMsg{err: fmt.Errorf("scan %s: %w", srcBase, ctx.Err()), token: token}
+	}
+	if unlisted > 0 {
 		scan.truncated = true
 	}
 	if streaming {

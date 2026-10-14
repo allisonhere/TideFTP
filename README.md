@@ -1,7 +1,8 @@
 # TideFTP
 
-TideFTP is a keyboard-first, mouse-friendly terminal file transfer client for
-SFTP, FTP and FTPS, built with Go, Bubble Tea, and TideUI.
+TideFTP is a keyboard-first, mouse-friendly ![NEW](https://img.shields.io/badge/NEW-red?style=flat-square) terminal
+file transfer client for SFTP, FTP and FTPS, built with Go, Bubble Tea, and
+TideUI.
 
 ![TideFTP](docs/screenshot.png)
 
