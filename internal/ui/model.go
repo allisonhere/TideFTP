@@ -374,6 +374,11 @@ type Model struct {
 	// automatically instead of prompting again. In-memory only — matches
 	// "this session" literally, and resets on restart.
 	sessionConflictPolicy *conflictPolicy
+	// defaultConflictPolicy is the persisted Settings choice; nil means ask.
+	// The session policy, when set, wins over it.
+	defaultConflictPolicy *conflictPolicy
+	// streamQueued counts files queued so far by the running streaming scan.
+	streamQueued int
 	// hostKeyPrompt holds an unknown SFTP host key while overlayHostKey asks
 	// the user whether to trust it, and what target/creds to resume
 	// connecting with if they do. Nil the rest of the time.
@@ -546,6 +551,7 @@ func NewModel(local vfs.FS, dialer session.Dialer, targets []session.Target, cfg
 		autoReconnect:               cfg.AutoReconnect,
 		recoverInterruptedTransfers: cfg.RecoverInterruptedTransfers,
 		checkConnectivity:           cfg.CheckConnectivity,
+		defaultConflictPolicy:       parseConflictPolicy(cfg.ConflictPolicy),
 		fileSplit:                   tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.FileSplit, Min: 0.25, Max: 0.75, Step: 0.03}),
 		bottomSplit:                 tideui.NewPaneRatio(tideui.PaneRatioOptions{Initial: cfg.Layout.BottomSplit, Min: 0.15, Max: 0.50, Step: 0.03}),
 		save:                        save,
@@ -597,6 +603,7 @@ func (m Model) snapshotConfig() config.Config {
 		AutoReconnect:               m.autoReconnect,
 		RecoverInterruptedTransfers: m.recoverInterruptedTransfers,
 		CheckConnectivity:           m.checkConnectivity,
+		ConflictPolicy:              m.defaultConflictKey(),
 		Layout: config.Layout{
 			FileSplit:   m.fileSplit.Value(),
 			BottomSplit: m.bottomSplit.Value(),
@@ -836,6 +843,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasAtBottom := m.isAtBottomPane()
 		m.applyPreflightScan(msg)
 		m.settleBottomOffset(wasAtBottom)
+		return m, nil
+	case preflightBatchMsg:
+		if !m.acceptsScan(msg.token) {
+			return m, nil
+		}
+		if policy := m.effectiveConflictPolicy(); policy != nil {
+			msg.scan.resolveAllRemaining(*policy)
+		}
+		// Downloads are underway; the scan carries on in the background.
+		if m.overlay == overlayScanning {
+			m.overlay = overlayNone
+		}
+		wasAtBottom := m.isAtBottomPane()
+		m.streamQueued += m.commitScan(msg.scan)
+		m.setStatus(fmt.Sprintf("scanning… queued %d so far", m.streamQueued))
+		m.settleBottomOffset(wasAtBottom)
+		if m.scanEvents != nil {
+			return m, waitForScanEvent(m.scanEvents)
+		}
 		return m, nil
 	case recoveryScanMsg:
 		if !m.acceptsScan(msg.token) {
@@ -1942,12 +1968,57 @@ func (m *Model) queueTransfer(direction domain.TransferDirection) tea.Cmd {
 // before giving up and reporting a lower bound instead (scan.truncated),
 // so a pathological or enormous tree cannot make queuing a folder hang the
 // UI or balloon memory.
-const preflightScanCap = 5000
+const preflightScanCap = 100000
 
-// preflightScanTimeout bounds the whole walk, across every directory it
-// has to List, not just one call the way listTimeout bounds a single
-// listing.
+// preflightScanTimeout bounds the sync scans (sync.go); the transfer scan
+// bounds each listing instead, so a big tree can take as long as it needs.
 const preflightScanTimeout = 60 * time.Second
+
+// scanListAttempts is how many times one directory listing is tried before
+// the walk gives up on that directory and moves on. Big servers drop or
+// stall the odd LIST; one bad folder must not discard the whole scan.
+const scanListAttempts = 3
+
+// defaultConflictKey is the persisted name of the Settings conflict policy.
+func (m Model) defaultConflictKey() string {
+	if m.defaultConflictPolicy == nil {
+		return ""
+	}
+	return conflictPolicyKey(*m.defaultConflictPolicy)
+}
+
+// effectiveConflictPolicy is the policy that resolves conflicts without
+// asking: the session choice, else the Settings default, else nil (ask).
+func (m Model) effectiveConflictPolicy() *conflictPolicy {
+	if m.sessionConflictPolicy != nil {
+		return m.sessionConflictPolicy
+	}
+	return m.defaultConflictPolicy
+}
+
+// listWithRetry lists dir with a per-attempt timeout, retrying transient
+// failures. It returns early with the parent's error if parent is done.
+func listWithRetry(parent context.Context, fs vfs.FS, dir string, showHidden bool) ([]domain.Entry, error) {
+	var lastErr error
+	for attempt := 1; attempt <= scanListAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(parent, listTimeout)
+		entries, err := fs.List(ctx, dir, showHidden)
+		cancel()
+		if err == nil {
+			return entries, nil
+		}
+		lastErr = err
+		if parent.Err() != nil {
+			return nil, parent.Err()
+		}
+		select {
+		case <-parent.Done():
+			return nil, parent.Err()
+		case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
+		}
+	}
+	return nil, lastErr
+}
 
 // preflightFile is one file discovered while walking a folder queued for
 // transfer — everything queueTransfer needs to turn it into a
@@ -1982,6 +2053,14 @@ type preflightScan struct {
 	// transfer that failed at open. Following one instead is worse — a link
 	// back up its own tree would drive the walk until it hit the cap.
 	skippedLinks int
+	// failedDirs counts source folders that still could not be listed after
+	// retries; their contents are missing from the scan. firstFailure names
+	// the first one.
+	failedDirs   int
+	firstFailure string
+	// streamed counts files already handed to the queue in batches, for a
+	// streaming scan whose final message carries no files of its own.
+	streamed int
 
 	// dstFS and siblings exist only to resolve a Rename: dstFS builds the
 	// renamed path, siblings (destination dir -> name -> entry) is what a
@@ -2061,6 +2140,13 @@ func (s *preflightScan) resolveAllRemaining(policy conflictPolicy) {
 	}
 }
 
+// preflightBatchMsg carries files a streaming scan has discovered so far,
+// already checked for destination conflicts, to be queued right away.
+type preflightBatchMsg struct {
+	scan  preflightScan
+	token int
+}
+
 // preflightScanMsg reports beginPreflightScan's result.
 type preflightScanMsg struct {
 	scan  preflightScan
@@ -2086,7 +2172,7 @@ type preflightScanMsg struct {
 func (m *Model) beginPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
 	m.setStatus("scanning…")
 	return func() tea.Msg {
-		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, nil, nil, 0)
+		return runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, nil, nil, nil, 0)
 	}
 }
 
@@ -2099,6 +2185,17 @@ func (m *Model) startPreflightScan(direction domain.TransferDirection, entries [
 		title = "Preparing download"
 	}
 	ctx, token, tick := m.startScan(title, "Scanning source")
+	// With a conflict policy chosen up front there is nothing to ask, so a
+	// folder transfer queues files as the walk finds them instead of making
+	// the user wait for the whole tree.
+	stream := m.effectiveConflictPolicy() != nil
+	if stream {
+		hasDir := false
+		for _, e := range entries {
+			hasDir = hasDir || e.IsDir()
+		}
+		stream = hasDir
+	}
 	events := make(chan tea.Msg, 1)
 	m.scanEvents = events
 	go func() {
@@ -2109,23 +2206,47 @@ func (m *Model) startPreflightScan(direction domain.TransferDirection, entries [
 			default: // a newer snapshot is more useful than an old one
 			}
 		}
-		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, report, ctx, token)
+		var batch func(preflightScan)
+		if stream {
+			batch = func(b preflightScan) {
+				select {
+				case events <- preflightBatchMsg{scan: b, token: token}:
+				case <-ctx.Done():
+				}
+			}
+		}
+		events <- runPreflightScan(direction, entries, srcBase, dstBase, srcFS, dstFS, showHidden, report, batch, ctx, token)
 	}()
 	return tea.Batch(waitForScanEvent(events), tick)
 }
 
-func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, report func(scanProgressMsg), parent context.Context, token int) preflightScanMsg {
+func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool, report func(scanProgressMsg), batch func(preflightScan), parent context.Context, token int) preflightScanMsg {
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, preflightScanTimeout)
-	defer cancel()
+	ctx := parent
 
 	scan := preflightScan{direction: direction, dstFS: dstFS}
+	// A streaming walk hands each directory's files to batch and forgets
+	// them, so memory and the cap only matter for the buffered path.
+	streaming := batch != nil
+	total := 0 // files discovered, buffered or streamed
 	emit := func(phase, current string) {
 		if report != nil {
-			report(scanProgressMsg{token: token, phase: phase, files: len(scan.files), folders: scan.folders, bytes: scan.totalBytes, current: current})
+			report(scanProgressMsg{token: token, phase: phase, files: total, folders: scan.folders, bytes: scan.totalBytes, current: current})
 		}
+	}
+	// flush checks the pending files' destinations and ships them to the
+	// queue. Only used when streaming.
+	flush := func() {
+		if len(scan.files) == 0 {
+			return
+		}
+		b := preflightScan{direction: direction, dstFS: dstFS, files: scan.files}
+		checkDestinations(ctx, &b)
+		scan.streamed += len(b.files)
+		scan.files = nil
+		batch(b)
 	}
 	type walkItem struct{ srcPath, dstPath string }
 	var stack []walkItem
@@ -2142,19 +2263,33 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 		}
 		scan.files = append(scan.files, preflightFile{src: srcPath, dst: dstPath, name: entry.Name, size: entry.Size, modified: entry.Modified})
 		scan.totalBytes += entry.Size
+		total++
 	}
 	emit("Scanning source for transfer", srcBase)
+	if streaming {
+		flush()
+	}
 
 	for len(stack) > 0 {
-		if len(scan.files) >= preflightScanCap {
+		if !streaming && len(scan.files) >= preflightScanCap {
 			scan.truncated = true
 			break
 		}
 		item := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		children, err := srcFS.List(ctx, item.srcPath, showHidden)
+		children, err := listWithRetry(ctx, srcFS, item.srcPath, showHidden)
 		if err != nil {
-			return preflightScanMsg{err: fmt.Errorf("scan %s: %w", item.srcPath, err), token: token}
+			if ctx.Err() != nil {
+				return preflightScanMsg{err: fmt.Errorf("scan %s: %w", item.srcPath, err), token: token}
+			}
+			// One folder that will not list is skipped and reported, not
+			// allowed to throw away everything found so far.
+			scan.failedDirs++
+			if scan.firstFailure == "" {
+				scan.firstFailure = fmt.Sprintf("%s: %v", item.srcPath, err)
+			}
+			emit("Scanning source for transfer", item.srcPath)
+			continue
 		}
 		for _, child := range children {
 			childSrc, childDst := srcFS.Child(item.srcPath, child.Name), dstFS.Child(item.dstPath, child.Name)
@@ -2167,35 +2302,48 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 				scan.skippedLinks++
 				continue
 			}
-			if len(scan.files) >= preflightScanCap {
+			if !streaming && len(scan.files) >= preflightScanCap {
 				scan.truncated = true
 				break
 			}
 			scan.files = append(scan.files, preflightFile{src: childSrc, dst: childDst, name: child.Name, size: child.Size, modified: child.Modified})
 			scan.totalBytes += child.Size
+			total++
+		}
+		if streaming {
+			flush()
 		}
 		emit("Scanning source for transfer", item.srcPath)
 	}
 	if len(stack) > 0 {
 		scan.truncated = true
 	}
+	if streaming {
+		return preflightScanMsg{scan: scan, token: token}
+	}
 
-	// Phase 2: which of the flattened files already exist at their
-	// destination? Grouped by destination directory so each one is
-	// listed at most once, however many files land in it. A directory
-	// that fails to list — most often because it doesn't exist yet, a
-	// nested folder destination not yet created — just means nothing
-	// conflicts there, not a scan failure.
+	emit("Checking destination conflicts", dstBase)
+	checkDestinations(ctx, &scan)
+	return preflightScanMsg{scan: scan, token: token}
+}
+
+// checkDestinations finds which of scan.files already exist at their
+// destination. Grouped by destination directory so each one is listed at
+// most once, however many files land in it. A directory that fails to list —
+// most often because it doesn't exist yet, a nested folder destination not
+// yet created — just means nothing conflicts there, not a scan failure.
+func checkDestinations(ctx context.Context, scan *preflightScan) {
 	byDir := map[string][]int{}
 	for i, f := range scan.files {
-		dir := dstFS.Parent(f.dst)
+		dir := scan.dstFS.Parent(f.dst)
 		byDir[dir] = append(byDir[dir], i)
 	}
 	scan.siblings = make(map[string]map[string]domain.Entry, len(byDir))
 	for dir, indices := range byDir {
-		listed, err := dstFS.List(ctx, dir, true)
+		listCtx, cancel := context.WithTimeout(ctx, listTimeout)
+		listed, err := scan.dstFS.List(listCtx, dir, true)
+		cancel()
 		if err != nil {
-			emit("Checking destination conflicts", dir)
 			continue
 		}
 		byName := make(map[string]domain.Entry, len(listed))
@@ -2209,10 +2357,7 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 				scan.files[i].conflict = &entry
 			}
 		}
-		emit("Checking destination conflicts", dir)
 	}
-
-	return preflightScanMsg{scan: scan, token: token}
 }
 
 // applyPreflightScan folds a completed scan into the model. An error is
@@ -2228,7 +2373,22 @@ func (m *Model) applyPreflightScan(msg preflightScanMsg) {
 		m.setError(fmt.Sprintf("scan: %v", msg.err))
 		return
 	}
+	if msg.scan.streamed > 0 {
+		// Files were queued batch by batch while scanning; only the summary
+		// is left to report.
+		summary := fmt.Sprintf("queued %d transfer(s) from %d folder(s)", m.streamQueued, msg.scan.folders)
+		if msg.scan.failedDirs > 0 {
+			summary += fmt.Sprintf(" — %d folder(s) could not be listed (%s)", msg.scan.failedDirs, msg.scan.firstFailure)
+		}
+		m.streamQueued = 0
+		m.setStatus(summary)
+		return
+	}
 	if len(msg.scan.files) == 0 {
+		if msg.scan.failedDirs > 0 {
+			m.setError(fmt.Sprintf("scan: %d folder(s) could not be listed (%s)", msg.scan.failedDirs, msg.scan.firstFailure))
+			return
+		}
 		if msg.scan.skippedLinks > 0 {
 			m.setStatus(fmt.Sprintf("nothing to queue — skipped %d linked folder(s)", msg.scan.skippedLinks))
 			return
@@ -2246,8 +2406,8 @@ func (m *Model) applyPreflightScan(msg preflightScanMsg) {
 		m.commitScan(scan)
 		return
 	}
-	if m.sessionConflictPolicy != nil {
-		scan.resolveAllRemaining(*m.sessionConflictPolicy)
+	if policy := m.effectiveConflictPolicy(); policy != nil {
+		scan.resolveAllRemaining(*policy)
 		m.commitScan(scan)
 		return
 	}

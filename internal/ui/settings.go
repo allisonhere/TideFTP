@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,7 @@ const (
 	settingsFieldReconnect
 	settingsFieldRecoverInterrupted
 	settingsFieldCheckConnectivity
+	settingsFieldConflict
 	// The update rows sit last so the settings people change often stay at
 	// the top. UpdateStatus is an action row whose meaning depends on the
 	// update state (check / install / restart), and UpdateIgnore only exists
@@ -84,6 +86,8 @@ func settingsFieldLabel(field settingsField) string {
 		return "Recover interrupted"
 	case settingsFieldCheckConnectivity:
 		return "Connectivity check"
+	case settingsFieldConflict:
+		return "If file exists"
 	case settingsFieldUpdateCheck:
 		return "Check for updates"
 	case settingsFieldUpdateStatus:
@@ -103,7 +107,7 @@ func settingsCategory(field settingsField) string {
 		return "Appearance"
 	case settingsFieldMaxParallel:
 		return "Transfer performance"
-	case settingsFieldEditor:
+	case settingsFieldEditor, settingsFieldConflict:
 		return "Workflow"
 	case settingsFieldVerify, settingsFieldReconnect, settingsFieldRecoverInterrupted, settingsFieldCheckConnectivity:
 		return "Reliability"
@@ -150,6 +154,11 @@ func (m Model) settingsFieldValue(field settingsField) string {
 			return "off"
 		}
 		return "on · pauses when offline"
+	case settingsFieldConflict:
+		if m.defaultConflictPolicy == nil {
+			return "ask"
+		}
+		return strings.ToLower(conflictPolicyLabel(*m.defaultConflictPolicy)) + " · no prompt"
 	case settingsFieldUpdateCheck:
 		return settingsToggleChoices[boolToIndex(m.updates.CheckOnStartup)]
 	case settingsFieldUpdateStatus:
@@ -332,6 +341,20 @@ func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 					m.transfers[i].Message = "interrupted — retry with R"
 				}
 			}
+		}
+	case settingsFieldConflict:
+		// ask, then each policy in order, wrapping.
+		n := int(conflictPolicyCount) + 1
+		cur := 0
+		if m.defaultConflictPolicy != nil {
+			cur = int(*m.defaultConflictPolicy) + 1
+		}
+		next := ((cur+direction)%n + n) % n
+		if next == 0 {
+			m.defaultConflictPolicy = nil
+		} else {
+			p := conflictPolicy(next - 1)
+			m.defaultConflictPolicy = &p
 		}
 	case settingsFieldCheckConnectivity:
 		m.checkConnectivity = !m.checkConnectivity

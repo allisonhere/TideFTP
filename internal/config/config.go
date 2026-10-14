@@ -25,6 +25,12 @@ type Config struct {
 	Shadow      bool   `toml:"shadow"`
 	ShowIcons   bool   `toml:"show_icons"`
 	MaxParallel int    `toml:"max_parallel"`
+	// ConflictPolicy is what to do when a queued file already exists at its
+	// destination: "" (ask), "overwrite", "overwrite-newer", "overwrite-size",
+	// "overwrite-size-newer", "resume", "rename" or "skip". Anything but ask
+	// lets a folder transfer start downloading while the tree is still being
+	// scanned.
+	ConflictPolicy string `toml:"conflict_policy,omitempty"`
 	// Editor is the command the `e` action opens files with. Empty means
 	// auto: $VISUAL, $EDITOR, git's core.editor, then a common editor on
 	// PATH. A value may carry flags, e.g. "code -w".

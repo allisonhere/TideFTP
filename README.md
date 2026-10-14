@@ -389,6 +389,10 @@ Two settings in `,` change what happens around a transfer:
   from zero, `s` skips them, and `↓` inspects the individual Failed rows. Set
   `recover_interrupted_transfers = false` to reconnect without restarting
   interrupted work.
+- **If file exists** (`conflict_policy`, default ask) sets what happens when
+  a transfer would overwrite an existing file. Any choice other than ask
+  skips the prompt and lets folder transfers start while the tree is still
+  being scanned.
 - **Connectivity check** (`check_connectivity`, on by default) watches for
   transfers failing back to back. Two in a row earns one quick reachability
   probe — a local network check plus a short TCP dial to the server — and if

@@ -27,6 +27,31 @@ const (
 	conflictPolicyCount
 )
 
+// conflictPolicyKeys are the persisted names for each policy, indexed by
+// conflictPolicy. The empty string in config means "ask".
+var conflictPolicyKeys = [conflictPolicyCount]string{
+	"overwrite", "overwrite-newer", "overwrite-size", "overwrite-size-newer", "resume", "rename", "skip",
+}
+
+func conflictPolicyKey(policy conflictPolicy) string {
+	if policy < 0 || policy >= conflictPolicyCount {
+		return ""
+	}
+	return conflictPolicyKeys[policy]
+}
+
+// parseConflictPolicy maps a persisted name back to a policy; unknown or
+// empty names mean "ask" (nil).
+func parseConflictPolicy(key string) *conflictPolicy {
+	for i, k := range conflictPolicyKeys {
+		if k == key {
+			p := conflictPolicy(i)
+			return &p
+		}
+	}
+	return nil
+}
+
 func conflictPolicyLabel(policy conflictPolicy) string {
 	switch policy {
 	case conflictOverwrite:
@@ -121,7 +146,7 @@ func (m *Model) resolveAllConflicts(remember bool) tea.Cmd {
 // starts the queue. Every conflicting file must already have a resolution
 // by the time this runs (resolveOneConflict/resolveAllConflicts guarantee
 // it); a clean file (no conflict) always queues unconditionally.
-func (m *Model) commitScan(scan preflightScan) {
+func (m *Model) commitScan(scan preflightScan) int {
 	if !m.queueBusy() {
 		m.queueBatchStartID = m.nextTransferID
 		m.queueBatchActive = true
@@ -186,8 +211,12 @@ func (m *Model) commitScan(scan preflightScan) {
 	if scan.skippedLinks > 0 {
 		summary += fmt.Sprintf(" — skipped %d linked folder(s)", scan.skippedLinks)
 	}
+	if scan.failedDirs > 0 {
+		summary += fmt.Sprintf(" — %d folder(s) could not be listed", scan.failedDirs)
+	}
 	m.setStatus(summary)
 	m.startQueuedTransfers()
+	return queued
 }
 
 // renameDestinationCap bounds how many numbered suffixes renameDestination

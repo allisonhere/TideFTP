@@ -2,6 +2,8 @@ package transfer
 
 import (
 	"errors"
+	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +19,28 @@ const CopyChunk = 32 * 1024
 // ErrCanceled marks a MoveFunc's returned error as a cancellation rather
 // than a failure: Runner reports it as a Canceled event instead of Failed.
 var ErrCanceled = errors.New("canceled")
+
+// retryAttempts is how many extra tries a transfer that failed before moving
+// any data gets; retryDelay scales the wait between them.
+const (
+	retryAttempts = 2
+	retryDelay    = time.Second
+)
+
+// transientError reports whether err looks like a connection hiccup rather
+// than a permanent refusal such as "file not found" or "permission denied".
+func transientError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{"421", "425", "426", "eof", "connection reset", "broken pipe", "timeout", "timed out", "too many connections", "use of closed network connection"} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
 
 // MoveFunc performs one transfer's actual byte movement. It must honor stop
 // (this one transfer being canceled) and quit (the whole engine closing),
@@ -111,9 +135,29 @@ func (r *Runner) run(req Request, stop chan struct{}) {
 	defer r.wg.Done()
 	defer r.done(req.ID, stop)
 
-	sent, err := r.move(req, stop, r.quit, func(sent int64) {
-		r.emit(Event{ID: req.ID, Kind: Progress, BytesDone: sent})
-	})
+	var sent int64
+	var err error
+	for attempt := 0; ; attempt++ {
+		sent, err = r.move(req, stop, r.quit, func(sent int64) {
+			r.emit(Event{ID: req.ID, Kind: Progress, BytesDone: sent})
+		})
+		// Retry only a failure before any byte moved: a stale pooled
+		// connection or a momentary "too many connections" on a big queue.
+		// Mid-file failures are left to the reconnect/resume machinery.
+		if err == nil || sent > 0 || attempt >= retryAttempts || !transientError(err) {
+			break
+		}
+		select {
+		case <-time.After(time.Duration(attempt+1) * retryDelay):
+		case <-stop:
+			err = ErrCanceled
+		case <-r.quit:
+			err = ErrCanceled
+		}
+		if errors.Is(err, ErrCanceled) {
+			break
+		}
+	}
 	switch {
 	case err == nil:
 		r.emit(Event{ID: req.ID, Kind: Completed, BytesDone: sent})

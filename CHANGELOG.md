@@ -7,7 +7,20 @@ feature batches and may change behaviour.
 
 ## Unreleased
 
+### Fixed
+
+- **Large directory trees (#4).** Queuing a big folder no longer dies with
+  `scan …: context deadline exceeded`. The whole-scan 60s limit is gone; each
+  directory listing gets its own timeout and three tries, and a folder that
+  still will not list is skipped and reported instead of aborting the scan.
+  The silent 5000-file cap is now 100000. Transfers that fail before any data
+  moves (stale connection, `421`/`425`) are retried automatically.
+
 ### Added
+
+- **"If file exists" setting** (`conflict_policy`). Pick a default conflict
+  policy once; with one set, a folder download starts immediately and files
+  are queued as the scan discovers them, FileZilla-style. Default is `ask`.
 
 - **Non-interactive CLI.** The `tideftp` binary now runs one command and
   exits — `ls`, `get`, `put`, `rm`, `mkdir`, `mv` — for shell scripts, CI and
