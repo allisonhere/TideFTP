@@ -39,6 +39,7 @@ const (
 	commandBookmarks
 	commandToggleBookmark
 	commandTransferLab
+	commandAbout
 )
 
 type paletteCommand struct {
@@ -65,6 +66,7 @@ func (m Model) paletteCommands() []paletteCommand {
 		{id: commandCheckUpdates, title: "Check for updates", hint: "look for a newer TideFTP release"},
 		{id: commandResetLayout, title: "Reset layout", hint: "restore pane sizes"},
 		{id: commandHelp, title: "Help", hint: "show keyboard reference"},
+		{id: commandAbout, title: "About TideFTP", hint: "version, credits and a note"},
 	}
 	if m.conn != nil {
 		commands = append(commands, paletteCommand{id: commandDisconnect, title: "Disconnect", hint: "close current connection"})
@@ -244,6 +246,8 @@ func (m *Model) runPaletteCommand(id commandID) tea.Cmd {
 		return m.persist()
 	case commandHelp:
 		m.openHelpOverlay()
+	case commandAbout:
+		return m.openAbout()
 	case commandNewFolder:
 		m.openMkdirPrompt()
 	case commandRename:

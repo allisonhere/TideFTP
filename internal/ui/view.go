@@ -861,6 +861,8 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		}
 		overlay := renderer.SoftPanelOverlay(tideui.SoftPanel{Prefix: "tideftp", Title: "quit", Width: 70, Content: renderer.RenderSoftBody(70, strings.Join(rows, "\n"))})
 		return &overlay
+	case overlayAbout:
+		return m.renderAboutOverlay(renderer)
 	case overlayUpdate:
 		rows := []string{}
 		switch m.update.state {

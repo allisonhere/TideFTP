@@ -94,6 +94,15 @@ feature batches and may change behaviour.
   - Behaviour change: `sync` with filters now creates empty source directories
     (lftp parity); pass `--no-empty-dirs` for the old behaviour.
 
+- **About screen.** Press `A` (or pick *About TideFTP* in the command palette)
+  for an animated modal: the terminal-window mark with rolling waves, a
+  shimmering TIDEFTP wordmark, the version, commit and build date, a note from
+  the author, and the source link. It takes the active theme's colours, shrinks
+  to a mini logo in short terminals, stops animating on its own after about 40
+  seconds (any key resumes), and shows a still image when
+  `TIDEFTP_REDUCE_MOTION` is set. Lives in `internal/about`; preview it alone
+  with `go run ./cmd/about-preview`.
+
 - **Live transfer visibility.** Queue is now the one operational transfer
   view: it contains both waiting and in-flight rows, with a pinned aggregate
   bytes-and-percent meter whenever files are moving. The redundant Active tab

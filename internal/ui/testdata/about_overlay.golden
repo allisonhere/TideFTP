@@ -1,0 +1,34 @@
+   TideFTP    test  test.local:22                                1 queued  tide-night  split 50/50
+╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
+│Local                       /home/allie/projects││Remote                              /public_html│
+│mode        s╭─ tideftp · about ────────────────────────────────────────────────────╮     name    │
+│  ▸ drwxr-xr-│                           ╭──────────────╮                           │:30 uploads  │
+│    -rw-r--r-│                           │ ● ● ●        │                           │:30 index.htm│
+│    -rw-r--r-│                           │ > _ ▁▁▁▁▁▁▁▁▁│                           │             │
+│             │                           │██▇▅▄▃▃▄▅▆▇███│                           │             │
+│             │                           ╰──────────────╯                           │             │
+│             │               █████ ███ ████  █████ █████ █████ ████                 │             │
+│             │                 █    █  █   █ █     █       █   █   █                │             │
+│             │                 █    █  █   █ ████  ████    █   ████                 │             │
+│             │                 █    █  █   █ █     █       █   █                    │             │
+│             │                 █   ███ ████  █████ █       █   █                    │             │
+│             │                 Terminal Information Delivery Engine                 │             │
+│             │                                                                      │             │
+│             │        TideFTP v0.4.0  ·  commit 6690fc2  ·  built 2026-10-08        │             │
+│             │                                                                      │             │
+│             │       ┃ Thank you for using TideFTP. I built it because moving       │             │
+│             │       ┃ files should feel calm: steady, resumable, and never         │             │
+│             │       ┃ in your way. If it ever saves you a long night or a          │             │
+│             │       ┃ lost transfer, then it did its job. Be kind to your          │             │
+│             │       ┃ servers, and may your connections always hold.               │             │
+│             │       ┃                                              — Allie ♥       │             │
+╰─────────────│                                                                      │─────────────╯
+╭─────────────│                source github.com/allisonhere/TideFTP                 │─────────────╮
+│Transfers    │     ▁▁▁▁▁▁▁▁▅▅▅▅▅▅▄▃▃▂▁▁▁  ▁▁▁▁▁▁▁ ▁▁▁▂▃▄▄▅▅▅▅▅▅▅▁▁▁▁▁▁▁          ▁▁▁│        queue│
+│  1 Queue (2x│▁▁▂▄▅▅▄▃▂▁███▇▁▁▂▄▅▅▄▃▂▁▄▅▆▇▁▁▃▄▅▅▄▃▂▁▄▃▂▂▁▁▃▄▅▅▄▃▂▁████▁▁▃▄▅▅▄▃▂▁▃▃▄▅│             │
+│ ▰▰▰▰▰▱▱▱▱▱▱▱│██████████▇▇▆▇██████████▇▇▆▇██████████▇▇▆▇██████████▇▇▆▇██████████▇▇▆▇│             │
+│ ▰▰▰▰▰▰▰▰▰▰▰▰│                space replay  ·  t colours  ·  q close                │             │
+│↑ ▰▰▰▰▰▰▰▰▰▱▱╰──────────────────────────────────────────────────────────────────────╯ transferring│
+│↓ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  /public_html/index.html -> /home/allie/projects/index.html         0% queued│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+   about TideFTP   tab pane  enter open  space select  u upload  d download  c connect  t theme  s…

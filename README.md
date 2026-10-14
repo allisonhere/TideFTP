@@ -362,6 +362,9 @@ tideftp mirror --profile prod --delete --log /var/log/mirror.log /var/www/upload
   Stats respectively
 - `U`: install a waiting update
 - `?`: help
+- `A`: About — version, build, and a note from the author (also in the
+  command palette). It follows your theme; `t` there cycles its own colours.
+  Set `TIDEFTP_REDUCE_MOTION=1` for a still image with no animation
 - `q`: quit
 
 ## Transfers

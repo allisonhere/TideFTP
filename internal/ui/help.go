@@ -53,6 +53,7 @@ var helpEntries = []helpEntry{
 	{section: "View", key: "1-5", label: "Queue / Failed / History / Log / Stats tabs"},
 	{section: "View", key: "U", label: "update TideFTP (when one is available)"},
 	{section: "View", key: "?", label: "open this help"},
+	{section: "View", key: "A", label: "about TideFTP"},
 	{section: "View", key: "q / ctrl+c", label: "quit"},
 }
 

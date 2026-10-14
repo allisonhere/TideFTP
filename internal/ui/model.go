@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"tideftp/internal/about"
 	"tideftp/internal/config"
 	"tideftp/internal/connect"
 	"tideftp/internal/credstore"
@@ -61,6 +62,7 @@ const (
 	overlayUpdate
 	overlayBookmarks
 	overlayTransferLab
+	overlayAbout
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -247,6 +249,7 @@ type Model struct {
 	width, height int
 	focus         focusPane
 	overlay       overlayMode
+	about         about.Model // the About screen; live only while overlayAbout is open
 
 	local   filePane
 	remote  filePane
@@ -686,6 +689,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
+	case about.TickMsg:
+		// The About animation clock. A tick that outlives the screen (it was
+		// closed mid-frame) is dropped, which also ends the loop.
+		if m.overlay != overlayAbout {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.about, cmd = m.about.Update(msg)
+		return m, cmd
+	case about.CloseMsg:
+		if m.overlay == overlayAbout {
+			m.overlay = overlayNone
+			m.setStatus("")
+		}
+		return m, nil
 	case connectedMsg:
 		return m, m.applyConnected(msg)
 	case connectFailedMsg:
@@ -1064,6 +1082,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	if m.overlay == overlayHelp {
 		return m, m.handleHelpKey(msg)
 	}
+	if m.overlay == overlayAbout {
+		return m, m.handleAboutKey(msg)
+	}
 	if m.overlay == overlayPreview {
 		return m, m.handlePreviewKey(msg)
 	}
@@ -1244,6 +1265,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 		m.settingsCursor = 0
 	case "?":
 		m.openHelpOverlay()
+	case "A":
+		cmd = m.openAbout()
 	case "shift+left":
 		m.fileSplit.Shrink()
 		m.setStatus("local pane narrower")

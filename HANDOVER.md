@@ -143,6 +143,28 @@ Design points worth knowing before changing it:
 Known limits are in TODO.md ("CLI follow-ups"). The big one: it has only run
 against the in-process test servers, never a third-party FTP/SFTP server.
 
+## About screen
+
+`internal/about` is a self-contained Bubble Tea sub-model (it imports nothing
+from `internal/ui`); `internal/ui/about.go` hosts it as `overlayAbout`.
+
+- Open with `A` or the command palette; `openAbout` returns the animation
+  clock, so tests drive it with `updateKey`/`Update` and **not** `settle()`
+  (the clock reschedules itself and `settle` would never run dry).
+- `about.TickMsg` is forwarded only while the overlay is open; a leftover tick
+  after closing is dropped, which ends the loop. `about.CloseMsg` hides it.
+- Colours come from the active theme (`aboutPalette`, using the theme's
+  Overlay as the panel background so it matches tideui's soft panel).
+- The modal is `aboutSize()` — up to 70x28, clamped to the terminal. The full
+  window logo needs ~31 rows; shorter modals get the mini logo, then lose the
+  link, message and so on (see the drop order in `about.Render`).
+- The animation settles after ~40s (`settleFrame`) and any key restarts it,
+  so an idle screen costs no bandwidth over SSH. `TIDEFTP_REDUCE_MOTION=1`
+  shows the finished frame and never ticks.
+- Message and signature are `about.DefaultMessage` / `DefaultAuthor`.
+- Goldens: `about_overlay` and `about_overlay_short`; build info is stubbed
+  through `aboutBuildInfo` so they don't depend on the commit.
+
 ## Verification and useful entry points
 
 - Last full verification: `go test ./...` and `git diff --check` pass.
