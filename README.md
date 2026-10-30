@@ -133,6 +133,13 @@ Disable the check in Settings or in `config.toml`:
 check_on_startup = false
 ```
 
+## Support
+
+TideFTP is free and built and maintained by one person. If it saves you time,
+you can [sponsor it on GitHub](https://github.com/sponsors/allisonhere),
+one-time or monthly. Starring the repo and reporting bugs in
+[issues](https://github.com/allisonhere/TideFTP/issues) help too.
+
 ## Develop
 
 ```bash
