@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -289,13 +290,14 @@ func TestSettingsIgnoreRowIsConditionalAndClampsTheCursor(t *testing.T) {
 
 	model = availableModel(t, "v0.3.0")
 	visible := model.settingsVisibleFields()
-	if visible[len(visible)-1] != settingsFieldUpdateIgnore {
+	ignoreRow := slices.Index(visible, settingsFieldUpdateIgnore)
+	if ignoreRow < 0 {
 		t.Fatal("the Ignore row did not appear once an update was available")
 	}
 
-	// Park on Ignore — the last row — and activate it.
+	// Park on Ignore and activate it.
 	model.overlay = overlaySettings
-	model.settingsCursor = len(visible) - 1
+	model.settingsCursor = ignoreRow
 	model = settle(t, model, model.activateSettingsField())
 
 	if model.settingsCursor >= len(model.settingsVisibleFields()) {

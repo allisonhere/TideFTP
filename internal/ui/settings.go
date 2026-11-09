@@ -37,6 +37,7 @@ const (
 	settingsFieldUpdateCheck
 	settingsFieldUpdateStatus
 	settingsFieldUpdateIgnore
+	settingsFieldChangelog
 	settingsFieldCount
 )
 
@@ -100,6 +101,8 @@ func settingsFieldLabel(field settingsField) string {
 		return "Updates"
 	case settingsFieldUpdateIgnore:
 		return "Ignore this version"
+	case settingsFieldChangelog:
+		return "Changelog"
 	}
 	return ""
 }
@@ -117,7 +120,7 @@ func settingsCategory(field settingsField) string {
 		return "Workflow"
 	case settingsFieldVerify, settingsFieldReconnect, settingsFieldRecoverInterrupted, settingsFieldCheckConnectivity:
 		return "Reliability"
-	case settingsFieldUpdateCheck, settingsFieldUpdateStatus, settingsFieldUpdateIgnore:
+	case settingsFieldUpdateCheck, settingsFieldUpdateStatus, settingsFieldUpdateIgnore, settingsFieldChangelog:
 		return "Updates"
 	}
 	return "Settings"
@@ -178,6 +181,8 @@ func (m Model) settingsFieldValue(field settingsField) string {
 		return m.settingsUpdateStatus()
 	case settingsFieldUpdateIgnore:
 		return "enter"
+	case settingsFieldChangelog:
+		return "what's new — enter"
 	}
 	return ""
 }
@@ -293,7 +298,7 @@ func themeIndex(name string, themes []tideui.Theme) int {
 func (m *Model) cycleSettingsField(direction int) tea.Cmd {
 	field := m.settingsFieldAt(m.settingsCursor)
 	switch field {
-	case settingsFieldUpdateStatus, settingsFieldUpdateIgnore:
+	case settingsFieldUpdateStatus, settingsFieldUpdateIgnore, settingsFieldChangelog:
 		// Action rows. h/l must not fire a network check or an install just
 		// because the user arrowed across the list.
 		return nil
@@ -407,6 +412,9 @@ func (m *Model) activateSettingsField() tea.Cmd {
 		return nil
 	case settingsFieldUpdateStatus:
 		return m.activateUpdateRow()
+	case settingsFieldChangelog:
+		m.openChangelog()
+		return nil
 	case settingsFieldUpdateIgnore:
 		cmd := m.dismissUpdate()
 		// The row the cursor was on has just retired itself.

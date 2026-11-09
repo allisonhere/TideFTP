@@ -64,6 +64,7 @@ const (
 	overlayBookmarks
 	overlayTransferLab
 	overlayAbout
+	overlayChangelog
 )
 
 // paneID names a file pane for listing requests. It is deliberately separate
@@ -336,6 +337,11 @@ type Model struct {
 	lastCreds  session.Credentials
 	helpQuery  string
 	helpOffset int
+
+	// changelogOffset is the first visible line of the changelog overlay;
+	// changelogReturn is the overlay esc goes back to (Settings or none).
+	changelogOffset int
+	changelogReturn overlayMode
 
 	conn     session.Conn
 	remoteFS vfs.FS
@@ -1095,6 +1101,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (result tea.Model, cmd tea.Cmd) {
 	}
 	if m.overlay == overlayAbout {
 		return m, m.handleAboutKey(msg)
+	}
+	if m.overlay == overlayChangelog {
+		return m, m.handleChangelogKey(msg)
 	}
 	if m.overlay == overlayPreview {
 		return m, m.handlePreviewKey(msg)
