@@ -33,6 +33,10 @@ type Target struct {
 	// prompt; "off" skips host-key verification entirely. Empty is the
 	// default ask-once-then-remember behaviour. It persists with the profile.
 	HostKeyPolicy string
+	// Auth is SFTP-only and one of "" (agent and key files) or "password"
+	// (password only, skipping the agent and keys). FTP/FTPS always use a
+	// password regardless. It persists with the profile.
+	Auth string
 	// Bookmarks are absolute directories on this server the remote pane can
 	// jump to, beyond StartPath. They persist with the profile.
 	Bookmarks []string
@@ -52,7 +56,28 @@ func (t Target) SameConnection(other Target) bool {
 		t.Port == other.Port &&
 		t.User == other.User &&
 		t.StartPath == other.StartPath &&
-		t.HostKeyPolicy == other.HostKeyPolicy
+		t.HostKeyPolicy == other.HostKeyPolicy &&
+		t.Auth == other.Auth
+}
+
+// SFTP authentication modes for Target.Auth.
+const (
+	AuthAgentKey = ""         // ssh agent and key files
+	AuthPassword = "password" // password only
+)
+
+// NormalizeAuth maps any unrecognised value to the agent/key default.
+func NormalizeAuth(value string) string {
+	if value == AuthPassword {
+		return value
+	}
+	return AuthAgentKey
+}
+
+// PasswordAuth reports whether t authenticates with a password alone: always
+// for FTP/FTPS, and for SFTP only when Auth says so.
+func (t Target) PasswordAuth() bool {
+	return t.Protocol != ProtocolSFTP || NormalizeAuth(t.Auth) == AuthPassword
 }
 
 // Host-key verification policies for Target.HostKeyPolicy.

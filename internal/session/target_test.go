@@ -31,6 +31,7 @@ func TestSameConnectionDistinguishesTargets(t *testing.T) {
 		"name":          func(tg *Target) { tg.Name = "renamed" },
 		"startPath":     func(tg *Target) { tg.StartPath = "/elsewhere" },
 		"hostKeyPolicy": func(tg *Target) { tg.HostKeyPolicy = HostKeyStrict },
+		"auth":          func(tg *Target) { tg.Auth = AuthPassword },
 	} {
 		other := base
 		mutate(&other)

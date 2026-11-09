@@ -646,6 +646,7 @@ func profilesToConfig(targets []session.Target) []config.Profile {
 			Name: t.Name, Protocol: t.Protocol, Host: t.Host,
 			Port: t.Port, User: t.User, StartPath: t.StartPath,
 			HostKeyPolicy: session.NormalizeHostKeyPolicy(t.HostKeyPolicy),
+			Auth:          session.NormalizeAuth(t.Auth),
 			Bookmarks:     append([]string(nil), t.Bookmarks...),
 		}
 	}
@@ -841,7 +842,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case serverConnectMsg:
 		if msg.found {
 			m.overlay = overlayNone
-			return m, m.connect(msg.target, session.Credentials{Password: msg.password})
+			return m, m.connect(msg.target, session.Credentials{
+				Password:     msg.password,
+				PasswordOnly: msg.target.Protocol == session.ProtocolSFTP,
+			})
 		}
 		cmd := m.openConnectFormFor(msg.target, connectFieldPassword)
 		m.setStatus("enter password for " + msg.target.Label())

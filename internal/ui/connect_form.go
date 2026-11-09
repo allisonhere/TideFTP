@@ -118,6 +118,23 @@ type connectFormValue struct {
 	credToken int
 }
 
+// authIndex maps a persisted Target.Auth onto the Auth picker.
+func authIndex(auth string) int {
+	if session.NormalizeAuth(auth) == session.AuthPassword {
+		return 1
+	}
+	return 0
+}
+
+// authValue is the Target.Auth the form persists. Only SFTP has a choice, so
+// FTP/FTPS always store the default rather than a redundant "password".
+func (m Model) authValue() string {
+	if connectProtocols[m.connectForm.protocol] == "sftp" && m.connectAuthMode() == "password" {
+		return session.AuthPassword
+	}
+	return session.AuthAgentKey
+}
+
 // connectAuthMode reports how the form will authenticate: always "password"
 // for FTP/FTPS, since they have no other method, or whichever the Auth field
 // is set to for SFTP.
@@ -260,6 +277,7 @@ func (m *Model) openConnectFormFor(src session.Target, focus connectField) tea.C
 		username:      src.User,
 		path:          src.StartPath,
 		hostKeyPolicy: hostKeyPolicyIndex(src.HostKeyPolicy),
+		auth:          authIndex(src.Auth),
 	}
 	if src.Port != 0 {
 		m.connectForm.port = strconv.Itoa(src.Port)
@@ -606,6 +624,7 @@ func (m *Model) targetFromForm() (session.Target, bool) {
 		User:          strings.TrimSpace(m.connectForm.username),
 		StartPath:     strings.TrimSpace(m.connectForm.path),
 		HostKeyPolicy: hostKeyPolicyValue(m.connectForm.hostKeyPolicy),
+		Auth:          m.authValue(),
 	}, true
 }
 

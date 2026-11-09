@@ -448,7 +448,10 @@ func (a App) credentials(target session.Target, c *connFlags) (session.Credentia
 	if err != nil || !ok {
 		return session.Credentials{}, nil
 	}
-	return session.Credentials{Password: password}, nil
+	return session.Credentials{
+		Password:     password,
+		PasswordOnly: target.Protocol == session.ProtocolSFTP && target.Auth == session.AuthPassword,
+	}, nil
 }
 
 func (a App) dial(target session.Target, creds session.Credentials, c *connFlags) (session.Conn, error) {
