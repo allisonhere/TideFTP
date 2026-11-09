@@ -76,6 +76,7 @@ func (m *Model) startTransferLabScenario(scenario labScenario) tea.Cmd {
 			Source:      "/transfer-lab/" + scenario.title + "/" + name,
 			Destination: "/incoming/transfer-lab/" + name,
 			BytesTotal:  size, Status: domain.Queued, Message: "lab queued", Protocol: m.target.Protocol,
+			Server: m.transferServer(),
 		})
 		m.nextTransferID++
 	}

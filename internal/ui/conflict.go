@@ -200,6 +200,7 @@ func (m *Model) commitScan(scan preflightScan) int {
 			Status:      domain.Queued,
 			Message:     "queued",
 			Protocol:    m.target.Protocol,
+			Server:      m.transferServer(),
 		})
 		m.nextTransferID++
 		queued++

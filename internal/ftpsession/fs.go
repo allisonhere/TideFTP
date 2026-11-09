@@ -231,8 +231,18 @@ func (f *FS) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		defer resp.Close()
 		data, err = io.ReadAll(resp)
+		// Close reads the server's final reply (226, or 426 for a stream
+		// that broke). A data connection that drops early is an ordinary
+		// EOF to ReadAll, so this reply is the only place a truncated read
+		// shows up — and the edit flow would otherwise write a truncated
+		// file back over the original.
+		if closeErr := resp.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("retrieve %s: %w", path, closeErr)
+		}
+		if err != nil {
+			data = nil
+		}
 		return err
 	})
 	return data, err

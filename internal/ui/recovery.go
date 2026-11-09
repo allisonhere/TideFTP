@@ -30,6 +30,7 @@ type recoveryRetry struct {
 	size        int64
 	offset      int64
 	protocol    string
+	server      string
 }
 
 // recoveryScanMsg is the categorized result of checking every interrupted
@@ -68,12 +69,28 @@ const (
 	recoverySkipRemaining
 )
 
+// transferServer is the Server a transfer queued right now belongs to.
+func (m Model) transferServer() string { return credentialKey(m.target) }
+
+// onCurrentServer reports whether row belongs to the server connected now.
+// A row with no Server predates the field and is taken as belonging.
+func (m Model) onCurrentServer(row domain.Transfer) bool {
+	return row.Server == "" || row.Server == m.transferServer()
+}
+
 func (m *Model) startInterruptedRecovery() tea.Cmd {
 	candidates := make([]domain.Transfer, 0)
-	for _, row := range m.transfers {
-		if row.RetryOnReconnect {
-			candidates = append(candidates, row)
+	for i, row := range m.transfers {
+		if !row.RetryOnReconnect {
+			continue
 		}
+		if !m.onCurrentServer(row) {
+			// Left marked, so connecting back to its own server still
+			// recovers it; it must never be resumed against this one.
+			m.transfers[i].Message = "interrupted — connect to its server to resume"
+			continue
+		}
+		candidates = append(candidates, row)
 	}
 	if len(candidates) == 0 {
 		return nil
@@ -151,7 +168,7 @@ func runInterruptedRecovery(ctx context.Context, token int, candidates []domain.
 				continue
 			}
 			if hit == nil {
-				result.missing = append(result.missing, recoveryRetry{originalID: row.ID, direction: row.Direction, source: row.Source, destination: row.Destination, size: row.BytesTotal, protocol: row.Protocol})
+				result.missing = append(result.missing, recoveryRetry{originalID: row.ID, direction: row.Direction, source: row.Source, destination: row.Destination, size: row.BytesTotal, protocol: row.Protocol, server: row.Server})
 				continue
 			}
 			if hit.Size > autoResumeVerifyLimit {
@@ -166,7 +183,7 @@ func runInterruptedRecovery(ctx context.Context, token int, candidates []domain.
 				result.mismatched[row.ID] = "partial could not be verified; retry with R"
 				continue
 			}
-			result.partial = append(result.partial, recoveryRetry{originalID: row.ID, direction: row.Direction, source: row.Source, destination: row.Destination, size: row.BytesTotal, offset: hit.Size, protocol: row.Protocol})
+			result.partial = append(result.partial, recoveryRetry{originalID: row.ID, direction: row.Direction, source: row.Source, destination: row.Destination, size: row.BytesTotal, offset: hit.Size, protocol: row.Protocol, server: row.Server})
 		}
 	}
 	return result
@@ -219,7 +236,7 @@ func totalRecoveryBytes(rows []domain.Transfer) int64 {
 // before the exceptions have been seen.
 func (m *Model) applyInterruptedRecovery(msg recoveryScanMsg) {
 	for i := range m.transfers {
-		if !m.transfers[i].RetryOnReconnect {
+		if !m.transfers[i].RetryOnReconnect || !m.onCurrentServer(m.transfers[i]) {
 			continue
 		}
 		m.transfers[i].RetryOnReconnect = false
@@ -310,7 +327,7 @@ func (m *Model) queueRecoveryRetries(retries []recoveryRetry, message string) in
 		m.transfers = append(m.transfers, domain.Transfer{
 			ID: id, Direction: retry.direction, Source: retry.source, Destination: retry.destination,
 			BytesTotal: retry.size, BytesDone: retry.offset, ResumeFrom: retry.offset,
-			Status: domain.Queued, Message: message, Protocol: retry.protocol,
+			Status: domain.Queued, Message: message, Protocol: retry.protocol, Server: m.transferServer(),
 		})
 		m.nextTransferID++
 		if index := m.transferIndex(retry.originalID); index >= 0 {
@@ -335,6 +352,7 @@ func (m *Model) restartRecoveryExceptions(manual map[int]string) int {
 		m.transfers = append(m.transfers, domain.Transfer{
 			ID: m.nextTransferID, Direction: original.Direction, Source: original.Source, Destination: original.Destination,
 			BytesTotal: original.BytesTotal, Status: domain.Queued, Message: "restarted after reconnect", Protocol: original.Protocol,
+			Server: m.transferServer(),
 		})
 		m.nextTransferID++
 		count++

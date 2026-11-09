@@ -2033,10 +2033,6 @@ func scanCap(limit int) int {
 	return limit
 }
 
-// preflightScanTimeout bounds the sync scans (sync.go); the transfer scan
-// bounds each listing instead, so a big tree can take as long as it needs.
-const preflightScanTimeout = 60 * time.Second
-
 // scanListAttempts is how many times one directory listing is tried before
 // the walk gives up on that directory and moves on. Big servers drop or
 // stall the odd LIST; one bad folder must not discard the whole scan.
@@ -2309,6 +2305,10 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 		}
 		b := preflightScan{direction: direction, dstFS: dstFS, files: scan.files}
 		checkDestinations(ctx, &b)
+		scan.failedDirs += b.failedDirs
+		if scan.firstFailure == "" {
+			scan.firstFailure = b.firstFailure
+		}
 		scan.streamed += len(b.files)
 		scan.files = nil
 		batch(b)
@@ -2406,9 +2406,11 @@ func runPreflightScan(direction domain.TransferDirection, entries []domain.Entry
 
 // checkDestinations finds which of scan.files already exist at their
 // destination. Grouped by destination directory so each one is listed at
-// most once, however many files land in it. A directory that fails to list —
-// most often because it doesn't exist yet, a nested folder destination not
-// yet created — just means nothing conflicts there, not a scan failure.
+// most once, however many files land in it. A directory that does not exist
+// yet — a nested folder destination not yet created — just means nothing
+// conflicts there. One that exists but cannot be listed is different: its
+// files are dropped from the scan and counted in failedDirs, because queuing
+// them as new would overwrite whatever is already there without a prompt.
 func checkDestinations(ctx context.Context, scan *preflightScan) {
 	byDir := map[string][]int{}
 	for i, f := range scan.files {
@@ -2416,11 +2418,21 @@ func checkDestinations(ctx context.Context, scan *preflightScan) {
 		byDir[dir] = append(byDir[dir], i)
 	}
 	scan.siblings = make(map[string]map[string]domain.Entry, len(byDir))
+	lister := newDestLister(ctx, scan.dstFS)
+	drop := map[int]bool{}
 	for dir, indices := range byDir {
-		listCtx, cancel := context.WithTimeout(ctx, listTimeout)
-		listed, err := scan.dstFS.List(listCtx, dir, true)
-		cancel()
+		listed, exists, err := lister.list(dir)
 		if err != nil {
+			for _, i := range indices {
+				drop[i] = true
+			}
+			scan.failedDirs++
+			if scan.firstFailure == "" {
+				scan.firstFailure = fmt.Sprintf("destination %s: %v", dir, err)
+			}
+			continue
+		}
+		if !exists {
 			continue
 		}
 		byName := make(map[string]domain.Entry, len(listed))
@@ -2434,6 +2446,17 @@ func checkDestinations(ctx context.Context, scan *preflightScan) {
 				scan.files[i].conflict = &entry
 			}
 		}
+	}
+	if len(drop) > 0 {
+		kept := scan.files[:0]
+		for i, f := range scan.files {
+			if drop[i] {
+				scan.totalBytes -= f.size
+				continue
+			}
+			kept = append(kept, f)
+		}
+		scan.files = kept
 	}
 }
 
@@ -2792,6 +2815,10 @@ func (m *Model) retrySelectedTransfer() tea.Cmd {
 		m.setError("selected transfer did not fail")
 		return nil
 	}
+	if !m.onCurrentServer(target) {
+		m.setError(fmt.Sprintf("transfer %d was queued on another server — connect to it to retry", target.ID))
+		return nil
+	}
 	if !m.queueBusy() {
 		m.queueBatchStartID = m.nextTransferID
 		m.queueBatchActive = true
@@ -2805,6 +2832,7 @@ func (m *Model) retrySelectedTransfer() tea.Cmd {
 		Status:      domain.Queued,
 		Message:     "queued",
 		Protocol:    m.target.Protocol,
+		Server:      m.transferServer(),
 	})
 	m.nextTransferID++
 	m.setStatus(fmt.Sprintf("retrying transfer %d as %d", target.ID, m.nextTransferID-1))

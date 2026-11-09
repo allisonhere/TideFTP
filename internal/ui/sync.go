@@ -153,8 +153,11 @@ func (m *Model) startSync() tea.Cmd {
 func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBase string, srcFS, dstFS vfs.FS, showHidden bool) tea.Cmd {
 	limit := scanCap(m.scanFileLimit)
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), preflightScanTimeout)
-		defer cancel()
+		// No deadline over the whole walk: a big tree legitimately takes
+		// longer than any fixed budget (see #4). Each listing carries its own
+		// timeout and retries instead, via listWithRetry and destLister.
+		ctx := context.Background()
+		dstLister := newDestLister(ctx, dstFS)
 
 		plan := syncPlan{
 			direction: direction,
@@ -183,16 +186,26 @@ func (m *Model) beginSyncScan(direction domain.TransferDirection, srcBase, dstBa
 			it := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 
-			srcChildren, err := srcFS.List(ctx, it.srcDir, showHidden)
+			srcChildren, err := listWithRetry(ctx, srcFS, it.srcDir, showHidden)
 			if err != nil {
 				return syncScanMsg{err: fmt.Errorf("read %s: %w", it.srcDir, err)}
 			}
 			var dstChildren []domain.Entry
 			if it.dstExists {
-				// An error here (the root does not exist yet, say) is not a
-				// scan failure: it just means nothing there matches and
-				// nothing there is an extra to prune.
-				dstChildren, _ = dstFS.List(ctx, it.dstDir, showHidden)
+				// A destination that does not exist yet (the root, say) just
+				// means nothing there matches and nothing is an extra to
+				// prune. One that exists but will not list fails the scan:
+				// treating it as empty would queue every file in it as new
+				// and overwrite newer destination copies unconditionally.
+				listed, _, err := dstLister.list(it.dstDir)
+				if err != nil {
+					return syncScanMsg{err: fmt.Errorf("read %s: %w", it.dstDir, err)}
+				}
+				for _, e := range listed {
+					if showHidden || !e.Hidden {
+						dstChildren = append(dstChildren, e)
+					}
+				}
 			}
 			dstByName := make(map[string]domain.Entry, len(dstChildren))
 			for _, e := range dstChildren {
@@ -281,8 +294,11 @@ func collectPruneTree(ctx context.Context, dstFS vfs.FS, root string, showHidden
 		dir := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		plan.prunePaths = append(plan.prunePaths, prunePath{path: dir, name: path.Base(dir), isDir: true})
-		children, err := dstFS.List(ctx, dir, showHidden)
+		children, err := listWithRetry(ctx, dstFS, dir, showHidden)
 		if err != nil {
+			// Its contents are unknown, so nothing inside is queued for
+			// deletion; removing the directory itself will fail while it
+			// still holds anything, which is the safe outcome.
 			continue
 		}
 		for _, child := range children {
@@ -388,11 +404,13 @@ type syncPruneMsg struct {
 // deletes.
 func syncPruneCmd(dstFS vfs.FS, paths []prunePath) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), preflightScanTimeout)
-		defer cancel()
+		// Each removal gets its own deadline rather than all of them sharing
+		// one: a single budget over a long prune ran out partway and failed
+		// every remaining delete with "context deadline exceeded".
+		ctx := context.Background()
 		var msg syncPruneMsg
 		for _, p := range paths {
-			if err := dstFS.Remove(ctx, p.path); err != nil {
+			if err := removeForDelete(ctx, dstFS, p.path); err != nil {
 				msg.failed++
 				if msg.err == nil {
 					msg.err = err
