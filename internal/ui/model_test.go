@@ -1727,6 +1727,52 @@ func TestServerListEnterFallsBackToFormForPasswordProfile(t *testing.T) {
 	}
 }
 
+// Regression for issue #6: choosing password auth for an SFTP profile must
+// survive saving and reopening it, rather than reverting to agent/key.
+func TestConnectFormPersistsSftpPasswordAuth(t *testing.T) {
+	var saved []config.Config
+	save := func(c config.Config) error { saved = append(saved, c); return nil }
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), save, nil, "")
+	model.width, model.height = 120, 36
+
+	model = press(t, model, runes("c"))
+	model.connectForm.auth = authIndex(session.AuthPassword)
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyCtrlS})
+
+	if len(model.profiles) != 1 || model.profiles[0].Auth != session.AuthPassword {
+		t.Fatalf("saved profiles = %+v, want one with password auth", model.profiles)
+	}
+	if got := profilesToConfig(model.profiles)[0].Auth; got != session.AuthPassword {
+		t.Fatalf("persisted auth = %q, want %q", got, session.AuthPassword)
+	}
+	reloaded := profilesFromConfig(profilesToConfig(model.profiles))
+
+	model.openConnectFormFor(reloaded[0], connectFieldName)
+	if got := model.connectAuthMode(); got != "password" {
+		t.Fatalf("reopened form auth = %q, want password", got)
+	}
+}
+
+func TestServerListEnterAsksForPasswordOnSftpPasswordProfile(t *testing.T) {
+	profile := testTarget
+	profile.Auth = session.AuthPassword
+	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
+	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil, "") // nil credstore
+	model.width, model.height = 120, 36
+	model.profiles = []session.Target{profile}
+
+	model = press(t, model, runes("c"))
+	model = press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.overlay != overlayConnect || model.connectField != connectFieldPassword {
+		t.Fatalf("enter on an sftp password profile left overlay=%v field=%d, want the form on Password", model.overlay, model.connectField)
+	}
+	if got := model.connectAuthMode(); got != "password" {
+		t.Fatalf("form auth = %q, want password", got)
+	}
+}
+
 func TestServerListNewRowOpensBlankForm(t *testing.T) {
 	dialer := &stubDialer{fs: fakefs.NewRemote(), engine: newScriptedEngine()}
 	model := NewModel(localfs.New(), dialer, []session.Target{testTarget}, config.Default(), nil, nil, "")

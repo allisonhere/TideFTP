@@ -112,13 +112,13 @@ func (m *Model) disarmServerDelete() {
 	m.serverDeleteExpiry = time.Time{}
 }
 
-// connectToServer dials profile i. An SFTP profile authenticates with the
-// agent or a key file, so it can connect with no interaction. FTP/FTPS always
-// need a password: it is looked up in the keyring, and if it isn't there the
-// connect form opens on the Password field instead.
+// connectToServer dials profile i. An SFTP profile using agent/key auth can
+// connect with no interaction. FTP/FTPS, and SFTP profiles set to password
+// auth, need a password: it is looked up in the keyring, and if it isn't there
+// the connect form opens on the Password field instead.
 func (m *Model) connectToServer(i int) tea.Cmd {
 	target := m.profiles[i]
-	if target.Protocol == "sftp" {
+	if !target.PasswordAuth() {
 		m.overlay = overlayNone
 		return m.connect(target, session.Credentials{})
 	}

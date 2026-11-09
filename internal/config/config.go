@@ -120,6 +120,9 @@ type Profile struct {
 	// HostKeyPolicy is SFTP-only: "" (ask), "strict", or "off". Omitted from
 	// the file when it is the ask default.
 	HostKeyPolicy string `toml:"host_key_policy,omitempty"`
+	// Auth is SFTP-only: "" (agent/key files) or "password". Omitted from the
+	// file when it is the agent/key default.
+	Auth string `toml:"auth,omitempty"`
 	// Bookmarks are absolute directories on this server that the remote pane
 	// can jump to. go-toml emits a table's keys in declaration order, so
 	// keeping this last leaves the scalars grouped at the top of each
