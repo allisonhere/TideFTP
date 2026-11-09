@@ -684,6 +684,14 @@ func (r *syncRun) plan(ctx context.Context, srcAll, dstAll map[string]domain.Ent
 		kept := map[string]bool{}
 		var dirs []string
 		for rel, d := range dstAll {
+			// With --dereference the destination walk follows symlinked
+			// directories so their files can be compared, but what lives
+			// behind such a link is outside the tree being synced. Never
+			// delete through one; an orphaned link itself is still removed
+			// below, as the link and not its target, the way rsync does.
+			if underFollowedLink(rel, dstAll) {
+				continue
+			}
 			if _, inSrc := srcAll[rel]; inSrc {
 				// Present on both sides: never a deletion, and it keeps its
 				// parent directories alive.
@@ -746,6 +754,17 @@ func (r *syncRun) plan(ctx context.Context, srcAll, dstAll map[string]domain.Ent
 	ops = append(ops, files...)
 	ops = append(ops, deletes...)
 	return ops, unchanged, nil
+}
+
+// underFollowedLink reports whether rel sits inside a symlinked directory the
+// walk followed (one of its ancestors is recorded with LinksToDir).
+func underFollowedLink(rel string, all map[string]domain.Entry) bool {
+	for d := path.Dir(rel); d != "." && d != "" && d != "/"; d = path.Dir(d) {
+		if all[d].LinksToDir {
+			return true
+		}
+	}
+	return false
 }
 
 // differs decides whether an existing destination file needs replacing.

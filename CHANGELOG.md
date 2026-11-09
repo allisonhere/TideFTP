@@ -16,6 +16,37 @@ feature batches and may change behaviour.
   The silent 5000-file cap is now 100000. Transfers that fail before any data
   moves (stale connection, `421`/`425`) are retried automatically.
 
+- **No silent overwrites when a destination folder won't list.** A folder
+  that exists but could not be listed (a timeout, a dropped connection) was
+  treated as empty, so every file headed there was queued as new and
+  overwrote what was already there, ignoring "If file exists". Those files are
+  now held back and reported. Mirror fails its scan instead of planning the
+  overwrite. Folders that simply do not exist yet still count as empty.
+
+- **Mirror handles large trees.** The mirror scan and prune no longer share
+  one 60s budget (the same limit #4 removed from folder transfers); each
+  listing and each deletion gets its own timeout.
+
+- **Interrupted transfers stay with their server.** After a dropped
+  connection, connecting to a *different* server no longer offers to resume
+  or restart the interrupted transfers there, and `R` refuses to retry a
+  transfer queued on another server. They resume when you reconnect to their
+  own server.
+
+- **FTP edits cannot truncate a file.** If an FTP download for `e` (edit)
+  broke partway, the partial file opened as if complete, and saving it
+  wrote the shortened copy back over the original. The server's abort reply
+  is now checked.
+
+- **`sync -L --delete` never deletes through a destination link.** With
+  `--dereference`, a symlinked directory at the destination that the source
+  did not have had its target's contents deleted, outside the tree being
+  synced. The link itself is now removed instead, as rsync does.
+
+- **Self-update on slow connections.** The release download no longer shares
+  the update check's 15s timeout, which failed any connection slower than
+  about 3 Mbit/s, and a failed download no longer leaves a temp folder behind.
+
 ### Added
 
 - **"If file exists" setting** (`conflict_policy`). Pick a default conflict

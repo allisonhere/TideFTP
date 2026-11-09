@@ -35,8 +35,14 @@ const SuggestedManualInstallScript = "curl -fsSL https://raw.githubusercontent.c
 type Updater struct {
 	ReleasesURL string
 	HTTPClient  *http.Client
-	GOOS        string
-	GOARCH      string
+	// DownloadHTTPClient fetches the release archive and its checksums. It
+	// is separate from HTTPClient because a client-wide Timeout covers
+	// reading the whole body: the 15s that suits a small API call failed
+	// every ~5 MB archive download on a link slower than about 3 Mbit/s.
+	// Nil falls back to HTTPClient, then to a download-sized default.
+	DownloadHTTPClient *http.Client
+	GOOS               string
+	GOARCH             string
 }
 
 // ReleaseInfo is the normalized release and asset metadata the UI needs after a check. -allie
@@ -89,9 +95,23 @@ type githubAsset struct {
 
 func New() *Updater {
 	return &Updater{
-		ReleasesURL: defaultReleasesURL,
-		HTTPClient:  &http.Client{Timeout: 15 * time.Second},
+		ReleasesURL:        defaultReleasesURL,
+		HTTPClient:         &http.Client{Timeout: 15 * time.Second},
+		DownloadHTTPClient: newDownloadClient(),
 	}
+}
+
+// Download timeouts: the server must start answering promptly, but the body
+// may take as long as a slow link needs, up to a generous ceiling.
+const (
+	downloadHeaderTimeout = 30 * time.Second
+	downloadTotalTimeout  = 15 * time.Minute
+)
+
+func newDownloadClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = downloadHeaderTimeout
+	return &http.Client{Transport: transport, Timeout: downloadTotalTimeout}
 }
 
 func (u *Updater) Check(currentVersion string) (CheckResult, error) {
@@ -165,7 +185,7 @@ func (u *Updater) Download(release ReleaseInfo) (DownloadedAsset, error) {
 		return DownloadedAsset{}, fmt.Errorf("release %s has no %s asset; refusing to install unverified update", release.Version, checksumsAssetName)
 	}
 
-	client := u.httpClient()
+	client := u.downloadClient()
 	req, err := http.NewRequest(http.MethodGet, release.DownloadURL, nil)
 	if err != nil {
 		return DownloadedAsset{}, fmt.Errorf("build download request: %w", err)
@@ -187,6 +207,14 @@ func (u *Updater) Download(release ReleaseInfo) (DownloadedAsset, error) {
 	if err != nil {
 		return DownloadedAsset{}, fmt.Errorf("create update temp dir: %w", err)
 	}
+	// Removed on every failure below; on success it holds the binary the
+	// installer copies from.
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
 
 	archivePath := filepath.Join(tmpDir, release.AssetName+".tar.gz")
 	archiveFile, err := os.Create(archivePath)
@@ -202,7 +230,6 @@ func (u *Updater) Download(release ReleaseInfo) (DownloadedAsset, error) {
 	}
 
 	if err := u.verifyArchiveChecksum(release, archivePath); err != nil {
-		_ = os.RemoveAll(tmpDir)
 		return DownloadedAsset{}, err
 	}
 
@@ -214,6 +241,7 @@ func (u *Updater) Download(release ReleaseInfo) (DownloadedAsset, error) {
 		return DownloadedAsset{}, fmt.Errorf("mark update binary executable: %w", err)
 	}
 
+	succeeded = true
 	return DownloadedAsset{
 		Release:     release,
 		ArchivePath: archivePath,
@@ -230,7 +258,7 @@ func (u *Updater) verifyArchiveChecksum(release ReleaseInfo, archivePath string)
 		return fmt.Errorf("refusing to fetch checksums from untrusted host: %s", release.ChecksumsURL)
 	}
 
-	client := u.httpClient()
+	client := u.downloadClient()
 	req, err := http.NewRequest(http.MethodGet, release.ChecksumsURL, nil)
 	if err != nil {
 		return fmt.Errorf("build checksums request: %w", err)
@@ -453,6 +481,16 @@ func (u *Updater) httpClient() *http.Client {
 		return u.HTTPClient
 	}
 	return &http.Client{Timeout: 15 * time.Second}
+}
+
+func (u *Updater) downloadClient() *http.Client {
+	if u != nil && u.DownloadHTTPClient != nil {
+		return u.DownloadHTTPClient
+	}
+	if u != nil && u.HTTPClient != nil {
+		return u.HTTPClient
+	}
+	return newDownloadClient()
 }
 
 func (u *Updater) releasesURL() string {

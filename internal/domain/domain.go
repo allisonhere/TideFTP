@@ -80,6 +80,11 @@ type Transfer struct {
 	// describe transfers already sitting in the queue — this field is what
 	// lets a per-protocol breakdown stay correct across a reconnect.
 	Protocol string
+	// Server identifies the connection (protocol, host, port and user) the
+	// transfer was queued on. Source and Destination only mean something on
+	// that server, so recovery and retry refuse to run a row against any
+	// other one.
+	Server string
 }
 
 func (t Transfer) Progress() float64 {
