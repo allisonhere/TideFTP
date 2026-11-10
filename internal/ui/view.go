@@ -863,6 +863,8 @@ func (m Model) renderOverlay(renderer tideui.Renderer) *tideui.Overlay {
 		return &overlay
 	case overlayAbout:
 		return m.renderAboutOverlay(renderer)
+	case overlayChangelog:
+		return m.renderChangelogOverlay(renderer)
 	case overlayUpdate:
 		rows := []string{}
 		switch m.update.state {

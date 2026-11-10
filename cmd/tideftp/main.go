@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
+	"tideftp"
 	"tideftp/internal/cli"
 	"tideftp/internal/config"
 	"tideftp/internal/connect"
@@ -120,6 +121,7 @@ func run() (code int, restartExec string) {
 		saveConfig = func(c config.Config) error { return config.Save(configPath, c) }
 	}
 
+	ui.SetChangelog(tideftp.Changelog)
 	model := ui.NewModel(localfs.New(), dialer, targets, cfg, saveConfig, credstore.New(), version)
 	if *transferLab {
 		model.EnableTransferLab()

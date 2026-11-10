@@ -9,6 +9,11 @@ feature batches and may change behaviour.
 
 ### Fixed
 
+- **SFTP password auth is remembered (#6).** A saved SFTP profile set to
+  password auth no longer reopens as agent/key. Connecting to it from the
+  server list uses the password stored in the keyring, or asks for one.
+  Thanks to @partrita for the report.
+
 - **Large directory trees (#4).** Queuing a big folder no longer dies with
   `scan …: context deadline exceeded`. The whole-scan 60s limit is gone; each
   directory listing gets its own timeout and three tries, and a folder that
@@ -48,6 +53,10 @@ feature batches and may change behaviour.
   about 3 Mbit/s, and a failed download no longer leaves a temp folder behind.
 
 ### Added
+
+- **Changelog in Settings.** Settings → Updates → Changelog (also in the
+  command palette) shows these release notes inside the app, bundled with
+  the build so they match the version you are running and work offline.
 
 - **"If file exists" setting** (`conflict_policy`). Pick a default conflict
   policy once; with one set, a folder download starts immediately and files

@@ -1,11 +1,10 @@
-   TideFTP    test  test.local:22           ↑ UPDATE v0.3.0 · U  1 queued  tide-night  split 50/50
-╭──────────────────╭─ tideftp · settings ───────────────────────────────────────╮──────────────────╮
-│Local             │                                                            │      /public_html│
-│mode        size  │  Appearance                                                │ed        name    │
-│  ▸ drwxr-xr-x    │  ▌ Theme                                       tide-night  │15 09:30 uploads  │
-│    -rw-r--r--    │    Density                                        compact  │15 09:30 index.htm│
-│    -rw-r--r--    │    Shadow                                              on  │                  │
-│                  │    Icons                                               on  │                  │
+   TideFTP    test ╭─ tideftp · settings ───────────────────────────────────────╮ight  split 50/50
+╭──────────────────│                                                            │──────────────────╮
+│Local             │  Appearance                                                │      /public_html│
+│mode        size  │  ▌ Theme                                       tide-night  │ed        name    │
+│  ▸ drwxr-xr-x    │    Density                                        compact  │15 09:30 uploads  │
+│    -rw-r--r--    │    Shadow                                              on  │15 09:30 index.htm│
+│    -rw-r--r--    │    Icons                                               on  │                  │
 │                  │  Transfer performance                                      │                  │
 │                  │    Max Parallel                                         2  │                  │
 │                  │    Scan file limit                                 100000  │                  │
@@ -19,10 +18,11 @@
 │                  │    Connectivity check            on · pauses when offline  │                  │
 │                  │  Workflow                                                  │                  │
 │                  │    If file exists                                     ask  │                  │
-╰──────────────────│  Updates                                                   │──────────────────╯
-╭──────────────────│    Check for updates                                   on  │──────────────────╮
-│Transfers         │    Updates                       v0.3.0 available — enter  │             queue│
-│  1 Queue (2x)    │    Ignore this version                              enter  │                  │
+│                  │  Updates                                                   │                  │
+╰──────────────────│    Check for updates                                   on  │──────────────────╯
+╭──────────────────│    Updates                       v0.3.0 available — enter  │──────────────────╮
+│Transfers         │    Ignore this version                              enter  │             queue│
+│  1 Queue (2x)    │    Changelog                           what's new — enter  │                  │
 │ ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱│                                                            │                  │
 │ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱│    up/down select   h/l change   esc close                 │                  │
 │↑ ▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱│                                                            │  50% transferring│
