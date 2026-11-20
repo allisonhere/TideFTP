@@ -14,6 +14,10 @@ feature batches and may change behaviour.
   server list uses the password stored in the keyring, or asks for one.
   Thanks to @partrita for the report.
 
+- **SSH security updates.** Updated `golang.org/x/crypto` to v0.56.0 to
+  fix two SSH channel deadlocks that could cause denial of service
+  (GO-2026-6354 and GO-2026-6355).
+
 - **Saved SFTP identity files (#10).** Profiles now retain the private-key
   path when saved, reopened, or connected from the server list or CLI.
 
