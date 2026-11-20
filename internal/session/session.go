@@ -37,6 +37,8 @@ type Target struct {
 	// (password only, skipping the agent and keys). FTP/FTPS always use a
 	// password regardless. It persists with the profile.
 	Auth string
+	// IdentityFile is the saved SFTP private-key path, never the key contents.
+	IdentityFile string
 	// Bookmarks are absolute directories on this server the remote pane can
 	// jump to, beyond StartPath. They persist with the profile.
 	Bookmarks []string
@@ -57,7 +59,8 @@ func (t Target) SameConnection(other Target) bool {
 		t.User == other.User &&
 		t.StartPath == other.StartPath &&
 		t.HostKeyPolicy == other.HostKeyPolicy &&
-		t.Auth == other.Auth
+		t.Auth == other.Auth &&
+		t.IdentityFile == other.IdentityFile
 }
 
 // SFTP authentication modes for Target.Auth.

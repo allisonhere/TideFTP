@@ -653,6 +653,7 @@ func profilesToConfig(targets []session.Target) []config.Profile {
 			Port: t.Port, User: t.User, StartPath: t.StartPath,
 			HostKeyPolicy: session.NormalizeHostKeyPolicy(t.HostKeyPolicy),
 			Auth:          session.NormalizeAuth(t.Auth),
+			IdentityFile:  t.IdentityFile,
 			Bookmarks:     append([]string(nil), t.Bookmarks...),
 		}
 	}
@@ -1395,6 +1396,9 @@ func (m *Model) connect(target session.Target, creds session.Credentials) tea.Cm
 // by an auto-reconnect redial, which must not cancel the campaign it is
 // part of.
 func (m *Model) connectFor(target session.Target, creds session.Credentials) tea.Cmd {
+	if target.Protocol == session.ProtocolSFTP && creds.IdentityFile == "" {
+		creds.IdentityFile = target.IdentityFile
+	}
 	cmds := []tea.Cmd{}
 	if m.conn != nil {
 		cmds = append(cmds, closeConnCmd(m.conn))

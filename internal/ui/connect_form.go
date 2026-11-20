@@ -182,8 +182,8 @@ func (m Model) connectFieldVisible(field connectField) bool {
 }
 
 // credentialsFromForm builds what Dial needs to authenticate and verify the
-// host. It never touches session.Target — none of this is part of what a
-// profile can persist. PasswordOnly is set only for SFTP, where choosing
+// host. The identity path is also saved on the target; secrets stay here.
+// PasswordOnly is set only for SFTP, where choosing
 // "password" explicitly means skipping the agent and key files rather than
 // merely offering Password as a fallback after them.
 func (m Model) credentialsFromForm() session.Credentials {
@@ -278,11 +278,12 @@ func (m *Model) openConnectFormFor(src session.Target, focus connectField) tea.C
 		path:          src.StartPath,
 		hostKeyPolicy: hostKeyPolicyIndex(src.HostKeyPolicy),
 		auth:          authIndex(src.Auth),
+		identity:      src.IdentityFile,
 	}
 	if src.Port != 0 {
 		m.connectForm.port = strconv.Itoa(src.Port)
 	}
-	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath)
+	m.markConnectFieldsFresh(connectFieldName, connectFieldHost, connectFieldPort, connectFieldUsername, connectFieldPath, connectFieldIdentity)
 	m.connectField = focus
 	m.connectCursor = 0
 	m.connectIdentityBrowse = false
@@ -616,7 +617,12 @@ func (m *Model) targetFromForm() (session.Target, bool) {
 		}
 		port = n
 	}
+	identity := ""
+	if connectProtocols[m.connectForm.protocol] == session.ProtocolSFTP {
+		identity = strings.TrimSpace(m.connectForm.identity)
+	}
 	return session.Target{
+		IdentityFile:  identity,
 		Name:          strings.TrimSpace(m.connectForm.name),
 		Protocol:      connectProtocols[m.connectForm.protocol],
 		Host:          host,

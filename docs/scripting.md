@@ -68,6 +68,7 @@ host = "files.example.com"
 port = 22
 user = "deploy"
 start_path = "/var/www"  # where relative remote paths begin
+identity_file = "/home/deploy/.ssh/prod_key" # optional SFTP private-key path
 ```
 
 Then:

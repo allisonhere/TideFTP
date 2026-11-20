@@ -455,6 +455,13 @@ func (a App) credentials(target session.Target, c *connFlags) (session.Credentia
 }
 
 func (a App) dial(target session.Target, creds session.Credentials, c *connFlags) (session.Conn, error) {
+	if target.Protocol == session.ProtocolSFTP {
+		if c.identity != "" {
+			creds.IdentityFile = c.identity
+		} else if creds.IdentityFile == "" {
+			creds.IdentityFile = target.IdentityFile
+		}
+	}
 	dialer, err := a.Dial(connect.Options{
 		Protocol: target.Protocol, Identity: c.identity, KnownHosts: c.knownHosts,
 		FTPSCA: c.ftpsCA, FTPSInsecure: c.ftpsInsecure, FTPSAllowTLS13: c.ftpsTLS13,

@@ -88,7 +88,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 		// back as an empty slice.
 		LocalBookmarks: []string{"/home/bob/projects", "/etc/nginx"},
 		Profiles: []Profile{
-			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob", Bookmarks: []string{"/var/www", "/var/log/nginx"}},
+			{Name: "bob@ftp.example.com (sftp)", Protocol: "sftp", Host: "ftp.example.com", Port: 2222, User: "bob", StartPath: "/home/bob", IdentityFile: "/home/bob/.ssh/custom_key", Bookmarks: []string{"/var/www", "/var/log/nginx"}},
 			{Name: "locked-down", Protocol: "sftp", Host: "secure.example.com", Port: 22, User: "ops", StartPath: "/srv", HostKeyPolicy: "strict", Auth: "password"},
 		},
 	}

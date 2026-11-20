@@ -123,6 +123,8 @@ type Profile struct {
 	// Auth is SFTP-only: "" (agent/key files) or "password". Omitted from the
 	// file when it is the agent/key default.
 	Auth string `toml:"auth,omitempty"`
+	// IdentityFile is an SFTP private-key path; the key itself is never stored.
+	IdentityFile string `toml:"identity_file,omitempty"`
 	// Bookmarks are absolute directories on this server that the remote pane
 	// can jump to. go-toml emits a table's keys in declaration order, so
 	// keeping this last leaves the scalars grouped at the top of each

@@ -14,6 +14,9 @@ feature batches and may change behaviour.
   server list uses the password stored in the keyring, or asks for one.
   Thanks to @partrita for the report.
 
+- **Saved SFTP identity files (#10).** Profiles now retain the private-key
+  path when saved, reopened, or connected from the server list or CLI.
+
 - **Large directory trees (#4).** Queuing a big folder no longer dies with
   `scan …: context deadline exceeded`. The whole-scan 60s limit is gone; each
   directory listing gets its own timeout and three tries, and a folder that

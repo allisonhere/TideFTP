@@ -145,6 +145,7 @@ func TargetFromProfile(p config.Profile) session.Target {
 		Port: p.Port, User: p.User, StartPath: p.StartPath,
 		HostKeyPolicy: session.NormalizeHostKeyPolicy(p.HostKeyPolicy),
 		Auth:          session.NormalizeAuth(p.Auth),
+		IdentityFile:  p.IdentityFile,
 		// Copied, not shared: the caller's slice must not be written through.
 		Bookmarks: append([]string(nil), p.Bookmarks...),
 	}
